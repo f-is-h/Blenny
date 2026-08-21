@@ -12,9 +12,10 @@ Sources reviewed:
 - Apple AppKit and Application Services API documentation.
 - Apple WWDC26 AppKit sessions and transcripts.
 - Apple Support documentation for menu bar settings.
-- The AppKit headers in the locally installed macOS 26.5 SDK, used only as a pre-27 comparison baseline.
+- The AppKit headers in the locally installed macOS 26.5 SDK, used as a pre-27 comparison baseline.
+- The AppKit headers and Swift importer in Xcode 27.0 beta (27A5237l), macOS 27.0 SDK build 26A5406c.
 
-The test Mac runs macOS 27.0, but its installed Xcode contains only the macOS 26.5 SDK. Consequently, API declarations newly shipped in the macOS 27 SDK cannot yet be compiled locally. Conclusions below distinguish direct Apple documentation from inferences that still need confirmation against Xcode 27 headers.
+The test Mac runs macOS 27.0. Xcode 26.6 remains the globally selected toolchain, while Xcode 27 is invoked per command through `DEVELOPER_DIR`; global `xcode-select` was not changed. The SDK 27 declarations below have now been inspected and compile-tested locally with Swift 6.4.
 
 ## Confirmed macOS 27 status-item API
 
@@ -30,6 +31,13 @@ Apple's WWDC26 guidance says a status item that opens a custom window should use
 
 This API is important for Blenny's own status item and any future custom popover or window. It does not enumerate, hide, reorder, or otherwise control another application's item.
 
+The Swift 6.4 importer exposes the required callbacks as:
+
+- `statusItem(_:didBegin:)`
+- `statusItemDidEndExpandedInterfaceSession(_:animated:)`
+
+The SDK 27 beta protocol is not MainActor-isolated. A delegate class isolated wholesale to `@MainActor` therefore fails Swift 6.4 strict concurrency checking instead of satisfying the protocol. The compile probe uses the actual nonisolated protocol surface rather than suppressing the diagnostic with `@preconcurrency`. Interactive callback delivery still needs a runtime experiment.
+
 Official references:
 
 - [Modernize your AppKit app](https://developer.apple.com/videos/play/wwdc2026/289/)
@@ -38,7 +46,7 @@ Official references:
 - [expandedInterfaceDelegate](https://developer.apple.com/documentation/appkit/nsstatusitem/expandedinterfacedelegate)
 - [expandedInterfaceSession](https://developer.apple.com/documentation/appkit/nsstatusitem/expandedinterfacesession)
 
-## Status-item API surface that appears revised
+## Confirmed revision to the status-item API surface
 
 The local macOS 26.5 `NSStatusItem.h` marks direct `view`, `target`, and `action` access on `NSStatusItem` as deprecated and recommends using the standard status-bar button instead. Apple's current documentation now lists:
 
@@ -48,7 +56,7 @@ The local macOS 26.5 `NSStatusItem.h` marks direct `view`, `target`, and `action
 
 WWDC26 also explicitly instructs apps with a custom status-item view to set the view on the status item and add target-action behavior to the status item so keyboard activation works.
 
-This is strong evidence that the macOS 27 SDK revises or undeprecates these declarations as part of the new managed interaction model. It remains an inference until Xcode 27 is installed and its headers and availability annotations are inspected. Blenny must not add conditional declarations or private symbol lookups to bypass the missing SDK.
+The macOS 27 SDK confirms the revision: `view`, `target`, and `action` are declared in the primary `NSStatusItem` interface with `API_AVAILABLE(macos(10.0))`, while `doubleAction` and the old forwarded drawing/menu helpers remain in the deprecated category. No compatibility declaration or private symbol lookup is needed.
 
 Official references:
 
@@ -64,7 +72,7 @@ Official references:
 
 Apple now documents keyboard navigation across status items. A normal status-item button's action fires when the user presses Return during keyboard navigation. Custom expanded UI should participate through the expanded-interface session instead of independently guessing when its window should open, receive focus, or close.
 
-This supports an AppKit-first Phase B design: keep Blenny's status item native, use its button and menu for the 0.0.1 probe, and adopt the new session API only after the macOS 27 SDK is available.
+This supports an AppKit-first Phase B design: keep Blenny's status item native and use its button and menu for the 0.0.1 probe. An item with an assigned `NSMenu` does not receive expanded-interface delegate callbacks because AppKit manages the menu lifecycle itself; a runtime session experiment must therefore use a separate Blenny-owned Debug item without a menu.
 
 ### Menu item images
 
@@ -117,13 +125,13 @@ Accordingly:
 ## Implications for the spike
 
 1. Phase A remains necessary. Apple has not provided a public cross-application status-item inventory or overflow API, so bounded Accessibility observation is still the only public mechanism located for the read-only probe.
-2. Phase B should use `NSStatusItem` exactly as a native owned item. Once Xcode 27 is installed, add a small compile-and-runtime probe for the expanded-interface session and keyboard navigation; do not emulate its behavior with mouse events.
+2. Phase B should use `NSStatusItem` exactly as a native owned item. The compile probe for the expanded-interface session now passes; a separate runtime probe for mouse and keyboard lifecycle callbacks remains. Do not emulate its behavior with mouse events.
 3. A public-API-only path does not currently satisfy the product requirement to prioritize other applications' items. Phase C cannot be justified as public API work based on this review.
 4. The new expanded-interface API is evidence of a more system-managed status-item interaction lifecycle, but it is not evidence that third-party layout control is feasible.
-5. The next tooling prerequisite is Xcode 27 with the macOS 27 SDK. Until then, Blenny can run on macOS 27 but cannot accurately compile-test the newly documented status-item API.
+5. The Xcode 27 tooling prerequisite is satisfied. Debug and Release tests pass against SDK 27, and the SwiftPM executable records `minos 27.0`, `sdk 27.0`.
 
 ## Current conclusion
 
-Apple added a meaningful public API for lifecycle and focus management of an app's own expanded status-item UI. Apple did not publish a corresponding API for global item enumeration, native overflow observation, or cross-application priority control in the material reviewed.
+Apple added a meaningful public API for lifecycle and focus management of an app's own expanded status-item UI, and the API is present in SDK 27 with a compile-tested Swift 6.4 surface. Apple did not publish a corresponding API for global item enumeration, native overflow observation, or cross-application priority control in the material reviewed.
 
 This narrows the differentiated engineering path rather than proving it: use the new public lifecycle for Blenny's own control, keep discovery in a bounded Accessibility backend, and treat every layout-priority experiment as unsupported and reversible until evidence says otherwise.

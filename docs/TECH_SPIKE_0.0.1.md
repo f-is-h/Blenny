@@ -1,6 +1,6 @@
 # Blenny 0.0.1 Technical Spike
 
-Status: Phase A trusted, privacy-scoped baseline captured; lifecycle identity validation remains pending.
+Status: Phase A trusted, privacy-scoped baseline captured; static identity drift fixed; relaunch/reflow lifecycle validation remains pending.
 
 Date: 2026-08-21
 
@@ -19,23 +19,23 @@ The implementation is clean-room Swift/AppKit code. It does not use or link Ice,
 | Hardware architecture | Apple Silicon `arm64` |
 | macOS | 27.0 |
 | macOS build | 26A5416b |
-| Xcode | 26.6 (17F113) |
-| Swift | Apple Swift 6.3.3 (`swiftlang-6.3.3.1.3`, `clang-2100.1.1.101`) |
-| Installed macOS SDK | 26.5 (25F70) |
-| SDK-declared maximum deployment target | 26.5.99 |
+| Default Xcode | 26.6 (17F113) |
+| Xcode 27 used explicitly | 27.0 beta (27A5237l) |
+| Swift 27 toolchain | Apple Swift 6.4 (`swiftlang-6.4.0.30.4`, `clang-2100.3.30.1`) |
+| macOS 27 SDK | 27.0 (26A5406c) |
 | Blenny deployment target | 27.0 |
 | App architecture | arm64 |
 | Temporary Bundle ID | `com.example.BlennyProbe` |
 | Signing used for local probe | ad-hoc |
 
-There is a version mismatch in the installed developer tools: the host is macOS 27.0, while Xcode contains a 26.5 SDK. SwiftPM and the linker nevertheless produced the probe successfully with `LC_BUILD_VERSION minos 27.0` and `sdk 26.5`; `LSMinimumSystemVersion` is also 27.0. No macOS 26 fallback was added. This is sufficient to run the probe on this host, but a macOS 27 SDK should be used before treating SDK-specific behavior as final.
+The first local app bundle was produced with Xcode 26.6 and records `LC_BUILD_VERSION minos 27.0`, `sdk 26.5`. Xcode 27 was subsequently installed alongside it. Without changing global `xcode-select`, the package now builds with the macOS 27 SDK and the SwiftPM executable records `minos 27.0`, `sdk 27.0`. No macOS 26 fallback was added. The already-authorized ad-hoc `.app` was deliberately not rebuilt during this SDK check because replacing its signature would invalidate the user's Accessibility grant.
 
 Build and test commands:
 
 ```sh
-swift test
-swift test --configuration release
-./scripts/build-app.sh debug
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --configuration release
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer ./scripts/build-app.sh debug
 open build/debug/Blenny.app
 ```
 
@@ -54,7 +54,7 @@ The probe includes:
 - Element, wall-clock, and per-application message limits. There is no retry loop.
 - A privacy-limited JSON report. Traversal stops at each status item and excludes its menu, menu items, nested application trees, unrelated windows, file paths, images, and window contents. Required menu-item text fields are whitespace-normalized and capped at 256 characters; custom action metadata is reduced to its semantic first line.
 - A conservative overflow classifier. A `MenuBarAgent` element that contains a recognized overflow/chevron Accessibility marker is labeled `nativeOverflowPresentationControl`. All other `MenuBarAgent` elements remain `systemOwnedPresentation`, never ordinary manageable items.
-- A candidate `MenuBarItemIdentity` based on normalized bundle ID, Accessibility identifier when present, otherwise semantic title/description, role, subrole, and an instance ordinal. PID, a transient element observation key, image bytes, and coordinates are excluded from the persistent identity.
+- A candidate `MenuBarItemIdentity` based on normalized bundle ID, Accessibility identifier when present, otherwise semantic title/description, role, subrole, and an instance ordinal. Decimal runs in semantic labels are represented by a stable `{number}` token because live status text often contains changing counters or time values; identities using this heuristic are explicitly weak confidence. PID, a transient element observation key, image bytes, and coordinates are excluded from the persistent identity.
 
 ## APIs and attributes attempted
 
@@ -88,21 +88,24 @@ No private framework, symbol, XPC service, entitlement, preference domain, or mu
 
 ## macOS 27 public API research
 
-The companion [macOS 27 Menu Bar Public API Research](MACOS_27_MENU_BAR_API_RESEARCH.md) reviews only Apple-published documentation, WWDC material, and the local pre-27 SDK headers. The main findings are:
+The companion [macOS 27 Menu Bar Public API Research](MACOS_27_MENU_BAR_API_RESEARCH.md) reviews Apple-published documentation, WWDC material, and both local SDK 26.5 and SDK 27 headers. The main findings are:
 
 - macOS 27 adds a public `NSStatusItem` expanded-interface delegate/session lifecycle for an app's own custom status-item UI.
 - `NSStatusItem.isVisible` remains `true` when the system temporarily hides an item for insufficient space, so it is not a public overflow signal.
 - No new public cross-application item inventory, native-overflow observation, or priority-management API was located.
 - `MenuBarAgent` remains a version-sensitive Accessibility observation rather than a documented management contract.
-- Xcode 27 and the macOS 27 SDK are required before the new status-item lifecycle can be compile-tested locally.
+- SDK 27 confirms that direct `NSStatusItem.view`, `target`, and `action` are active declarations rather than deprecated compatibility members.
+- Swift 6.4 imports the begin callback as `statusItem(_:didBegin:)`; the delegate protocol is not MainActor-isolated in this beta SDK, so an `@MainActor` conformance fails strict concurrency checking.
 
 ## Experiments and results
 
 | Experiment | Execution status | Result |
 | --- | --- | --- |
-| Debug build with deployment target 27.0 | Run | Passed. Mach-O reports `minos 27.0`, `sdk 26.5`. |
-| Debug unit tests | Run | Passed: 16 tests in 3 suites. |
-| Release build and unit tests | Run | Passed: 16 tests in 3 suites. |
+| Original Debug app with deployment target 27.0 | Run | Passed. Mach-O reports `minos 27.0`, `sdk 26.5`. This authorized app was not re-signed during the SDK 27 check. |
+| SDK 27 SwiftPM build | Run | Passed with Xcode 27.0 beta and Swift 6.4. Mach-O reports `minos 27.0`, `sdk 27.0`. |
+| Debug unit tests with SDK 27 | Run | Passed: 19 tests in 4 suites. |
+| Release build and unit tests with SDK 27 | Run | Passed: 19 tests in 4 suites. |
+| Expanded-interface public API compile probe | Run | Passed. The test compiles protocol conformance, `expandedInterfaceDelegate`, `expandedInterfaceSession`, and `cancel()` against SDK 27. It does not claim that callbacks have been exercised interactively. |
 | App launch | Run | Passed. The process remained running from the generated `.app`. |
 | Reopen after closing diagnostics window | Run | Passed. Closing the last window kept the status-item process alive, and opening the same `.app` again restored the diagnostics window. |
 | Diagnostics window | Run and visually inspected | Passed. Permission status and all four controls rendered correctly. |
@@ -116,6 +119,7 @@ The companion [macOS 27 Menu Bar Public API Research](MACOS_27_MENU_BAR_API_RESE
 | Privacy-boundary validation | Run | The corrected report contained zero `AXApplication`, `AXMenu`, `AXMenuItem`, or `AXWebArea` records. Agent presentation roots were bounded; the deeper Agent records came only from its dedicated `AXExtrasMenuBar` tree. |
 | Candidate write-surface check | Run | All 24 candidates exposed actions, but none exposed settable `AXHidden`, `AXPosition`, or `AXSize`. Two menu-bar-sized Agent root windows reported settable `AXPosition`; they remain classified as system presentation and were not modified. |
 | Diagnostics report display | Run, defect fixed and rerun | The trusted scan completed and JSON export worked, but a zero-sized text view initially made the report appear blank and a permission refresh replaced the completion summary. The final build displays JSON and preserves the completion summary; a zero-item read-only report was used for the visual rerun after rebuilding reset local trust. |
+| Consecutive static identity comparison | Run | Two bounded scans 39 seconds apart each found 24 candidates. Identity v1 matched 23/24; one same-owner item changed one numeric scalar in an 11-character semantic label. Replaying both reports through the v2 numeric-mask rule matched 24/24. This validates the specific fix, not lifecycle stability. |
 | Identity stability across app relaunch/reflow/sleep/display change | Not run | Requires trusted captures and a controlled test matrix. |
 | Phase B status-item length changes | Not implemented or run | Out of current phase. |
 | Phase C preferred-position reads/writes | Not implemented or run | Out of current phase. |
@@ -126,6 +130,7 @@ The current tests verify:
 
 - case, diacritic, and whitespace normalization;
 - Accessibility identifier precedence over changing titles;
+- masking changing decimal runs in semantic labels while preserving digits in Accessibility identifiers;
 - duplicate observation removal;
 - deterministic ordinals for multiple semantically identical items;
 - omission of PID and position from persistent identity;
@@ -137,6 +142,7 @@ The current tests verify:
 - rejection of ordinary windows as menu bar presentation roots;
 - removal of pointer/selector details from custom AX action names;
 - recognition of the live Simplified Chinese overflow label and rejection when attached to a non-button role.
+- compilation of the public macOS 27 expanded-interface delegate/session surface with SDK 27.
 
 ## Performance observations
 
@@ -146,6 +152,7 @@ The current tests verify:
 - The first trusted scan took 10,110 ms and produced 3,355 elements because it traversed unrelated hosted application subtrees. This was a correctness and privacy failure, not an acceptable performance result.
 - The corrected inventory filters background processes, stops at status items, inspects only one child level of menu-bar-sized Agent roots, caps each AX application at a 0.5-second messaging timeout, and caps the overall scan at five seconds.
 - The corrected trusted scan completed in 282 ms with 120 records and did not reach either bound. This is one measurement on one busy-menu-bar state, not a performance guarantee.
+- Two later bounded scans completed in 761 ms and 250 ms with 121 records each. Their candidate count remained 24; latency variation still requires a larger sample before setting a target.
 
 ## Recovery and cleanup
 
@@ -160,24 +167,24 @@ To remove local artifacts:
 
 No backup file exists because no system state has been written.
 
-Both trusted JSON exports and the temporary process sample were permanently deleted after anonymous aggregates were recorded. None was tracked by Git.
+All trusted JSON exports and the temporary process sample were permanently deleted after anonymous aggregates were recorded. None was tracked by Git.
 
 ## Unresolved questions
 
 - Are the overflow control's labels stable across language and display configurations?
-- Which identity components remain stable across owner-app relaunch, dynamic title changes, menu bar reflow, sleep/wake, and display changes?
+- Which identity components remain stable across owner-app relaunch, menu bar reflow, sleep/wake, and display changes? Static numeric-title drift is now covered by identity v2, but non-numeric dynamic labels remain unresolved.
 - How should multiple indistinguishable items from one bundle receive a stable ordinal if traversal order changes?
 - Do the two observed overflow controls map deterministically to the two active menu bar presentation roots/displays?
 - Does `MenuBarAgent` appear through `NSWorkspace` consistently on every display configuration?
 - What are corrected trusted-scan latency and memory characteristics across repeated refreshes and display configurations?
-- Do the new macOS 27 `NSStatusItem` expanded-interface APIs behave as documented once Xcode 27 is installed?
+- Does the new expanded-interface delegate receive begin/end callbacks correctly during mouse and keyboard activation? The SDK surface compiles, but interactive lifecycle behavior has not been run.
 
 ## Go/no-go assessment
 
 No go decision can be made yet.
 
-The corrected live scan provides positive evidence that third-party extras trees and native overflow controls are observable within a narrow, fast privacy boundary. It also provides negative evidence: none of the 24 candidates exposed writable hidden/position/size attributes, no candidate exposed an Accessibility identifier, and 18 of 24 therefore received only weak structural identities. The two settable positions belonged to system-presentation root windows, not manageable candidates, and were not touched. Stable identity across lifecycle events remains untested, and the public API review found no supported cross-application priority mechanism. Phase A is therefore substantially validated but does not prove the product route or unlock Phase C writes.
+The corrected live scan provides positive evidence that third-party extras trees and native overflow controls are observable within a narrow, fast privacy boundary. It also provides negative evidence: none of the 24 candidates exposed writable hidden/position/size attributes and no candidate exposed an Accessibility identifier. Identity v2 fixes the one observed numeric-label drift, but it correctly lowers that item from moderate to weak confidence, producing 19 weak and 5 moderate candidates in the replay. The two settable positions belonged to system-presentation root windows, not manageable candidates, and were not touched. Stable identity across lifecycle events remains untested, and the public API review found no supported cross-application priority mechanism. Phase A is therefore substantially validated but does not prove the product route or unlock Phase C writes.
 
 ## Recommendation
 
-Install Xcode 27 with the macOS 27 SDK, compile-probe the new expanded-interface lifecycle, and repeat the bounded scan across one non-critical third-party app relaunch plus a natural menu-bar reflow. Capture one state with native overflow absent if the menu bar can reach that state without synthetic input. Use those paired observations to judge identity stability before beginning Phase B; keep Phase C at read-only/dry-run until a safe, documented restoration path exists.
+With the SDK 27 compile gate cleared, select one non-critical third-party status-item app for a controlled relaunch comparison, then capture a natural menu-bar reflow and one state with native overflow absent if possible without synthetic input. Separately exercise the public expanded-interface callbacks on a Blenny-owned Debug status item before deciding whether the product needs custom expanded UI. Use the paired identity observations to close Phase A before beginning the length portion of Phase B; keep Phase C at read-only/dry-run until a safe, documented restoration path exists.
