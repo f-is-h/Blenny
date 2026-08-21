@@ -30,6 +30,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        showDiagnostics()
+        return true
+    }
+
     private func showDiagnostics() {
         diagnosticsWindowController.showWindow(nil)
         diagnosticsWindowController.window?.orderFrontRegardless()
@@ -69,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !requestedAccessibilityThisLaunch else {
             openAccessibilitySettings()
             diagnosticsWindowController.showPermissionMessage(
-                "The system prompt was already requested during this launch. Enable Blenny under Privacy & Security › Accessibility, then return and choose Refresh."
+                "The system prompt was already requested during this launch. Enable Blenny under Privacy & Security › Device Control and Data Access, then return and choose Refresh."
             )
             return
         }
@@ -78,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = AccessibilityAuthorization.requestSystemPrompt()
         updatePermissionPresentation()
         diagnosticsWindowController.showPermissionMessage(
-            "Enable Blenny under Privacy & Security › Accessibility. The probe will not keep prompting; return here and choose Refresh after granting access."
+            "Enable Blenny under Privacy & Security › Device Control and Data Access. The probe will not keep prompting; return here and choose Refresh after granting access."
         )
     }
 
@@ -103,6 +111,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         )
 
+        applications = applications.filter { application in
+            application.activationPolicy != .prohibited
+                || application.bundleIdentifier == "com.apple.MenuBarAgent"
+        }
+        applications.sort { first, second in
+            scanPriority(for: first) < scanPriority(for: second)
+        }
+
         var seenPIDs = Set<pid_t>()
         return applications.compactMap { application in
             guard application.processIdentifier > 0,
@@ -114,5 +130,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 bundleIdentifier: application.bundleIdentifier
             )
         }
+    }
+
+    private func scanPriority(for application: NSRunningApplication) -> Int {
+        if application.bundleIdentifier == "com.apple.MenuBarAgent" { return 0 }
+        if application.processIdentifier == ProcessInfo.processInfo.processIdentifier { return 1 }
+        return 2
     }
 }

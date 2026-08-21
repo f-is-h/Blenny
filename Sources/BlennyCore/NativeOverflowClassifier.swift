@@ -15,10 +15,7 @@ public enum NativeOverflowClassifier {
 
     private static let candidateRoles = Set([
         "axbutton",
-        "axcheckbox",
-        "axmenubaritem",
-        "axmenuitem",
-        "axpopupbutton"
+        "axmenubaritem"
     ])
 
     private static let overflowMarkers = [
@@ -35,7 +32,9 @@ public enum NativeOverflowClassifier {
         "オーバーフロー",
         "メニューバーの項目をさらに表示",
         "更多菜单栏项目",
+        "显示隐藏菜单栏项目",
         "更多選單列項目",
+        "顯示隱藏的選單列項目",
         "溢出"
     ]
 
@@ -53,7 +52,8 @@ public enum NativeOverflowClassifier {
             .joined(separator: " ")
 
         if bundleIdentifier == menuBarAgentBundleIdentifier {
-            if overflowMarkers.contains(where: searchableText.contains) {
+            if normalizedRole == "axbutton",
+               overflowMarkers.contains(where: searchableText.contains) {
                 return MenuBarElementClassificationResult(
                     classification: .nativeOverflowPresentationControl,
                     reason: "MenuBarAgent-owned element matched a native overflow accessibility marker."

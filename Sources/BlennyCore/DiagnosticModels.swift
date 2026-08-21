@@ -153,6 +153,7 @@ public struct DiagnosticReport: Codable, Equatable, Sendable {
     public let extrasMenuBarTreesFound: Int
     public let menuBarAgentProcessesFound: Int
     public let elementLimitReached: Bool
+    public let timeLimitReached: Bool
     public let aggregateErrors: [String: Int]
     public let notes: [String]
     public let items: [MenuBarItemRecord]
@@ -166,11 +167,12 @@ public struct DiagnosticReport: Codable, Equatable, Sendable {
         extrasMenuBarTreesFound: Int,
         menuBarAgentProcessesFound: Int,
         elementLimitReached: Bool,
+        timeLimitReached: Bool,
         aggregateErrors: [String: Int],
         notes: [String],
         items: [MenuBarItemRecord]
     ) {
-        self.schemaVersion = 1
+        self.schemaVersion = 2
         self.generatedAt = generatedAt
         self.environment = environment
         self.accessibilityTrusted = accessibilityTrusted
@@ -179,6 +181,7 @@ public struct DiagnosticReport: Codable, Equatable, Sendable {
         self.extrasMenuBarTreesFound = extrasMenuBarTreesFound
         self.menuBarAgentProcessesFound = menuBarAgentProcessesFound
         self.elementLimitReached = elementLimitReached
+        self.timeLimitReached = timeLimitReached
         self.aggregateErrors = aggregateErrors
         self.notes = notes
         self.items = items

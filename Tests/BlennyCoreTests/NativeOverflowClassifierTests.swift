@@ -16,6 +16,32 @@ struct NativeOverflowClassifierTests {
         #expect(result.classification == .nativeOverflowPresentationControl)
     }
 
+    @Test("localized macOS 27 overflow label is recognized")
+    func marksLocalizedOverflowControl() {
+        let result = NativeOverflowClassifier.classify(
+            ownerBundleIdentifier: "com.apple.MenuBarAgent",
+            role: "AXButton",
+            title: nil,
+            itemDescription: "显示隐藏菜单栏项目",
+            accessibilityIdentifier: nil
+        )
+
+        #expect(result.classification == .nativeOverflowPresentationControl)
+    }
+
+    @Test("overflow text on a non-button remains generic system presentation")
+    func rejectsNonButtonOverflowMarker() {
+        let result = NativeOverflowClassifier.classify(
+            ownerBundleIdentifier: "com.apple.MenuBarAgent",
+            role: "AXGroup",
+            title: nil,
+            itemDescription: "显示隐藏菜单栏项目",
+            accessibilityIdentifier: nil
+        )
+
+        #expect(result.classification == .systemOwnedPresentation)
+    }
+
     @Test("unknown MenuBarAgent controls are never manageable")
     func excludesUnknownSystemControl() {
         let result = NativeOverflowClassifier.classify(

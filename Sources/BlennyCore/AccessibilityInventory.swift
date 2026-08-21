@@ -3,9 +3,17 @@ import Foundation
 
 public actor AccessibilityInventory {
     private let maximumElementsPerRefresh: Int
+    private let maximumDurationNanoseconds: UInt64
+    private let messagingTimeoutSeconds: Float
 
-    public init(maximumElementsPerRefresh: Int = 4_096) {
-        self.maximumElementsPerRefresh = maximumElementsPerRefresh
+    public init(
+        maximumElementsPerRefresh: Int = 1_024,
+        maximumDurationMilliseconds: Int = 5_000,
+        messagingTimeoutSeconds: Float = 0.5
+    ) {
+        self.maximumElementsPerRefresh = max(1, maximumElementsPerRefresh)
+        self.maximumDurationNanoseconds = UInt64(max(1, maximumDurationMilliseconds)) * 1_000_000
+        self.messagingTimeoutSeconds = max(0.1, messagingTimeoutSeconds)
     }
 
     public func capture(
@@ -31,6 +39,7 @@ public actor AccessibilityInventory {
                 extrasMenuBarTreesFound: 0,
                 menuBarAgentProcessesFound: 0,
                 elementLimitReached: false,
+                timeLimitReached: false,
                 aggregateErrors: [:],
                 notes: notes,
                 items: []
@@ -38,19 +47,30 @@ public actor AccessibilityInventory {
         }
 
         var aggregateErrors: [String: Int] = [:]
+        var runningApplicationsChecked = 0
         var extrasMenuBarTreesFound = 0
         var menuBarAgentProcessesFound = 0
         var observations: [ElementObservation] = []
         var visitedElements = Set<ElementVisitKey>()
         var elementLimitReached = false
+        var timeLimitReached = false
 
         for application in applications {
+            guard !hasExceededTimeLimit(since: startedAt) else {
+                timeLimitReached = true
+                break
+            }
             guard observations.count < maximumElementsPerRefresh else {
                 elementLimitReached = true
                 break
             }
 
+            runningApplicationsChecked += 1
             let applicationElement = AXUIElementCreateApplication(application.processIdentifier)
+            let timeoutError = AXUIElementSetMessagingTimeout(applicationElement, messagingTimeoutSeconds)
+            if timeoutError != .success {
+                increment(error: timeoutError, in: &aggregateErrors)
+            }
             let normalizedBundleIdentifier = MenuBarItemIdentityResolver.normalize(application.bundleIdentifier)
             let isMenuBarAgent = normalizedBundleIdentifier == NativeOverflowClassifier.menuBarAgentBundleIdentifier
             if isMenuBarAgent {
@@ -65,9 +85,12 @@ public actor AccessibilityInventory {
                     root: extrasMenuBar,
                     owner: application,
                     source: isMenuBarAgent ? .menuBarAgent : .applicationExtrasMenuBar,
+                    scope: .extrasMenuBar,
+                    startedAt: startedAt,
                     observations: &observations,
                     visitedElements: &visitedElements,
                     elementLimitReached: &elementLimitReached,
+                    timeLimitReached: &timeLimitReached,
                     aggregateErrors: &aggregateErrors
                 )
             } else if extrasResult.error != .attributeUnsupported && extrasResult.error != .noValue {
@@ -79,16 +102,24 @@ public actor AccessibilityInventory {
             let childResult = copyAttribute(applicationElement, name: kAXChildrenAttribute as CFString)
             if childResult.error == .success {
                 for child in axElements(from: childResult.value) {
+                    let childRole = copySanitizedString(child, name: kAXRoleAttribute as CFString)
+                    guard AccessibilityTraversalPolicy.isMenuBarPresentationRoot(
+                        role: childRole,
+                        frame: frame(of: child)
+                    ) else { continue }
                     traverse(
                         root: child,
                         owner: application,
                         source: .menuBarAgent,
+                        scope: .agentPresentationRoot,
+                        startedAt: startedAt,
                         observations: &observations,
                         visitedElements: &visitedElements,
                         elementLimitReached: &elementLimitReached,
+                        timeLimitReached: &timeLimitReached,
                         aggregateErrors: &aggregateErrors
                     )
-                    if elementLimitReached { break }
+                    if elementLimitReached || timeLimitReached { break }
                 }
             } else if childResult.error != .attributeUnsupported && childResult.error != .noValue {
                 increment(error: childResult.error, in: &aggregateErrors)
@@ -101,6 +132,9 @@ public actor AccessibilityInventory {
         if elementLimitReached {
             notes.append("The bounded element limit was reached; the report is intentionally truncated instead of retrying or polling.")
         }
+        if timeLimitReached {
+            notes.append("The five-second wall-clock budget was reached; the report is intentionally partial and no retry was attempted.")
+        }
 
         assignStableIdentities(to: &observations)
 
@@ -109,10 +143,11 @@ public actor AccessibilityInventory {
             environment: environment,
             accessibilityTrusted: true,
             durationMilliseconds: elapsedMilliseconds(since: startedAt),
-            runningApplicationsChecked: applications.count,
+            runningApplicationsChecked: runningApplicationsChecked,
             extrasMenuBarTreesFound: extrasMenuBarTreesFound,
             menuBarAgentProcessesFound: menuBarAgentProcessesFound,
             elementLimitReached: elementLimitReached,
+            timeLimitReached: timeLimitReached,
             aggregateErrors: aggregateErrors,
             notes: notes,
             items: observations.map(\.record)
@@ -123,14 +158,21 @@ public actor AccessibilityInventory {
         root: AXUIElement,
         owner: RunningApplicationDescriptor,
         source: AccessibilityTreeSource,
+        scope: AccessibilityTraversalScope,
+        startedAt: UInt64,
         observations: inout [ElementObservation],
         visitedElements: inout Set<ElementVisitKey>,
         elementLimitReached: inout Bool,
+        timeLimitReached: inout Bool,
         aggregateErrors: inout [String: Int]
     ) {
         var stack: [(element: AXUIElement, depth: Int)] = [(root, 0)]
 
         while let current = stack.popLast() {
+            guard !hasExceededTimeLimit(since: startedAt) else {
+                timeLimitReached = true
+                return
+            }
             guard observations.count < maximumElementsPerRefresh else {
                 elementLimitReached = true
                 return
@@ -143,12 +185,23 @@ public actor AccessibilityInventory {
             guard visitedElements.insert(visitKey).inserted else { continue }
 
             let role = copySanitizedString(current.element, name: kAXRoleAttribute as CFString)
+            guard AccessibilityTraversalPolicy.shouldInclude(role: role, in: scope) else { continue }
             let subrole = copySanitizedString(current.element, name: kAXSubroleAttribute as CFString)
             let title = copySanitizedString(current.element, name: kAXTitleAttribute as CFString)
             let itemDescription = copySanitizedString(current.element, name: kAXDescriptionAttribute as CFString)
             let accessibilityIdentifier = copySanitizedString(current.element, name: kAXIdentifierAttribute as CFString)
-            let position = attributeDiagnostic(current.element, name: kAXPositionAttribute as CFString)
-            let size = attributeDiagnostic(current.element, name: kAXSizeAttribute as CFString)
+            let positionResult = copyAttribute(current.element, name: kAXPositionAttribute as CFString)
+            let sizeResult = copyAttribute(current.element, name: kAXSizeAttribute as CFString)
+            let position = attributeDiagnostic(
+                current.element,
+                name: kAXPositionAttribute as CFString,
+                readResult: positionResult
+            )
+            let size = attributeDiagnostic(
+                current.element,
+                name: kAXSizeAttribute as CFString,
+                readResult: sizeResult
+            )
             let hidden = attributeDiagnostic(current.element, name: kAXHiddenAttribute as CFString)
             let classification = NativeOverflowClassifier.classify(
                 ownerBundleIdentifier: owner.bundleIdentifier,
@@ -172,7 +225,10 @@ public actor AccessibilityInventory {
                         title: title,
                         itemDescription: itemDescription,
                         accessibilityIdentifier: accessibilityIdentifier,
-                        frame: frame(of: current.element),
+                        frame: frame(
+                            positionValue: positionResult.value,
+                            sizeValue: sizeResult.value
+                        ),
                         actions: actionNames(of: current.element, aggregateErrors: &aggregateErrors),
                         hiddenAttribute: hidden,
                         positionAttribute: position,
@@ -182,6 +238,12 @@ public actor AccessibilityInventory {
                     )
                 )
             )
+
+            guard AccessibilityTraversalPolicy.shouldTraverseChildren(
+                of: role,
+                at: current.depth,
+                in: scope
+            ) else { continue }
 
             let childResult = copyAttribute(current.element, name: kAXChildrenAttribute as CFString)
             if childResult.error == .success {
@@ -193,6 +255,10 @@ public actor AccessibilityInventory {
                 increment(error: childResult.error, in: &aggregateErrors)
             }
         }
+    }
+
+    private func hasExceededTimeLimit(since startedAt: UInt64) -> Bool {
+        DispatchTime.now().uptimeNanoseconds - startedAt >= maximumDurationNanoseconds
     }
 
     private func assignStableIdentities(to observations: inout [ElementObservation]) {
@@ -273,8 +339,12 @@ private func axElements(from value: CFTypeRef?) -> [AXUIElement] {
 private func frame(of element: AXUIElement) -> RectSnapshot? {
     let positionResult = copyAttribute(element, name: kAXPositionAttribute as CFString)
     let sizeResult = copyAttribute(element, name: kAXSizeAttribute as CFString)
-    guard let point = point(from: positionResult.value),
-          let size = size(from: sizeResult.value) else {
+    return frame(positionValue: positionResult.value, sizeValue: sizeResult.value)
+}
+
+private func frame(positionValue: CFTypeRef?, sizeValue: CFTypeRef?) -> RectSnapshot? {
+    guard let point = point(from: positionValue),
+          let size = size(from: sizeValue) else {
         return nil
     }
     return RectSnapshot(
@@ -301,8 +371,12 @@ private func size(from value: CFTypeRef?) -> CGSize? {
     return AXValueGetValue(axValue, .cgSize, &size) ? size : nil
 }
 
-private func attributeDiagnostic(_ element: AXUIElement, name: CFString) -> AXAttributeDiagnostic {
-    let readResult = copyAttribute(element, name: name)
+private func attributeDiagnostic(
+    _ element: AXUIElement,
+    name: CFString,
+    readResult: AttributeCopyResult? = nil
+) -> AXAttributeDiagnostic {
+    let readResult = readResult ?? copyAttribute(element, name: name)
     var settable = DarwinBoolean(false)
     let settableError = AXUIElementIsAttributeSettable(element, name, &settable)
 
@@ -344,7 +418,18 @@ private func actionNames(
         }
         return []
     }
-    return (names as? [String] ?? []).sorted()
+    return (names as? [String] ?? [])
+        .compactMap(sanitizeActionName)
+        .sorted()
+}
+
+func sanitizeActionName(_ name: String) -> String? {
+    guard let firstLine = name.components(separatedBy: .newlines).first else { return nil }
+    let normalized = firstLine
+        .components(separatedBy: .whitespacesAndNewlines)
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+    return normalized.isEmpty ? nil : String(normalized.prefix(128))
 }
 
 private func describe(_ error: AXError) -> String {

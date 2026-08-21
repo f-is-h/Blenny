@@ -7,7 +7,7 @@ final class DiagnosticsWindowController: NSWindowController {
     private let guidanceLabel = NSTextField(wrappingLabelWithString: "Choose Refresh to run one bounded, read-only scan. No polling is used.")
     private let refreshButton = NSButton(title: "Refresh", target: nil, action: nil)
     private let requestAccessButton = NSButton(title: "Request Access…", target: nil, action: nil)
-    private let openSettingsButton = NSButton(title: "Open Accessibility Settings", target: nil, action: nil)
+    private let openSettingsButton = NSButton(title: "Open Device Control Settings", target: nil, action: nil)
     private let exportButton = NSButton(title: "Export JSON…", target: nil, action: nil)
     private let textView = NSTextView()
     private let onRefresh: () -> Void
@@ -47,7 +47,7 @@ final class DiagnosticsWindowController: NSWindowController {
         permissionLabel.stringValue = trusted ? "Accessibility: Granted" : "Accessibility: Not Granted"
         permissionLabel.textColor = trusted ? .systemGreen : .systemOrange
         requestAccessButton.isEnabled = !trusted
-        if trusted {
+        if trusted, currentReport == nil {
             guidanceLabel.stringValue = "Ready. Choose Refresh to run one bounded, read-only scan."
         }
     }
@@ -70,6 +70,7 @@ final class DiagnosticsWindowController: NSWindowController {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
             let data = try encoder.encode(report)
             textView.string = String(decoding: data, as: UTF8.self)
+            textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
             guidanceLabel.stringValue = "Captured \(report.items.count) relevant AX elements in \(report.durationMilliseconds) ms."
         } catch {
             textView.string = "Could not render diagnostic JSON: \(error.localizedDescription)"
@@ -108,14 +109,32 @@ final class DiagnosticsWindowController: NSWindowController {
         textView.isRichText = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        textView.string = "No scan has run yet. Grant Accessibility access if needed, then choose Refresh."
+        textView.textColor = .labelColor
+        textView.backgroundColor = .textBackgroundColor
+        textView.string = "No scan has run yet. Grant Device Control and Data Access if needed, then choose Refresh."
         textView.textContainerInset = NSSize(width: 10, height: 10)
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
+        scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.borderType = .bezelBorder
+
+        let initialTextSize = NSSize(width: 860, height: 500)
+        textView.frame = NSRect(origin: .zero, size: initialTextSize)
+        textView.minSize = NSSize(width: 0, height: initialTextSize.height)
+        textView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.containerSize = NSSize(
+            width: initialTextSize.width,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        textView.textContainer?.widthTracksTextView = true
         scrollView.documentView = textView
 
         let contentStack = NSStackView(views: [permissionLabel, guidanceLabel, buttonRow, scrollView])
