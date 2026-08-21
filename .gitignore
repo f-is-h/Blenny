@@ -1,0 +1,26 @@
+.DS_Store
+
+# Swift Package Manager and app build products
+.build/
+build/
+DerivedData/
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+# Signing and provisioning material
+*.cer
+*.p12
+*.mobileprovision
+*.provisionprofile
+Config/Local.xcconfig
+
+# Local diagnostics and reversible-system-state backups
+LocalData/Diagnostics/
+LocalData/Backups/
+*.blenny-diagnostics.json
+*.blenny-backup.json
