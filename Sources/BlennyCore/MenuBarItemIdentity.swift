@@ -35,7 +35,7 @@ public struct MenuBarItemIdentity: Codable, Hashable, Sendable {
 
     public var stableKey: String {
         let components = [
-            "blenny-identity-v1",
+            "blenny-identity-v2",
             ownerBundleIdentifier,
             accessibilityIdentifier ?? "",
             semanticLabel ?? "",
@@ -100,6 +100,25 @@ public enum MenuBarItemIdentityResolver {
         return normalized.isEmpty ? nil : normalized
     }
 
+    public static func normalizeSemanticLabel(_ value: String?) -> String? {
+        guard let normalized = normalize(value) else { return nil }
+
+        var result = ""
+        var isInsideDecimalRun = false
+        for scalar in normalized.unicodeScalars {
+            if CharacterSet.decimalDigits.contains(scalar) {
+                if !isInsideDecimalRun {
+                    result.append(contentsOf: "{number}")
+                }
+                isInsideDecimalRun = true
+            } else {
+                result.append(contentsOf: String(scalar))
+                isInsideDecimalRun = false
+            }
+        }
+        return result
+    }
+
     public static func resolve(_ candidates: [MenuBarItemIdentityCandidate]) -> [ResolvedMenuBarItemIdentity] {
         var seenObservationKeys = Set<String>()
         var instanceCounts: [BaseIdentity: Int] = [:]
@@ -113,15 +132,19 @@ public enum MenuBarItemIdentityResolver {
 
             let bundleIdentifier = normalize(candidate.ownerBundleIdentifier) ?? "unknown.bundle"
             let identifier = normalize(candidate.accessibilityIdentifier)
-            let label = identifier == nil
+            let rawLabel = identifier == nil
                 ? normalize(candidate.title) ?? normalize(candidate.itemDescription)
                 : nil
+            let label = normalizeSemanticLabel(rawLabel)
+            let usesVolatileNumberMask = label != rawLabel
             let role = normalize(candidate.role) ?? "unknown-role"
             let subrole = normalize(candidate.subrole)
             let confidence: MenuBarItemIdentityConfidence
 
             if identifier != nil {
                 confidence = .strong
+            } else if usesVolatileNumberMask {
+                confidence = .weak
             } else if label != nil {
                 confidence = .moderate
             } else {

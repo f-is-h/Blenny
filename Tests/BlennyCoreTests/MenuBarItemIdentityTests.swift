@@ -7,6 +7,7 @@ struct MenuBarItemIdentityTests {
     func normalization() {
         #expect(MenuBarItemIdentityResolver.normalize("  Ménu\u{00A0}  Item\n") == "menu item")
         #expect(MenuBarItemIdentityResolver.normalize(" \t\n ") == nil)
+        #expect(MenuBarItemIdentityResolver.normalizeSemanticLabel("CPU 42%") == "cpu {number}%")
     }
 
     @Test("an Accessibility identifier takes precedence over a changing title")
@@ -20,6 +21,32 @@ struct MenuBarItemIdentityTests {
 
         #expect(try #require(first.first).identity == #require(second.first).identity)
         #expect(try #require(first.first).identity.confidence == .strong)
+    }
+
+    @Test("changing numeric status text does not change identity")
+    func masksVolatileNumericText() throws {
+        let first = MenuBarItemIdentityResolver.resolve([
+            candidate(observationKey: "one", title: "Usage 41%")
+        ])
+        let second = MenuBarItemIdentityResolver.resolve([
+            candidate(observationKey: "two", title: "Usage 42%")
+        ])
+
+        #expect(try #require(first.first).identity == #require(second.first).identity)
+        #expect(try #require(first.first).identity.semanticLabel == "usage {number}%")
+        #expect(try #require(first.first).identity.confidence == .weak)
+    }
+
+    @Test("numeric Accessibility identifiers remain distinct")
+    func preservesNumbersInIdentifiers() throws {
+        let first = MenuBarItemIdentityResolver.resolve([
+            candidate(observationKey: "one", identifier: "status.1")
+        ])
+        let second = MenuBarItemIdentityResolver.resolve([
+            candidate(observationKey: "two", identifier: "status.2")
+        ])
+
+        #expect(try #require(first.first).identity != #require(second.first).identity)
     }
 
     @Test("duplicate observations are removed before identities are assigned")
