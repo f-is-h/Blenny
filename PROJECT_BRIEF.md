@@ -6,9 +6,9 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.0.1` technical feasibility validation
-- Document date: 2026-08-21
-- Product status: research only; no distributable build yet
+- Current phase: `0.0.1` technical feasibility validation complete; proceed to `0.0.2`
+- Document date: 2026-08-24
+- Product status: core architecture go on the tested macOS 27 build; no distributable build yet
 - Source lineage decision: clean implementation, not an Ice fork
 - License decision: pending; decide before the first public release
 
@@ -249,7 +249,9 @@ Do not add a license file until the project owner chooses one.
 
 ### 8.1 Proposed user model
 
-Each manageable item has one of three policies:
+Blenny's management unit is an owning application bundle, not an individual status-item instance. Every status item exposed by the same bundle inherits one policy; Blenny does not offer per-icon control within one app.
+
+Each manageable application has one of three policies:
 
 1. **Pinned** — keep visible whenever possible.
 2. **Automatic** — allow the system to overflow it when space is needed.
@@ -284,6 +286,7 @@ The system remains the source of truth for the currently rendered layout. Blenny
 - Automatic migration from Ice, Thaw, or Bartender.
 - Dozens of advanced settings.
 - Any implementation that moves the user's cursor.
+- Independent identification, ordering, or hiding of multiple status items from the same application bundle.
 
 ## 9. Proposed architecture
 
@@ -326,12 +329,10 @@ BlennyApp
 
 Candidate identity components:
 
-- Owning bundle identifier.
-- `NSStatusItem` autosave/preference identifier where discoverable.
-- Accessibility identifier or stable title.
-- Role/subrole.
-- Instance ordinal for multiple items from one app.
-- A migration strategy when an app changes one component.
+- Owning bundle identifier as the persisted policy identity.
+- A migration strategy when an app changes its bundle identifier.
+- `NSStatusItem` autosave/preference identifiers, Accessibility identifiers, stable labels, and role/subrole only as diagnostic observations or backend key-resolution hints.
+- An explicit many-observations-to-one-policy mapping when one bundle exposes multiple status items.
 
 `MenuBarPolicyEngine`
 
@@ -458,7 +459,7 @@ Priority scenarios:
 - Multiple displays with different scaling.
 - App launch and quit.
 - Status-item app relaunch and update-like replacement.
-- Multiple status items from one bundle.
+- Apps with multiple status items, as a compatibility check that every item receives the same bundle-level policy; independent per-item behavior is out of scope.
 - Dynamic items such as Focus, Now Playing, VPN, microphone/camera indicators, and system monitoring apps.
 - Sleep and wake.
 - Lock and unlock.
@@ -547,4 +548,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Use [`NEXT_SESSION_PROMPT.md`](NEXT_SESSION_PROMPT.md) to begin the `0.0.1` technical feasibility spike in a new development session.
+Begin the `0.0.2` integrated prototype defined in [`docs/ROADMAP.md`](docs/ROADMAP.md): move the proven installed custom-control and serialized assessment-policy handoff out of ignored experiments and into a narrow Debug-only macOS 27 backend with automated restore tests.
