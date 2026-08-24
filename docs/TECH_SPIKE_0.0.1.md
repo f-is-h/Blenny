@@ -16,7 +16,7 @@ The Phase A build contains no Accessibility attribute writes, Accessibility acti
 
 The implementation is clean-room Swift/AppKit code. It does not use or link Ice, Thaw, or PlatformRuntimeKit code or binaries. No license file has been added because the project license remains undecided.
 
-The product policy scope is bundle-level. All status items owned by one application bundle share one Pinned, Automatic, or Hidden policy. Per-instance management for apps that expose multiple status items is explicitly out of scope; instance-level Accessibility metadata remains diagnostic only.
+The product policy scope is bundle-level. All status items owned by one application bundle share one policy; per-instance management for apps that expose multiple status items is explicitly out of scope, and instance-level Accessibility metadata remains diagnostic only. A subsequent product decision names the three policies Pinned, Revealable, and Hidden. This replaces the earlier working term Automatic: Revealable bundles are normally hard-concealed and join only an ordinary user-initiated reveal session, while Hidden bundles remain excluded from that session and require a separate explicit recovery surface.
 
 ## Environment and build
 
@@ -284,7 +284,7 @@ All trusted JSON exports and the temporary process sample were permanently delet
 - Does the visibility-restriction service remain callable without a private entitlement on later macOS 27 builds, and does disconnect cleanup remain reliable?
 - Which part of the successful installed-copy setup is decisive: residence under `/Applications`, explicit LaunchServices registration, or another persistent owner record created by those operations? The executable and bundle identifier were otherwise unchanged.
 - Does a production-signed and notarized Blenny retain its visible control across app updates, logout/login, sleep/wake, and MenuBarAgent recreation while the assessment restriction is active?
-- Can an Automatic bundle be revealed after the overflow transition and placed in the intended expanded segment without visible layout flicker or synthetic reordering?
+- Can a Revealable bundle be admitted after the native overflow transition, or through Blenny's fallback control when native overflow is absent, without visible layout flicker or synthetic reordering?
 - After the user opens pressure-forced native overflow, can Blenny remove its blank leading spacer without immediately collapsing or invalidating the expanded group?
 - Can Blenny temporarily own the active menu, observe one native-overflow interaction, and restore the preceding frontmost application without visible focus disruption, lost keystrokes, or a clickable blank menu region?
 - Can pressure be scoped and restored independently for each display when the frontmost application changes or a display is added/removed?

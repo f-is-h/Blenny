@@ -28,15 +28,21 @@ Exit criteria met:
 
 Not a deliverable: no distributable app, stable bundle identity, onboarding, settings editor, or product backend.
 
-## 0.0.2 — Integrated backend prototype
+## 0.0.2 — Revealable group technical prototype
 
 Advance when:
 
 - The installed custom control and visibility-restriction code live in a narrow Debug-only `MacOS27` backend promoted from the isolated research probe.
 - One actor or equivalent serial writer owns every assertion transition.
-- Bundle-level `Pinned`, `Automatic`, and `Hidden` intent maps deterministically to allowlists.
+- The experiment is limited to the Revealable group: approved Revealable bundles are hard-concealed at baseline and admitted only for a bounded user-initiated reveal session.
+- When the native overflow control is present, its observed expand/collapse transition can drive that session without intercepting or synthesizing input.
+- When the native overflow control is absent, Blenny's normally installed status item supplies a stable reveal/conceal control without modifying another application's menu or status item.
+- The native and Blenny-owned controls never create a state in which the Revealable group has no usable reveal affordance.
+- Ending either reveal path deterministically restores the concealed baseline without visible flicker, an unrestricted gap, polling, or continuous reconciliation.
+- Pinned, Revealable, and Hidden remain distinct bundle-level policy inputs; ordinary reveal sessions never include Hidden bundles. The fully Hidden recovery UI and shortcut are not implemented or mutation-tested in `0.0.2`.
+- Any separate policy writer uses a point-to-point, session-scoped local channel that authenticates the requesting Blenny component's code identity, rejects untrusted or stale commands, and cannot accept arbitrary allowlists from a client.
 - The backend fails closed when private classes, selectors, or expected encodings differ.
-- Normal quit, helper disconnect, and failed replacement activation restore safely in automated or bounded integration tests.
+- Normal quit, helper disconnect, failed replacement activation, rejected peers, and replayed or out-of-order commands restore or remain safely unchanged in automated or bounded integration tests.
 - No polling or reconciliation loop is introduced.
 
 ## 0.0.3 — Persistent policy prototype
@@ -53,7 +59,7 @@ Advance when:
 
 Advance when:
 
-- A minimal AppKit-first editor exposes `Pinned`, `Automatic`, and `Hidden` groups.
+- A minimal AppKit-first editor exposes `Pinned`, `Revealable`, and `Hidden` groups with clear user-facing labels.
 - UI edits remain local and smooth; system policy applies only after the interaction completes.
 - Blenny's menu-bar control has stable click, keyboard, and quit behavior.
 - Accessibility onboarding is clear and never repeatedly prompts.
@@ -85,7 +91,7 @@ Advance when:
 
 Publish the repository and signed prerelease together when:
 
-- The core installed experience supports bundle-level `Pinned`, `Automatic`, and `Hidden` policies.
+- The core installed experience supports bundle-level `Pinned`, `Revealable`, and `Hidden` policies.
 - Reveal/conceal is fast, visually stable, and safely reversible.
 - Known unsupported items are surfaced clearly.
 - App updates preserve policies and the Blenny control's registration identity.

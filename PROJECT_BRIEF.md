@@ -252,13 +252,19 @@ Do not add a license file until the project owner chooses one.
 
 Blenny's management unit is an owning application bundle, not an individual status-item instance. Every status item exposed by the same bundle inherits one policy; Blenny does not offer per-icon control within one app.
 
-Each manageable application has one of three policies:
+Each manageable application has one of three policies. The working internal names are deliberately distinct from Accessibility's `AXHidden` attribute and the native overflow control's collapsed state:
 
 1. **Pinned** — keep visible whenever possible.
-2. **Automatic** — allow the system to overflow it when space is needed.
-3. **Hidden** — prefer it to remain out of the primary menu bar and make it accessible on demand.
+2. **Revealable** — keep normally concealed through Blenny's bundle-level visibility policy, then include it only during a user-initiated reveal session.
+3. **Hidden** — keep excluded from ordinary reveal sessions; it must still be discoverable and temporarily recoverable from Blenny's main interface, with a global shortcut as a possible later convenience.
 
-The initial settings interface may present these as three columns with drag and drop.
+The initial settings interface may present these as three columns. User-facing labels remain subject to interface testing; the intended Chinese concepts are fixed display, revealable hidden, and fully hidden.
+
+Revealable and Hidden are not two different low-level hiding mechanisms. Both use the reversible bundle-level concealment path validated by the spike. The difference is which bundles Blenny admits into an ordinary reveal session.
+
+When the native overflow control is already present and its state transition can be observed safely, Blenny may treat the user's native expand/collapse action as the reveal-session trigger. Hard concealment can free enough width that the native control disappears; in that state Blenny must provide its own separate, normally installed status-item control. Blenny must not synthesize a click on, overlay, replace, or claim ownership of Apple's control.
+
+Opening an ordinary reveal session includes Revealable bundles but not Hidden bundles. Closing it returns Revealable bundles to the concealed baseline. Hidden bundles require a separate, explicit recovery surface so that no policy makes them practically unreachable.
 
 The system remains the source of truth for the currently rendered layout. Blenny remains the source of truth for user intent.
 
@@ -266,7 +272,7 @@ The system remains the source of truth for the currently rendered layout. Blenny
 
 - One native menu bar item owned by Blenny.
 - A minimal layout editor.
-- Pinned, Automatic, and Hidden policies.
+- Pinned, Revealable, and Hidden bundle-level policies.
 - Stable persistence across app relaunches and login sessions.
 - Observation of the native overflow state.
 - A simple on-demand shelf only where necessary.
@@ -337,7 +343,7 @@ Candidate identity components:
 
 `MenuBarPolicyEngine`
 
-- Convert Pinned/Automatic/Hidden user intent into an ordered desired state.
+- Convert Pinned/Revealable/Hidden user intent into deterministic baseline and reveal-session states.
 - Remain deterministic and testable without macOS private APIs.
 
 `MacOS27LayoutBackend`
