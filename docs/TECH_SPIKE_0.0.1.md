@@ -1,12 +1,14 @@
 # Blenny 0.0.1 Technical Spike
 
-Status: Phase A trusted baseline captured; one controlled Phase C write/relaunch/restore cycle completed; the tested preferred-position change produced no meaningful layout effect.
+Status: Phase A trusted baseline captured; Phase B's Blenny-owned length experiment passed; one controlled Phase C write/relaunch/restore cycle produced no meaningful cross-application layout effect.
 
 Date: 2026-08-21
 
+Last updated: 2026-08-22
+
 ## Scope and safety boundary
 
-This document records the Phase A read-only Accessibility probe and one controlled Phase C experiment against a non-critical third-party status item. Phase B status-item length experiments have not been run. No critical system status item was modified or restarted.
+This document records the Phase A read-only Accessibility probe, Phase B experiments against Blenny's own status item, and one controlled Phase C experiment against a non-critical third-party status item. No critical system status item was modified or restarted.
 
 The Phase A build contains no Accessibility attribute writes, Accessibility actions, synthetic input, mouse movement, WindowServer manipulation, Screen Recording dependency, private entitlement, injection, polling timer, or automatic reconciliation loop. A refresh is manually initiated, limited to 1,024 Accessibility elements, given a five-second wall-clock budget, and uses a 0.5-second per-application AX messaging timeout.
 
@@ -56,11 +58,16 @@ The probe includes:
 - A conservative overflow classifier. A `MenuBarAgent` element that contains a recognized overflow/chevron Accessibility marker is labeled `nativeOverflowPresentationControl`. All other `MenuBarAgent` elements remain `systemOwnedPresentation`, never ordinary manageable items.
 - A candidate `MenuBarItemIdentity` based on normalized bundle ID, Accessibility identifier when present, otherwise semantic title/description, role, subrole, and an instance ordinal. Decimal runs in semantic labels are represented by a stable `{number}` token because live status text often contains changing counters or time values; identities using this heuristic are explicitly weak confidence. PID, a transient element observation key, image bytes, and coordinates are excluded from the persistent identity.
 
+## Phase B implementation
+
+The Debug app adds an explicitly warned status-item length experiment to the diagnostics window. It offers 80, 160, and 320 point values. Each run changes only Blenny's own `NSStatusItem.length`, disables repeated runs, and automatically restores `NSStatusItem.variableLength` after eight seconds. A manual Restore Now control is available during the pulse. Release builds contain neither the controls nor their strings.
+
 ## APIs and attributes attempted
 
 ### Public AppKit/Foundation APIs
 
 - `NSStatusBar` and `NSStatusItem` for Blenny's own menu bar item.
+- `NSStatusItem.length` and `NSStatusItem.variableLength` for the bounded Debug-only Phase B experiment.
 - `NSMenu`, `NSWindow`, `NSSavePanel`, and standard AppKit controls.
 - `NSWorkspace.runningApplications` and `NSRunningApplication` for PID/bundle attribution.
 - `ProcessInfo` and the system version property list for environment reporting.
@@ -116,6 +123,7 @@ The companion [macOS 27 Menu Bar Public API Research](MACOS_27_MENU_BAR_API_RESE
 | Release build and unit tests with SDK 27 | Run | Passed: 25 tests in 5 suites. |
 | Expanded-interface public API compile probe | Run | Passed. The test compiles protocol conformance, `expandedInterfaceDelegate`, `expandedInterfaceSession`, and `cancel()` against SDK 27. It does not claim that callbacks have been exercised interactively. |
 | App launch | Run | Passed. The process remained running from the generated `.app`. |
+| Re-signed Phase B Debug app | Run | Passed. The new Debug interface launched, but replacing the ad-hoc signature invalidated its prior Accessibility trust as expected. No permission prompt was triggered automatically; Phase B overflow observations used an independent read-only system Accessibility client. |
 | Reopen after closing diagnostics window | Run | Passed. Closing the last window kept the status-item process alive, and opening the same `.app` again restored the diagnostics window. |
 | Diagnostics window | Run and visually inspected | Passed. Permission status and all four controls rendered correctly. |
 | Manual refresh without Accessibility permission | Run | Passed. Returned zero elements in 0 ms, showed a clear permission note, and enabled JSON export without prompting. |
@@ -130,7 +138,11 @@ The companion [macOS 27 Menu Bar Public API Research](MACOS_27_MENU_BAR_API_RESE
 | Diagnostics report display | Run, defect fixed and rerun | The trusted scan completed and JSON export worked, but a zero-sized text view initially made the report appear blank and a permission refresh replaced the completion summary. The final build displays JSON and preserves the completion summary; a zero-item read-only report was used for the visual rerun after rebuilding reset local trust. |
 | Consecutive static identity comparison | Run | Two bounded scans 39 seconds apart each found 24 candidates. Identity v1 matched 23/24; one same-owner item changed one numeric scalar in an 11-character semantic label. Replaying both reports through the v2 numeric-mask rule matched 24/24. This validates the specific fix, not lifecycle stability. |
 | Identity stability across app relaunch/reflow/sleep/display change | Not run | Requires trusted captures and a controlled test matrix. |
-| Phase B status-item length changes | Not implemented or run | Out of current phase. |
+| Blenny status-item menu | Run before and after Phase B | Clicking Blenny opened a native menu containing Open Diagnostics, Refresh, permission status/request, and Quit. The menu remained functional after all length pulses. |
+| Phase B, 80 pt pulse | Run once | Blenny remained present in the collapsed menu-bar presentation. Native overflow, clock, and Control Center remained available. Automatic restoration to `NSStatusItem.variableLength` completed after eight seconds. |
+| Phase B, 160 pt pulse | Run once | Blenny remained present in the collapsed presentation. Native overflow remained available; no critical system control disappeared. Automatic restoration completed after eight seconds. |
+| Phase B, 320 pt pulse | Run once | Blenny disappeared from the collapsed presentation and appeared when the native overflow control was opened. The overflow label changed from `显示隐藏菜单栏项目` to `隐藏菜单栏项目`. After automatic length restoration and closing overflow, Blenny returned to the collapsed presentation. |
+| Phase B Release isolation | Inspected | Release binary strings contain no Debug experiment warning or controls; the Debug binary contains the clearly labeled experiment surface. |
 | Preferred-position domain discovery | Run, read-only | `com.apple.MenuBarAgent` currently contains only two analytics values. Fifteen live preferred-position keys were found across `com.apple.controlcenter` and `com.apple.systemuiserver`; the selected non-critical third-party test domain contributes one additional key. All 16 values are CFNumbers of the same representation. |
 | Phase C baseline snapshot | Run, read-only | Captured the two system domains plus the selected test domain into a mode-`0600` ignored backup. A SHA-256 fingerprint covers domain scope, keys, value types, and values. |
 | Restore preview | Run, read-only | Immediate preview found identical backup/current fingerprints with zero set and zero remove operations. A zero-operation restore command also completed final read-back verification without calling a preference write. |
@@ -176,7 +188,7 @@ The current tests verify:
 
 ## Recovery and cleanup
 
-The controlled experiment temporarily changed one Usage4Claude preference value from 510 to 6000. It has been restored to 510. The complete 16-entry current-state fingerprint equals the pre-experiment baseline, and the restore preview contains zero operations. Usage4Claude was relaunched after restoration and returned to its pre-experiment AX coordinate. No system preference domain, critical system item, or system UI process was changed or restarted. Quitting Blenny removes its process-owned status item through normal AppKit/process teardown.
+The controlled Phase C experiment temporarily changed one Usage4Claude preference value from 510 to 6000. It has been restored to 510. The complete 16-entry current-state fingerprint equals the pre-experiment baseline, and the restore preview contains zero operations. Usage4Claude was relaunched after restoration and returned to its pre-experiment AX coordinate. Every Phase B pulse restored `NSStatusItem.variableLength`, the overflow presentation was closed, and Blenny returned to the collapsed presentation. No system preference domain, critical system item, or system UI process was changed or restarted. Quitting Blenny removes its process-owned status item through normal AppKit/process teardown.
 
 To remove local artifacts:
 
@@ -205,8 +217,8 @@ All trusted JSON exports and the temporary process sample were permanently delet
 
 No go decision can be made yet.
 
-The corrected live scan provides positive evidence that third-party extras trees and native overflow controls are observable within a narrow, fast privacy boundary. The state experiment adds positive evidence that the observed preferred-position values can be read, fingerprinted, changed through public CFPreferences functions, and restored exactly without continuous rewriting. It also provides important negative evidence: changing Usage4Claude from 510 to 6000 had no meaningful layout effect either immediately or after relaunch. None of the 24 AX candidates exposed writable hidden/position/size attributes, and no public cross-application priority API was found. Deterministic storage restoration is now demonstrated for one operation, but meaningful priority control is not. The current preferred-position hypothesis therefore does not satisfy the product's go condition.
+The corrected live scan provides positive evidence that third-party extras trees and native overflow controls are observable within a narrow, fast privacy boundary. Phase B now demonstrates that macOS 27's native overflow reacts to the public length of a Blenny-owned status item and that the overflow transition can be observed and reversed without polling or synthetic sorting input. The state experiment also shows that preferred-position values can be read, fingerprinted, changed through public CFPreferences functions, and restored exactly. It provides important negative evidence: changing Usage4Claude from 510 to 6000 had no meaningful layout effect either immediately or after relaunch. None of the 24 AX candidates exposed writable hidden/position/size attributes, and no public cross-application priority API was found. The own-item and observation portions are feasible; meaningful cross-application priority control is not yet feasible, so the overall product go condition remains unmet.
 
 ## Recommendation
 
-Do not repeat guessed preferred-position writes or restart MenuBarAgent. Prefer a read-only differential capture around a user-performed native reorder of the same non-critical item to determine whether macOS 27 updates another state source or relationship. In parallel, proceed with Phase B's Blenny-owned `NSStatusItem.length` and expanded-interface experiments because they use public, owner-scoped AppKit APIs. Treat cross-application priority control as no-go until a reproducible effect is found and reversed without critical system UI manipulation.
+Do not repeat guessed preferred-position writes or restart MenuBarAgent. After granting Accessibility to the newly signed Debug build, prefer a read-only differential capture around a user-performed native reorder of the same non-critical item to determine whether macOS 27 updates another state source or relationship. Separately exercise the public expanded-interface callbacks on Blenny's own status item. Treat cross-application priority control as no-go until a reproducible effect is found and reversed without critical system UI manipulation.

@@ -14,6 +14,15 @@ final class DiagnosticsWindowController: NSWindowController {
     private let onRequestAccess: () -> Void
     private let onOpenSystemSettings: () -> Void
     private var currentReport: DiagnosticReport?
+    #if DEBUG
+    private let debugLengthPopup = NSPopUpButton()
+    private let debugRunLengthButton = NSButton(title: "Run 8-Second Pulse", target: nil, action: nil)
+    private let debugRestoreLengthButton = NSButton(title: "Restore Now", target: nil, action: nil)
+    private let debugLengthStatusLabel = NSTextField(labelWithString: "Standard variable length is active.")
+    private var onRunDebugLengthExperiment: ((CGFloat) -> Void)?
+    private var onRestoreDebugLengthExperiment: (() -> Void)?
+    private let debugLengths: [CGFloat] = [80, 160, 320]
+    #endif
 
     init(
         onRefresh: @escaping () -> Void,
@@ -30,7 +39,11 @@ final class DiagnosticsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
+        #if DEBUG
+        window.title = "Blenny 0.0.1 — Technical Probe (Debug)"
+        #else
         window.title = "Blenny 0.0.1 — Read-only Accessibility Probe"
+        #endif
         window.center()
         window.isReleasedWhenClosed = false
         super.init(window: window)
@@ -76,6 +89,31 @@ final class DiagnosticsWindowController: NSWindowController {
             textView.string = "Could not render diagnostic JSON: \(error.localizedDescription)"
         }
     }
+
+    #if DEBUG
+    func configureDebugLengthExperiment(
+        onRun: @escaping (CGFloat) -> Void,
+        onRestore: @escaping () -> Void
+    ) {
+        onRunDebugLengthExperiment = onRun
+        onRestoreDebugLengthExperiment = onRestore
+    }
+
+    func displayDebugLengthUpdate(_ update: DebugLengthExperimentUpdate) {
+        switch update {
+        case let .applied(length, durationSeconds):
+            debugLengthStatusLabel.stringValue = "Applied \(Int(length)) pt to Blenny only; automatic restore in \(durationSeconds) seconds."
+            debugRunLengthButton.isEnabled = false
+            debugLengthPopup.isEnabled = false
+            debugRestoreLengthButton.isEnabled = true
+        case .restored:
+            debugLengthStatusLabel.stringValue = "Restored NSStatusItem.variableLength."
+            debugRunLengthButton.isEnabled = true
+            debugLengthPopup.isEnabled = true
+            debugRestoreLengthButton.isEnabled = false
+        }
+    }
+    #endif
 
     private func configureContent() {
         guard let contentView = window?.contentView else { return }
@@ -137,7 +175,13 @@ final class DiagnosticsWindowController: NSWindowController {
         textView.textContainer?.widthTracksTextView = true
         scrollView.documentView = textView
 
-        let contentStack = NSStackView(views: [permissionLabel, guidanceLabel, buttonRow, scrollView])
+        var contentViews: [NSView] = [permissionLabel, guidanceLabel, buttonRow]
+        #if DEBUG
+        contentViews.append(makeDebugLengthExperimentView())
+        #endif
+        contentViews.append(scrollView)
+
+        let contentStack = NSStackView(views: contentViews)
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
         contentStack.spacing = 10
@@ -155,6 +199,50 @@ final class DiagnosticsWindowController: NSWindowController {
             scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 420)
         ])
     }
+
+    #if DEBUG
+    private func makeDebugLengthExperimentView() -> NSView {
+        let warningLabel = NSTextField(wrappingLabelWithString: "DEBUG EXPERIMENT — Changes only Blenny's own NSStatusItem.length. Each pulse is bounded and automatically restores the standard variable length.")
+        warningLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        warningLabel.textColor = .systemOrange
+        warningLabel.maximumNumberOfLines = 2
+
+        debugLengthPopup.addItems(withTitles: debugLengths.map { "\(Int($0)) pt" })
+        debugLengthPopup.selectItem(at: 1)
+        debugRunLengthButton.target = self
+        debugRunLengthButton.action = #selector(runDebugLengthExperiment)
+        debugRestoreLengthButton.target = self
+        debugRestoreLengthButton.action = #selector(restoreDebugLengthExperiment)
+        debugRestoreLengthButton.isEnabled = false
+        debugLengthStatusLabel.textColor = .secondaryLabelColor
+
+        let controls = NSStackView(views: [
+            debugLengthPopup,
+            debugRunLengthButton,
+            debugRestoreLengthButton,
+            debugLengthStatusLabel
+        ])
+        controls.orientation = .horizontal
+        controls.alignment = .centerY
+        controls.spacing = 8
+
+        let stack = NSStackView(views: [warningLabel, controls])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        return stack
+    }
+
+    @objc private func runDebugLengthExperiment() {
+        let index = debugLengthPopup.indexOfSelectedItem
+        guard debugLengths.indices.contains(index) else { return }
+        onRunDebugLengthExperiment?(debugLengths[index])
+    }
+
+    @objc private func restoreDebugLengthExperiment() {
+        onRestoreDebugLengthExperiment?()
+    }
+    #endif
 
     @objc private func refresh() {
         onRefresh()

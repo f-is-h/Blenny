@@ -1,5 +1,12 @@
 import AppKit
 
+#if DEBUG
+enum DebugLengthExperimentUpdate {
+    case applied(length: CGFloat, durationSeconds: Int)
+    case restored
+}
+#endif
+
 @MainActor
 final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
@@ -9,6 +16,9 @@ final class StatusItemController: NSObject {
     private let onRefresh: () -> Void
     private let onRequestAccess: () -> Void
     private let onQuit: () -> Void
+    #if DEBUG
+    private var lengthExperimentTask: Task<Void, Never>?
+    #endif
 
     init(
         onOpenDiagnostics: @escaping () -> Void,
@@ -35,6 +45,43 @@ final class StatusItemController: NSObject {
         refreshItem.isEnabled = !refreshing
         refreshItem.title = refreshing ? "Refreshing…" : "Refresh"
     }
+
+    #if DEBUG
+    func runDebugLengthExperiment(
+        length: CGFloat,
+        durationSeconds: Int = 8,
+        onUpdate: @escaping (DebugLengthExperimentUpdate) -> Void
+    ) {
+        restoreStandardLength()
+        statusItem.length = length
+        onUpdate(.applied(length: length, durationSeconds: durationSeconds))
+
+        lengthExperimentTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(durationSeconds))
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.statusItem.length = NSStatusItem.variableLength
+            self.lengthExperimentTask = nil
+            onUpdate(.restored)
+        }
+    }
+
+    func restoreDebugLengthExperiment(
+        onUpdate: (DebugLengthExperimentUpdate) -> Void
+    ) {
+        restoreStandardLength()
+        onUpdate(.restored)
+    }
+
+    private func restoreStandardLength() {
+        lengthExperimentTask?.cancel()
+        lengthExperimentTask = nil
+        statusItem.length = NSStatusItem.variableLength
+    }
+    #endif
 
     private func configureButton() {
         guard let button = statusItem.button else { return }

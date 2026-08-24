@@ -7,11 +7,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isRefreshing = false
     private var requestedAccessibilityThisLaunch = false
 
-    private lazy var diagnosticsWindowController = DiagnosticsWindowController(
-        onRefresh: { [weak self] in self?.refresh() },
-        onRequestAccess: { [weak self] in self?.requestAccessibilityAccess() },
-        onOpenSystemSettings: { [weak self] in self?.openAccessibilitySettings() }
-    )
+    private lazy var diagnosticsWindowController: DiagnosticsWindowController = {
+        let controller = DiagnosticsWindowController(
+            onRefresh: { [weak self] in self?.refresh() },
+            onRequestAccess: { [weak self] in self?.requestAccessibilityAccess() },
+            onOpenSystemSettings: { [weak self] in self?.openAccessibilitySettings() }
+        )
+        #if DEBUG
+        controller.configureDebugLengthExperiment(
+            onRun: { [weak self] length in self?.runDebugLengthExperiment(length: length) },
+            onRestore: { [weak self] in self?.restoreDebugLengthExperiment() }
+        )
+        #endif
+        return controller
+    }()
 
     private lazy var statusItemController = StatusItemController(
         onOpenDiagnostics: { [weak self] in self?.showDiagnostics() },
@@ -102,6 +111,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         diagnosticsWindowController.setAccessibilityTrusted(trusted)
         statusItemController.setAccessibilityTrusted(trusted)
     }
+
+    #if DEBUG
+    private func runDebugLengthExperiment(length: CGFloat) {
+        statusItemController.runDebugLengthExperiment(length: length) { [weak self] update in
+            self?.diagnosticsWindowController.displayDebugLengthUpdate(update)
+        }
+    }
+
+    private func restoreDebugLengthExperiment() {
+        statusItemController.restoreDebugLengthExperiment { [weak self] update in
+            self?.diagnosticsWindowController.displayDebugLengthUpdate(update)
+        }
+    }
+    #endif
 
     private func runningApplicationDescriptors() -> [RunningApplicationDescriptor] {
         var applications = NSWorkspace.shared.runningApplications
