@@ -5,6 +5,9 @@
 build/
 DerivedData/
 .swiftpm/xcode/package.xcworkspace/xcuserdata/
+*.app/
+*.dSYM/
+*.xcresult/
 
 # Xcode user state
 xcuserdata/

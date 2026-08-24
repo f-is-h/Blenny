@@ -1,10 +1,12 @@
 # Blenny 0.0.1 Technical Spike
 
+> Historical engineering record. It documents unsupported, build-specific experiments and is not a production API guide. Sanitized source for the decisive installed toggle experiment lives under [`Research/0.0.1/Probes`](../Research/0.0.1/Probes/README.md) and is excluded from product targets.
+
 Status: Complete — go on macOS 27.0 build `26A5416b` for an installed, LaunchServices-registered custom-control architecture. Phase A captured a trusted, privacy-bounded inventory and event-driven native-overflow observation. Phase B's Blenny-owned length experiment passed. Phase C showed that preferred-position writes are reversible but ineffective for cross-application priority, while a private assessment-mode assertion can hard-hide and rapidly reveal an approved bundle. Uninstalled Blenny probes were suppressed during the restriction; an installed and registered Blenny remained visible and completed repeated reveal/conceal transitions without user-visible flicker or delay. This is evidence to proceed to an integrated prototype, not a compatibility guarantee or distributable product release.
 
 Completion date: 2026-08-24
 
-Last updated: 2026-08-23
+Last updated: 2026-08-24
 
 ## Scope and safety boundary
 

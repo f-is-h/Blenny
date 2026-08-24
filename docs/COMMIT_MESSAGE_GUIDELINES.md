@@ -30,6 +30,8 @@ Use Conventional Commit-style messages:
 - Do not add generated-by notices, AI attribution, or AI `Co-Authored-By` trailers.
 - Build and run the relevant tests before committing.
 - Never commit credentials, signing material, local diagnostics, system-state backups, or personal filesystem paths.
+- Put reproducible experiment source under `Research/`; keep generated artifacts and raw local evidence under ignored `LocalData/`.
+- Before the first public push, preserve the original first commit when curating later private history.
 
 Examples:
 

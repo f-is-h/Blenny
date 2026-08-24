@@ -4,9 +4,9 @@ Blenny advances by verified exit criteria, not by elapsed time or commit count. 
 
 ## Versioning rules
 
-- `0.0.x` versions are engineering milestones. They may be Debug-only and are not public releases.
-- `0.x.0` versions are user-testable prereleases. Each minor version adds a coherent product capability.
-- Patch versions such as `0.1.1` contain fixes and compatibility updates without expanding scope.
+- `0.0.x` versions are private engineering milestones. They may be Debug-only and are not public releases.
+- `0.9.x` versions are the first public, open-source release candidates. Source and signed binaries ship together.
+- Patch versions contain fixes and compatibility updates without expanding scope.
 - `1.0.0` begins the stable product contract and published macOS compatibility policy.
 - A version advances only when every required exit criterion is verified and restoration is complete.
 
@@ -24,7 +24,7 @@ Exit criteria met:
 - Complete repeated reveal/conceal transitions without visible flicker or perceptible delay.
 - Restore through explicit invalidation and process-disconnect cleanup.
 - Preserve clock, Notification Center, Control Center, and native overflow in completed recovery checks.
-- Keep all unsupported mutation code in ignored Debug experiments.
+- Keep unsupported mutation code isolated from product targets in clearly warned research probes.
 
 Not a deliverable: no distributable app, stable bundle identity, onboarding, settings editor, or product backend.
 
@@ -32,7 +32,7 @@ Not a deliverable: no distributable app, stable bundle identity, onboarding, set
 
 Advance when:
 
-- The installed custom control and visibility-restriction code live in a narrow Debug-only `MacOS27` backend rather than ignored one-off probes.
+- The installed custom control and visibility-restriction code live in a narrow Debug-only `MacOS27` backend promoted from the isolated research probe.
 - One actor or equivalent serial writer owns every assertion transition.
 - Bundle-level `Pinned`, `Automatic`, and `Hidden` intent maps deterministically to allowlists.
 - The backend fails closed when private classes, selectors, or expected encodings differ.
@@ -81,33 +81,23 @@ Advance when:
 - A compatibility kill switch can disable the private backend on unknown macOS builds.
 - Privacy, diagnostics export, uninstall, and complete restore instructions are reviewed.
 
-## 0.1.0 — First public alpha
+## 0.9.0 — First public release candidate
 
-Ship to a small test group when:
+Publish the repository and signed prerelease together when:
 
 - The core installed experience supports bundle-level `Pinned`, `Automatic`, and `Hidden` policies.
 - Reveal/conceal is fast, visually stable, and safely reversible.
 - Known unsupported items are surfaced clearly.
-- A macOS build compatibility matrix and recovery instructions are published.
-- Crash reports and diagnostics are opt-in and privacy-scoped.
-
-## 0.2.0 — Public beta
-
-Advance when:
-
-- The lifecycle and multi-display matrix is reliable across a wider hardware sample.
 - App updates preserve policies and the Blenny control's registration identity.
-- Onboarding, update delivery, Homebrew Cask installation, and uninstall recovery are tested.
+- Onboarding, update delivery, and uninstall recovery are tested.
 - Performance remains effectively idle when state is unchanged.
-
-## 0.9.0 — Release candidate
-
-Advance when:
-
 - No known issue can leave the menu bar unrecoverable.
 - The supported macOS build policy and emergency disable mechanism are final.
 - Security and privacy review is complete.
 - The open-source license is selected and notices are ready.
+- Every reachable branch, tag, commit, and tracked research artifact passes the repository publication gate.
+- A macOS build compatibility matrix and recovery instructions are published.
+- Crash reports and diagnostics are opt-in and privacy-scoped.
 - User documentation matches the intentionally minimal feature set.
 
 ## 1.0.0 — Stable release
