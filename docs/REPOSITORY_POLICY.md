@@ -32,6 +32,15 @@ Unsupported experiments belong under `Research/`. They must:
 
 These artifacts belong under ignored `LocalData/` only for the shortest useful retention period.
 
+## Language and local notes
+
+- English is the canonical language for tracked documentation, code, comments, commit messages, issue templates, and release material.
+- Localized strings may remain in source, tests, and technical evidence when their exact spelling is required for behavior or reproducibility.
+- Public translations are optional. They must identify the English document they translate and must not silently become the only record of a product, architecture, safety, or recovery decision.
+- Private working-language drafts and owner notes belong under ignored `LocalNotes/`. They may explain or summarize the project, but they are not part of the repository history or public source of truth.
+- Any conclusion required to build, maintain, recover, audit, or distribute Blenny must also be distilled into the appropriate tracked English document.
+- Because ignored notes are not protected by Git history, they require an independent private backup if they contain information worth retaining.
+
 ## Publication gate
 
 Before changing the repository from private to public:

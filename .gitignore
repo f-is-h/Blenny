@@ -29,3 +29,6 @@ LocalData/
 *.sample.txt
 *.spindump
 *.crash
+
+# Private owner notes and working-language drafts
+LocalNotes/
