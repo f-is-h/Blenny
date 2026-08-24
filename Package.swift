@@ -8,7 +8,8 @@ let package = Package(
         .macOS("27.0")
     ],
     products: [
-        .executable(name: "Blenny", targets: ["BlennyApp"])
+        .executable(name: "Blenny", targets: ["BlennyApp"]),
+        .executable(name: "BlennyLayoutProbe", targets: ["BlennyLayoutProbe"])
     ],
     targets: [
         .target(
@@ -20,6 +21,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "BlennyApp",
+            dependencies: ["BlennyCore"]
+        ),
+        .executableTarget(
+            name: "BlennyLayoutProbe",
             dependencies: ["BlennyCore"]
         ),
         .testTarget(
