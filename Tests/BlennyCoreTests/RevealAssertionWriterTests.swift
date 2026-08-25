@@ -102,6 +102,56 @@ struct RevealAssertionWriterTests {
         #expect(await writer.state == .restored)
     }
 
+    @Test("Normal exit cannot resurrect an assertion whose activation was pending")
+    func normalExitDuringActivationStaysRestored() async throws {
+        let recorder = AssertionRecorder()
+        let gate = ActivationGate()
+        let writer = RevealAssertionWriter(
+            factory: FakeAssertionFactory(
+                recorder: recorder,
+                behaviors: [.controlled(gate)]
+            )
+        )
+
+        let replacement = Task {
+            try await writer.replace(with: plan(.baseline))
+        }
+        await gate.waitUntilStarted()
+        await writer.restoreAndStop()
+        await gate.release()
+
+        await #expect(throws: RevealAssertionWriterError.writerStopped) {
+            try await replacement.value
+        }
+        #expect(await writer.state == .restored)
+        #expect(recorder.events.filter { $0 == "invalidate-baseline-1" }.count == 1)
+    }
+
+    @Test("Connection loss supersedes and invalidates a pending activation")
+    func disconnectDuringActivationStaysRestored() async throws {
+        let recorder = AssertionRecorder()
+        let gate = ActivationGate()
+        let writer = RevealAssertionWriter(
+            factory: FakeAssertionFactory(
+                recorder: recorder,
+                behaviors: [.controlled(gate)]
+            )
+        )
+
+        let replacement = Task {
+            try await writer.replace(with: plan(.revealed))
+        }
+        await gate.waitUntilStarted()
+        await writer.connectionInvalidated()
+        await gate.release()
+
+        await #expect(throws: RevealAssertionWriterError.transitionSuperseded) {
+            try await replacement.value
+        }
+        #expect(await writer.state == .restored)
+        #expect(recorder.events.filter { $0 == "invalidate-revealed-1" }.count == 1)
+    }
+
     private func plan(_ presentation: RevealSessionPresentation) -> RevealAllowlistPlan {
         RevealAllowlistPlan(
             presentation: presentation,
@@ -119,6 +169,41 @@ private enum FakeAssertionBehavior: Sendable {
     case succeed
     case fail
     case stall
+    case controlled(ActivationGate)
+}
+
+private actor ActivationGate {
+    private var started = false
+    private var released = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+    func beginAndWait() async {
+        started = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+        if released { return }
+        await withCheckedContinuation { continuation in
+            releaseWaiter = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        released = true
+        let waiter = releaseWaiter
+        releaseWaiter = nil
+        waiter?.resume()
+    }
 }
 
 private final class AssertionRecorder: @unchecked Sendable {
@@ -192,6 +277,8 @@ private final class FakeAssertionCandidate: RevealAssertionCandidate, @unchecked
             } catch {
                 throw CancellationError()
             }
+        case let .controlled(gate):
+            await gate.beginAndWait()
         }
     }
 

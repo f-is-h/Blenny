@@ -14,6 +14,7 @@ public protocol RevealAssertionCandidateFactory: Sendable {
 public enum RevealAssertionWriterError: Error, Equatable, Sendable {
     case transitionAlreadyInProgress
     case activationTimedOut
+    case transitionSuperseded
     case writerStopped
 }
 
@@ -27,6 +28,11 @@ public actor RevealAssertionWriter {
     private let factory: any RevealAssertionCandidateFactory
     private let activationTimeout: Duration
     private var activeAssertion: (any RevealAssertionCandidate)?
+    private var pendingAssertion: (
+        identifier: UInt64,
+        candidate: any RevealAssertionCandidate
+    )?
+    private var nextTransitionIdentifier: UInt64 = 0
     private var transitioning = false
     private var stopped = false
 
@@ -56,17 +62,39 @@ public actor RevealAssertionWriter {
             throw error
         }
 
+        nextTransitionIdentifier &+= 1
+        let transitionIdentifier = nextTransitionIdentifier
+        pendingAssertion = (transitionIdentifier, replacement)
+
         do {
             try await activate(replacement)
         } catch {
-            await replacement.invalidate()
-            transitioning = false
+            let stillOwned = pendingAssertion?.identifier == transitionIdentifier
+            if stillOwned {
+                pendingAssertion = nil
+                transitioning = false
+                await replacement.invalidate()
+            }
+            if stopped {
+                throw RevealAssertionWriterError.writerStopped
+            }
+            if !stillOwned {
+                throw RevealAssertionWriterError.transitionSuperseded
+            }
             throw error
+        }
+
+        guard pendingAssertion?.identifier == transitionIdentifier else {
+            if stopped {
+                throw RevealAssertionWriterError.writerStopped
+            }
+            throw RevealAssertionWriterError.transitionSuperseded
         }
 
         // The preceding assertion remains active throughout replacement
         // activation. Only a confirmed active replacement can become current.
         let preceding = activeAssertion
+        pendingAssertion = nil
         activeAssertion = replacement
         state = .active(plan.presentation)
         transitioning = false
@@ -76,19 +104,25 @@ public actor RevealAssertionWriter {
     public func restoreAndStop() async {
         stopped = true
         transitioning = false
+        let pending = pendingAssertion?.candidate
         let preceding = activeAssertion
+        pendingAssertion = nil
         activeAssertion = nil
         state = .restored
+        await pending?.invalidate()
         await preceding?.invalidate()
     }
 
     public func connectionInvalidated() async {
         // Invalidation is idempotent. Calling it locally as well as relying on
         // MenuBarAgent's process-connection cleanup keeps the restore path clear.
+        let pending = pendingAssertion?.candidate
         let preceding = activeAssertion
+        pendingAssertion = nil
         activeAssertion = nil
         transitioning = false
         state = .restored
+        await pending?.invalidate()
         await preceding?.invalidate()
     }
 

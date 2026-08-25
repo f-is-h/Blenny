@@ -86,6 +86,7 @@ The new automated coverage includes:
 - replacement activation before preceding invalidation.
 - failed replacement preserving the old baseline.
 - activation timeout preserving the old baseline.
+- normal-exit and connection-loss restoration racing with an in-flight activation, without assertion resurrection.
 - explicit restoration on normal exit and simulated connection invalidation.
 - exact private runtime class, selector, encoding, and configuration round-trip checks without assertion activation.
 
@@ -166,8 +167,9 @@ Every bounded real run ended with Usage4Claude visible. The final validation ins
 
 ## Final verification
 
-- Xcode 27 Debug tests: 48 tests in 9 suites passed.
-- Xcode 27 Release tests: 46 tests in 8 suites passed; the two runtime-surface tests are Debug-only by design.
+- The pre-push release audit found a serialized-writer race in which a pending activation could otherwise complete after an overlapping restore request. The writer now tracks pending ownership, invalidates pending candidates during restoration, and refuses to promote a superseded activation. Deterministic normal-exit and connection-loss tests cover the interleaving.
+- Xcode 27 Debug tests: 50 tests in 9 suites passed.
+- Xcode 27 Release tests: 48 tests in 8 suites passed; the two runtime-surface tests are Debug-only by design.
 - Xcode 27 Debug and Release app builds passed.
 - Both app executables are arm64, record `minos 27.0` and `sdk 27.0`, report version `0.0.2`, and pass strict deep signature verification.
 - Release binary inspection found no private framework path, private class names, private activation selector, real-write environment switch, or Debug prototype label. The Debug binary retained the expected isolated private backend.
