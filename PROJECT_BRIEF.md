@@ -6,8 +6,8 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.0.1` technical feasibility validation complete; proceed to `0.0.2`
-- Document date: 2026-08-24
+- Current phase: `0.0.2` Revealable-session technical prototype complete; proceed to `0.0.3`
+- Document date: 2026-08-25
 - Product status: core architecture go on the tested macOS 27 build; no distributable build yet
 - Source lineage decision: clean implementation, not an Ice fork
 - License decision: pending; decide before the first public release
@@ -555,4 +555,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Begin the `0.0.2` integrated prototype defined in [`docs/ROADMAP.md`](docs/ROADMAP.md): promote the proven installed custom-control and serialized assessment-policy handoff from the isolated [`Research/0.0.1/Probes`](Research/0.0.1/Probes/README.md) source into a narrow Debug-only macOS 27 backend with automated restore tests.
+Begin the `0.0.3` persistent-policy prototype defined in [`docs/ROADMAP.md`](docs/ROADMAP.md). Preserve the validated Debug-only `0.0.2` Revealable-session boundary while adding bundle-level persistence, unknown-bundle reporting, a dry-run, and an explicit Stop Managing and Restore path.

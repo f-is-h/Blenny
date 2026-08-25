@@ -30,7 +30,9 @@ Not a deliverable: no distributable app, stable bundle identity, onboarding, set
 
 ## 0.0.2 — Revealable group technical prototype
 
-Advance when:
+Status: **Complete on macOS 27.0 build `26A5416b`.**
+
+Exit criteria met:
 
 - The installed custom control and visibility-restriction code live in a narrow Debug-only `MacOS27` backend promoted from the isolated research probe.
 - One actor or equivalent serial writer owns every assertion transition.
