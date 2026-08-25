@@ -17,10 +17,19 @@ xcuserdata/
 
 # Signing and provisioning material
 *.cer
+*.key
+*.keychain
+*.keychain-db
+*.pem
 *.p12
 *.mobileprovision
 *.provisionprofile
 Config/Local.xcconfig
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
 
 # Local diagnostics, performance captures, and reversible-system-state backups
 LocalData/

@@ -1,0 +1,219 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+version=""
+base_ref=""
+allow_dirty=false
+
+usage() {
+  print -u2 "Usage: $0 --version X.Y.Z --base PREVIOUS_TAG [--allow-dirty]"
+  exit 64
+}
+
+while (( $# > 0 )); do
+  case "$1" in
+    --version)
+      (( $# >= 2 )) || usage
+      version="$2"
+      shift 2
+      ;;
+    --base)
+      (( $# >= 2 )) || usage
+      base_ref="$2"
+      shift 2
+      ;;
+    --allow-dirty)
+      allow_dirty=true
+      shift
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+
+[[ "$version" == <->.<->.<-> ]] || usage
+[[ -n "$base_ref" ]] || usage
+
+repository_root=$(git rev-parse --show-toplevel)
+cd "$repository_root"
+
+failures=0
+
+fail() {
+  print -u2 "FAIL: $1"
+  (( failures += 1 ))
+}
+
+pass() {
+  print "PASS: $1"
+}
+
+git rev-parse --verify "$base_ref^{commit}" >/dev/null 2>&1 \
+  || fail "base ref does not resolve to a commit: $base_ref"
+
+if git merge-base --is-ancestor "$base_ref" HEAD; then
+  pass "$base_ref is an ancestor of HEAD"
+else
+  fail "$base_ref is not an ancestor of HEAD"
+fi
+
+if $allow_dirty || [[ -z "$(git status --porcelain)" ]]; then
+  pass "working tree policy satisfied"
+else
+  fail "working tree is not clean"
+fi
+
+if git diff --check "$base_ref..HEAD" && git diff --check; then
+  pass "Git whitespace checks"
+else
+  fail "Git whitespace checks"
+fi
+
+range="$base_ref..HEAD"
+commit_count=$(git rev-list --count "$range")
+if (( commit_count > 0 )); then
+  pass "$commit_count commit(s) found in $range"
+else
+  fail "version range contains no commits: $range"
+fi
+
+bad_subjects=$(git log --format='%s' "$range" | while IFS= read -r subject; do
+  if [[ ! "$subject" =~ '^(feat|fix|docs|refactor|perf|test|style|build|ci|chore)(\([^)]+\))?: .+' ]]; then
+    print -r -- "$subject"
+  fi
+done)
+if [[ -z "$bad_subjects" ]]; then
+  pass "version commit subjects follow the repository convention"
+else
+  fail "non-conforming commit subjects:\n$bad_subjects"
+fi
+
+ai_pattern='(generated[ -]by|co-authored-by:.*(claude|chatgpt|openai|codex))'
+if git log --format='%B' "$range" | grep -Eiq "$ai_pattern"; then
+  fail "version commit messages contain prohibited AI attribution"
+else
+  pass "version commit messages contain no AI attribution"
+fi
+
+forbidden_paths=$(git log --all --name-only --pretty=format: | sort -u | grep -E \
+  '(^|/)(LocalData|LocalNotes|DerivedData|\.build|build)/|\.(app|dSYM|xcresult|p12|pem|key|mobileprovision|provisionprofile)(/|$)' \
+  || true)
+if [[ -z "$forbidden_paths" ]]; then
+  pass "reachable history contains no forbidden artifact paths"
+else
+  fail "reachable history contains forbidden artifact paths:\n$forbidden_paths"
+fi
+
+candidate_paths=(${(f)"$(git ls-files --cached --others --exclude-standard)"})
+forbidden_candidate_paths=$(print -l -- "${candidate_paths[@]}" | grep -E \
+  '(^|/)(LocalData|LocalNotes|DerivedData|\.build|build)/|\.(app|dSYM|xcresult|p12|pem|key|mobileprovision|provisionprofile)(/|$)' \
+  || true)
+if [[ -z "$forbidden_candidate_paths" ]]; then
+  pass "current candidate paths contain no forbidden artifacts"
+else
+  fail "current candidate paths contain forbidden artifacts:\n$forbidden_candidate_paths"
+fi
+
+history_revisions=(${(f)"$(git rev-list --all)"})
+private_key_pattern='BEGIN [A-Z ]*PRIVATE K''EY'
+github_token_pattern='(gh''p_[[:alnum:]]{20,}|github_pat''_[[:alnum:]_]{20,})'
+absolute_user_pattern='/Us''ers/[^/[:space:]]+/'
+secret_hits=""
+for pattern in "$private_key_pattern" "$github_token_pattern" "$absolute_user_pattern"; do
+  hits=$(git grep -n -I -E "$pattern" $history_revisions -- . 2>/dev/null || true)
+  if [[ -n "$hits" ]]; then
+    secret_hits+="$hits\n"
+  fi
+  for file_path in "${candidate_paths[@]}"; do
+    [[ -f "$file_path" ]] || continue
+    hits=$(grep -nEI "$pattern" -- "$file_path" 2>/dev/null || true)
+    if [[ -n "$hits" ]]; then
+      secret_hits+="$file_path:$hits\n"
+    fi
+  done
+done
+if [[ -z "$secret_hits" ]]; then
+  pass "reachable and current content contains no private keys, GitHub tokens, or personal absolute paths"
+else
+  fail "sensitive content found in reachable or current content:\n$secret_hits"
+fi
+
+metadata=$(git log --all --format='%an <%ae> | %cn <%ce>' | sort -u)
+print "INFO: reachable author/committer identities:"
+print -r -- "$metadata"
+
+large_files=""
+mach_o_files=""
+for file_path in "${candidate_paths[@]}"; do
+  [[ -f "$file_path" ]] || continue
+  size=$(stat -f '%z' "$file_path")
+  if (( size > 5242880 )); then
+    large_files+="$file_path ($size bytes)\n"
+  fi
+  if file -b "$file_path" | grep -q 'Mach-O'; then
+    mach_o_files+="$file_path\n"
+  fi
+done
+if [[ -z "$large_files" ]]; then
+  pass "no tracked file exceeds 5 MiB"
+else
+  fail "unexpected large tracked files:\n$large_files"
+fi
+if [[ -z "$mach_o_files" ]]; then
+  pass "no tracked Mach-O binaries"
+else
+  fail "tracked Mach-O binaries found:\n$mach_o_files"
+fi
+
+spike_path="docs/TECH_SPIKE_${version}.md"
+[[ -f "$spike_path" ]] \
+  && pass "$spike_path exists" \
+  || fail "$spike_path is missing"
+
+bundle_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
+[[ "$bundle_version" == "$version" ]] \
+  && pass "Info.plist version is $version" \
+  || fail "Info.plist version is $bundle_version, expected $version"
+
+roadmap_section=$(awk -v version="$version" '
+  index($0, "## " version " ") == 1 { collecting = 1 }
+  collecting && index($0, "## ") == 1 && index($0, "## " version " ") != 1 { exit }
+  collecting { print }
+' docs/ROADMAP.md)
+if print -r -- "$roadmap_section" | grep -Fq "Status: **Complete" \
+  && grep -Fq "Version \`$version\` completed" README.md \
+  && grep -Eq "Current phase: \`$version\`.*complete" PROJECT_BRIEF.md; then
+  pass "top-level version documents mention a completed $version milestone"
+else
+  fail "top-level version documents are not aligned for $version"
+fi
+
+tag="v$version"
+if git rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1; then
+  tag_type=$(git cat-file -t "$tag")
+  tag_target=$(git rev-list -n 1 "$tag")
+  head_target=$(git rev-parse HEAD)
+  [[ "$tag_type" == "tag" ]] \
+    && pass "$tag is annotated" \
+    || fail "$tag is not annotated"
+  [[ "$tag_target" == "$head_target" ]] \
+    && pass "$tag points to HEAD ($head_target)" \
+    || fail "$tag points to $tag_target instead of HEAD $head_target"
+else
+  print "INFO: $tag is absent and may be created only after the full audit passes"
+fi
+
+if git fsck --full --strict >/dev/null; then
+  pass "Git object database integrity"
+else
+  fail "Git object database integrity"
+fi
+
+if (( failures > 0 )); then
+  print -u2 "Release audit failed with $failures finding(s)."
+  exit 1
+fi
+
+print "Release audit passed for Blenny $version."

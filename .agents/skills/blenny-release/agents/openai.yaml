@@ -1,0 +1,4 @@
+interface:
+  display_name: "Blenny Release"
+  short_description: "Audit, tag, and safely publish a completed Blenny version"
+  default_prompt: "Use $blenny-release to audit and close the current Blenny version. Do not push until I explicitly confirm the exact branch, remote, and tags."
