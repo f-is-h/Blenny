@@ -6,6 +6,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let inventory = AccessibilityInventory()
     private var isRefreshing = false
     private var requestedAccessibilityThisLaunch = false
+    #if DEBUG
+    private var revealablePrototypeController: DebugRevealablePrototypeController?
+    private var terminationRestoreInProgress = false
+    #endif
 
     private lazy var diagnosticsWindowController: DiagnosticsWindowController = {
         let controller = DiagnosticsWindowController(
@@ -31,8 +35,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = statusItemController
+        #if DEBUG
+        revealablePrototypeController = DebugRevealablePrototypeController(
+            statusItemController: statusItemController
+        )
+        revealablePrototypeController?.start()
+        #endif
         updatePermissionPresentation()
         showDiagnostics()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        #if DEBUG
+        guard let revealablePrototypeController,
+              revealablePrototypeController.isRunning else {
+            return .terminateNow
+        }
+        guard !terminationRestoreInProgress else { return .terminateLater }
+        terminationRestoreInProgress = true
+        Task { @MainActor in
+            await revealablePrototypeController.stop()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+        #else
+        return .terminateNow
+        #endif
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

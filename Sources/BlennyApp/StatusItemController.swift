@@ -1,4 +1,5 @@
 import AppKit
+import BlennyCore
 
 #if DEBUG
 enum DebugLengthExperimentUpdate {
@@ -12,12 +13,22 @@ final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let permissionItem = NSMenuItem(title: "Accessibility: Checking…", action: nil, keyEquivalent: "")
     private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refresh), keyEquivalent: "r")
+    private let menu = NSMenu()
     private let onOpenDiagnostics: () -> Void
     private let onRefresh: () -> Void
     private let onRequestAccess: () -> Void
     private let onQuit: () -> Void
     #if DEBUG
     private var lengthExperimentTask: Task<Void, Never>?
+    private var revealPrototypeToggle: (() -> Void)?
+    private var revealPrototypeEntryPoint: RevealEntryPoint?
+    private var revealPrototypePresentation: RevealSessionPresentation = .baseline
+    private var revealPrototypeEnabled = false
+    private let revealPrototypeStateItem = NSMenuItem(
+        title: "0.0.2 Revealable prototype: inactive",
+        action: nil,
+        keyEquivalent: ""
+    )
     #endif
 
     init(
@@ -47,6 +58,32 @@ final class StatusItemController: NSObject {
     }
 
     #if DEBUG
+    func configureDebugRevealPrototype(onToggle: @escaping () -> Void) {
+        revealPrototypeToggle = onToggle
+        revealPrototypeStateItem.isEnabled = false
+        menu.insertItem(revealPrototypeStateItem, at: 0)
+        menu.insertItem(.separator(), at: 1)
+
+        guard let button = statusItem.button else { return }
+        statusItem.menu = nil
+        button.target = self
+        button.action = #selector(handleStatusButton(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
+
+    func updateDebugRevealPrototype(
+        entryPoint: RevealEntryPoint?,
+        presentation: RevealSessionPresentation,
+        enabled: Bool,
+        status: String
+    ) {
+        revealPrototypeEntryPoint = entryPoint
+        revealPrototypePresentation = presentation
+        revealPrototypeEnabled = enabled
+        revealPrototypeStateItem.title = "0.0.2: \(status)"
+        updateDebugRevealPrototypeButton()
+    }
+
     func runDebugLengthExperiment(
         length: CGFloat,
         durationSeconds: Int = 8,
@@ -94,11 +131,10 @@ final class StatusItemController: NSObject {
         if image == nil {
             button.title = "B"
         }
-        button.toolTip = "Blenny 0.0.1 Accessibility probe"
+        button.toolTip = "Blenny 0.0.2 Revealable technical prototype"
     }
 
     private func configureMenu() {
-        let menu = NSMenu()
         let openItem = NSMenuItem(title: "Open Diagnostics", action: #selector(openDiagnostics), keyEquivalent: "d")
         let requestItem = NSMenuItem(title: "Request Accessibility Access…", action: #selector(requestAccess), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Blenny", action: #selector(quit), keyEquivalent: "q")
@@ -117,6 +153,49 @@ final class StatusItemController: NSObject {
         menu.addItem(quitItem)
         statusItem.menu = menu
     }
+
+    #if DEBUG
+    @objc private func handleStatusButton(_ sender: Any?) {
+        if NSApp.currentEvent?.type == .rightMouseUp
+            || revealPrototypeEntryPoint != .blennyFallback
+            || !revealPrototypeEnabled {
+            menu.popUp(
+                positioning: nil,
+                at: NSPoint(x: 0, y: statusItem.button?.bounds.height ?? 0),
+                in: statusItem.button
+            )
+            return
+        }
+        revealPrototypeToggle?()
+    }
+
+    private func updateDebugRevealPrototypeButton() {
+        guard let button = statusItem.button else { return }
+        let symbolName: String
+        let accessibilityDescription: String
+        if revealPrototypeEntryPoint == .blennyFallback {
+            if revealPrototypePresentation == .baseline {
+                symbolName = "chevron.right.2"
+                accessibilityDescription = "Reveal Revealable menu bar items"
+            } else {
+                symbolName = "chevron.left.2"
+                accessibilityDescription = "Conceal Revealable menu bar items"
+            }
+        } else {
+            symbolName = "rectangle.3.group"
+            accessibilityDescription = "Blenny diagnostics; use native overflow"
+        }
+        let image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: accessibilityDescription
+        )
+        image?.isTemplate = true
+        button.image = image
+        button.isEnabled = true
+        button.toolTip = revealPrototypeStateItem.title
+        button.setAccessibilityLabel(accessibilityDescription)
+    }
+    #endif
 
     @objc private func openDiagnostics() {
         onOpenDiagnostics()

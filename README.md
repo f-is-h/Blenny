@@ -2,7 +2,7 @@
 
 Blenny is a minimal, native menu bar organizer designed exclusively for macOS 27 and later.
 
-The project is currently under private development. Version `0.0.1` completed the core technical-feasibility spike on one macOS 27 build; it is not a distributable release or a general compatibility claim.
+The project is currently under private development. Version `0.0.1` completed the core technical-feasibility spike on one macOS 27 build. Version `0.0.2` completed the bounded Debug-only Revealable-session prototype on that build; neither milestone is a distributable release or a general compatibility claim.
 
 ## Product direction
 

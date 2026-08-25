@@ -68,3 +68,39 @@ struct NativeOverflowClassifierTests {
         #expect(result.classification == .manageableCandidate)
     }
 }
+
+@Suite("Native overflow presentation state")
+struct NativeOverflowPresentationStateTests {
+    @Test("Live Simplified Chinese collapsed label is recognized")
+    func collapsedLabel() {
+        #expect(
+            NativeOverflowPresentationStateClassifier.classify(
+                title: nil,
+                itemDescription: "显示隐藏菜单栏项目",
+                accessibilityIdentifier: nil
+            ) == .collapsed
+        )
+    }
+
+    @Test("Live Simplified Chinese expanded label is recognized")
+    func expandedLabel() {
+        #expect(
+            NativeOverflowPresentationStateClassifier.classify(
+                title: nil,
+                itemDescription: "隐藏菜单栏项目",
+                accessibilityIdentifier: nil
+            ) == .expanded
+        )
+    }
+
+    @Test("Unknown labels never guess an expanded state")
+    func unknownLabel() {
+        #expect(
+            NativeOverflowPresentationStateClassifier.classify(
+                title: nil,
+                itemDescription: "Unrelated control",
+                accessibilityIdentifier: nil
+            ) == .unknown
+        )
+    }
+}
