@@ -51,6 +51,40 @@ struct RevealablePolicyTests {
         }
     }
 
+    @Test("Hidden stays excluded through both ordinary reveal entries")
+    func hiddenIsExcludedForBothEntries() throws {
+        let assignments = try BundlePolicyAssignments(
+            pinned: [pinned],
+            revealable: [revealable],
+            hidden: [hidden]
+        )
+        let observed = Set([pinned, revealable, hidden, unmanaged])
+
+        for entryPoint in [RevealEntryPoint.nativeOverflow, .blennyFallback] {
+            var reducer = RevealSessionReducer(entryPoint: entryPoint)
+            let disposition: RevealSessionEventDisposition
+            switch entryPoint {
+            case .nativeOverflow:
+                disposition = reducer.reduce(
+                    .nativeOverflowChanged(expanded: true, sequence: 1)
+                )
+            case .blennyFallback:
+                disposition = reducer.reduce(.blennyFallbackToggled(sequence: 1))
+            }
+            #expect(disposition == .transitionRequired(.revealed))
+
+            let plan = try RevealAllowlistPlanner.plan(
+                presentation: reducer.presentation,
+                assignments: assignments,
+                observedRunningBundleIdentifiers: observed,
+                blennyBundleIdentifier: blenny
+            )
+            #expect(plan.allowedBundleIdentifiers.contains(pinned))
+            #expect(plan.allowedBundleIdentifiers.contains(revealable))
+            #expect(!plan.allowedBundleIdentifiers.contains(hidden))
+        }
+    }
+
     @Test("Native overflow is preferred when present")
     func nativeEntrySelection() throws {
         #expect(
@@ -79,6 +113,32 @@ struct RevealablePolicyTests {
                 blennyFallbackInstalled: false
             )
         }
+    }
+
+    @Test("Availability changes never pass through an entryless state")
+    func availabilityChangesKeepAnEntry() {
+        var reducer = RevealSessionReducer(entryPoint: .nativeOverflow)
+        #expect(
+            reducer.reduce(
+                .entryAvailabilityChanged(
+                    nativeOverflowPresent: false,
+                    blennyFallbackInstalled: true,
+                    sequence: 1
+                )
+            ) == .entryPointChanged(.blennyFallback)
+        )
+        #expect(reducer.entryPoint == .blennyFallback)
+
+        #expect(
+            reducer.reduce(
+                .entryAvailabilityChanged(
+                    nativeOverflowPresent: true,
+                    blennyFallbackInstalled: true,
+                    sequence: 2
+                )
+            ) == .entryPointChanged(.nativeOverflow)
+        )
+        #expect(reducer.entryPoint == .nativeOverflow)
     }
 
     @Test("Duplicate and out-of-order AX events cannot create a write loop")
@@ -143,7 +203,11 @@ struct RevealablePolicyTests {
         )
         #expect(reducer.entryPoint == .blennyFallback)
         #expect(
-            reducer.reduce(.blennyFallbackToggled(sequence: 2))
+            reducer.reduce(.nativeOverflowChanged(expanded: true, sequence: 2))
+                == .ignoredInactiveEntryPoint
+        )
+        #expect(
+            reducer.reduce(.blennyFallbackToggled(sequence: 3))
                 == .transitionRequired(.baseline)
         )
         #expect(reducer.entryPoint == .nativeOverflow)
@@ -157,6 +221,19 @@ struct RevealablePolicyTests {
         )
         #expect(
             reducer.reduce(.connectionInvalidated(sequence: 1))
+                == .restoreRequired
+        )
+        #expect(reducer.presentation == .baseline)
+    }
+
+    @Test("Whole experiment timeout requests complete restoration")
+    func experimentTimeoutRestores() {
+        var reducer = RevealSessionReducer(
+            presentation: .revealed,
+            entryPoint: .nativeOverflow
+        )
+        #expect(
+            reducer.reduce(.experimentTimedOut(sequence: 1))
                 == .restoreRequired
         )
         #expect(reducer.presentation == .baseline)

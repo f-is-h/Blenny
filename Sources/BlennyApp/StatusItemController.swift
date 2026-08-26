@@ -6,6 +6,12 @@ enum DebugLengthExperimentUpdate {
     case applied(length: CGFloat, durationSeconds: Int)
     case restored
 }
+
+private final class DebugStatusItemContentStack: NSStackView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+}
 #endif
 
 @MainActor
@@ -19,13 +25,24 @@ final class StatusItemController: NSObject {
     private let onRequestAccess: () -> Void
     private let onQuit: () -> Void
     #if DEBUG
+    private static let placementEnvironmentKey = "BLENNY_ENABLE_0_0_3_SELF_POSITION"
+    private static let placementAutosaveName = "Blenny0.0.3Validation"
+    private static let placementPreferenceKey =
+        "NSStatusItem Preferred Position \(placementAutosaveName)"
+    private static let placementValue = 500
+
+    private let placementProbeEnabled: Bool
+    private let originalPersistentPlacement: Any?
+    private var placementRestored = false
     private var lengthExperimentTask: Task<Void, Never>?
     private var revealPrototypeToggle: (() -> Void)?
     private var revealPrototypeEntryPoint: RevealEntryPoint?
     private var revealPrototypePresentation: RevealSessionPresentation = .baseline
     private var revealPrototypeEnabled = false
+    private var revealPrototypeContentStack: DebugStatusItemContentStack?
+    private var revealPrototypeArrowImageView: NSImageView?
     private let revealPrototypeStateItem = NSMenuItem(
-        title: "0.0.2 Revealable prototype: inactive",
+        title: "0.0.3 Revealable + Hidden prototype: inactive",
         action: nil,
         keyEquivalent: ""
     )
@@ -41,8 +58,39 @@ final class StatusItemController: NSObject {
         self.onRefresh = onRefresh
         self.onRequestAccess = onRequestAccess
         self.onQuit = onQuit
+        #if DEBUG
+        let placementProbeEnabled = ProcessInfo.processInfo.environment[
+            Self.placementEnvironmentKey
+        ] == "YES"
+        self.placementProbeEnabled = placementProbeEnabled
+        if let bundleIdentifier = Bundle.main.bundleIdentifier {
+            self.originalPersistentPlacement = UserDefaults.standard
+                .persistentDomain(forName: bundleIdentifier)?[
+                    Self.placementPreferenceKey
+                ]
+        } else {
+            self.originalPersistentPlacement = nil
+        }
+        if placementProbeEnabled {
+            // Registration-domain defaults are process-scoped. The explicit
+            // cleanup below also removes any same-name value AppKit may persist.
+            UserDefaults.standard.register(defaults: [
+                Self.placementPreferenceKey: Self.placementValue
+            ])
+        }
+        #endif
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
+
+        #if DEBUG
+        if placementProbeEnabled {
+            statusItem.autosaveName = Self.placementAutosaveName
+            Self.debugLog(
+                "BLENNY_0_0_3 self_position=\(Self.placementValue) "
+                    + "autosave=\(Self.placementAutosaveName) persistence=registration_domain"
+            )
+        }
+        #endif
 
         configureButton()
         configureMenu()
@@ -80,7 +128,7 @@ final class StatusItemController: NSObject {
         revealPrototypeEntryPoint = entryPoint
         revealPrototypePresentation = presentation
         revealPrototypeEnabled = enabled
-        revealPrototypeStateItem.title = "0.0.2: \(status)"
+        revealPrototypeStateItem.title = "0.0.3: \(status)"
         updateDebugRevealPrototypeButton()
     }
 
@@ -113,6 +161,21 @@ final class StatusItemController: NSObject {
         onUpdate(.restored)
     }
 
+    func restoreDebugStatusItemPlacement() {
+        guard placementProbeEnabled, !placementRestored else { return }
+        placementRestored = true
+        if let originalPersistentPlacement {
+            UserDefaults.standard.set(
+                originalPersistentPlacement,
+                forKey: Self.placementPreferenceKey
+            )
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.placementPreferenceKey)
+        }
+        _ = UserDefaults.standard.synchronize()
+        Self.debugLog("BLENNY_0_0_3 self_position_restored=true")
+    }
+
     private func restoreStandardLength() {
         lengthExperimentTask?.cancel()
         lengthExperimentTask = nil
@@ -131,7 +194,11 @@ final class StatusItemController: NSObject {
         if image == nil {
             button.title = "B"
         }
-        button.toolTip = "Blenny 0.0.2 Revealable technical prototype"
+        #if DEBUG
+        button.toolTip = "Blenny 0.0.3 Revealable + Hidden technical prototype"
+        #else
+        button.toolTip = "Blenny 0.0.3 read-only Accessibility probe"
+        #endif
     }
 
     private func configureMenu() {
@@ -171,29 +238,112 @@ final class StatusItemController: NSObject {
 
     private func updateDebugRevealPrototypeButton() {
         guard let button = statusItem.button else { return }
-        let symbolName: String
+        let arrowSymbolName: String?
         let accessibilityDescription: String
         if revealPrototypeEntryPoint == .blennyFallback {
             if revealPrototypePresentation == .baseline {
-                symbolName = "chevron.right.2"
+                arrowSymbolName = "chevron.right.2"
                 accessibilityDescription = "Reveal Revealable menu bar items"
             } else {
-                symbolName = "chevron.left.2"
+                arrowSymbolName = "chevron.left.2"
                 accessibilityDescription = "Conceal Revealable menu bar items"
             }
+        } else if revealPrototypeEntryPoint == .nativeOverflow {
+            if revealPrototypePresentation == .baseline {
+                arrowSymbolName = "chevron.right.2"
+                accessibilityDescription =
+                    "Blenny status: native overflow controls reveal; currently collapsed"
+            } else {
+                arrowSymbolName = "chevron.left.2"
+                accessibilityDescription =
+                    "Blenny status: native overflow controls reveal; currently expanded"
+            }
         } else {
-            symbolName = "rectangle.3.group"
-            accessibilityDescription = "Blenny diagnostics; use native overflow"
+            arrowSymbolName = nil
+            accessibilityDescription = "Blenny diagnostics"
         }
-        let image = NSImage(
-            systemSymbolName: symbolName,
-            accessibilityDescription: accessibilityDescription
-        )
-        image?.isTemplate = true
-        button.image = image
+        if let arrowSymbolName {
+            let arrowImageView = ensureDebugPrototypeContent(in: button)
+            let arrowImage = NSImage(
+                systemSymbolName: arrowSymbolName,
+                accessibilityDescription: nil
+            )
+            arrowImage?.isTemplate = true
+            arrowImageView.image = arrowImage
+            statusItem.length = 48
+        } else {
+            removeDebugPrototypeContent()
+            let blennyImage = NSImage(
+                systemSymbolName: "rectangle.3.group",
+                accessibilityDescription: "Blenny"
+            )
+            blennyImage?.isTemplate = true
+            button.image = blennyImage
+            button.imageScaling = .scaleNone
+            button.imagePosition = .imageOnly
+            statusItem.length = NSStatusItem.variableLength
+        }
         button.isEnabled = true
         button.toolTip = revealPrototypeStateItem.title
         button.setAccessibilityLabel(accessibilityDescription)
+        Self.debugLog(
+            "BLENNY_0_0_3 status_item_length=\(statusItem.length) "
+                + "arrow=\(arrowSymbolName ?? "none") native_symbol_views=true"
+        )
+    }
+
+    private func ensureDebugPrototypeContent(
+        in button: NSStatusBarButton
+    ) -> NSImageView {
+        if let revealPrototypeArrowImageView {
+            return revealPrototypeArrowImageView
+        }
+
+        let blennyImage = NSImage(
+            systemSymbolName: "rectangle.3.group",
+            accessibilityDescription: nil
+        )
+        blennyImage?.isTemplate = true
+        let blennyImageView = NSImageView(image: blennyImage ?? NSImage())
+        blennyImageView.imageScaling = .scaleNone
+        blennyImageView.contentTintColor = .controlTextColor
+
+        let arrowImageView = NSImageView()
+        arrowImageView.imageScaling = .scaleNone
+        arrowImageView.contentTintColor = .controlTextColor
+
+        let stack = DebugStatusItemContentStack(
+            views: [blennyImageView, arrowImageView]
+        )
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setAccessibilityElement(false)
+
+        button.image = nil
+        button.attributedTitle = NSAttributedString()
+        button.title = ""
+        button.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: button.centerYAnchor)
+        ])
+
+        revealPrototypeContentStack = stack
+        revealPrototypeArrowImageView = arrowImageView
+        return arrowImageView
+    }
+
+    private func removeDebugPrototypeContent() {
+        revealPrototypeContentStack?.removeFromSuperview()
+        revealPrototypeContentStack = nil
+        revealPrototypeArrowImageView = nil
+    }
+
+    private static func debugLog(_ message: String) {
+        guard let data = "\(message)\n".data(using: .utf8) else { return }
+        FileHandle.standardOutput.write(data)
     }
     #endif
 

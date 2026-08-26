@@ -7,7 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isRefreshing = false
     private var requestedAccessibilityThisLaunch = false
     #if DEBUG
-    private var revealablePrototypeController: DebugRevealablePrototypeController?
+    private var policyCoexistenceController: DebugPolicyCoexistenceController?
     private var terminationRestoreInProgress = false
     #endif
 
@@ -36,30 +36,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = statusItemController
         #if DEBUG
-        revealablePrototypeController = DebugRevealablePrototypeController(
+        policyCoexistenceController = DebugPolicyCoexistenceController(
             statusItemController: statusItemController
         )
-        revealablePrototypeController?.start()
+        policyCoexistenceController?.start()
         #endif
         updatePermissionPresentation()
+        #if DEBUG
+        // Keep the user's current frontmost application and its leading menu
+        // width intact during the bounded policy experiment. Activating Blenny's
+        // diagnostics window can itself remove native overflow and force the
+        // fallback path before native ownership can be validated.
+        if policyCoexistenceController == nil {
+            showDiagnostics()
+        }
+        #else
         showDiagnostics()
+        #endif
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         #if DEBUG
-        guard let revealablePrototypeController,
-              revealablePrototypeController.isRunning else {
+        guard let policyCoexistenceController,
+              policyCoexistenceController.isRunning else {
             return .terminateNow
         }
         guard !terminationRestoreInProgress else { return .terminateLater }
         terminationRestoreInProgress = true
         Task { @MainActor in
-            await revealablePrototypeController.stop()
+            await policyCoexistenceController.stop()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
         #else
         return .terminateNow
+        #endif
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        #if DEBUG
+        statusItemController.restoreDebugStatusItemPlacement()
         #endif
     }
 

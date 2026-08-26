@@ -48,6 +48,61 @@ struct RevealAssertionWriterTests {
         #expect(await writer.state == .active(.baseline))
     }
 
+    @Test("Failed Revealable activation preserves baseline and cannot admit Hidden")
+    func failedRevealKeepsHiddenConcealed() async throws {
+        let recorder = AssertionRecorder()
+        let factory = FakeAssertionFactory(
+            recorder: recorder,
+            behaviors: [.succeed, .fail]
+        )
+        let writer = RevealAssertionWriter(factory: factory)
+        let baseline = plan(
+            .baseline,
+            allowedBundleIdentifiers: ["com.example.BlennyProbe"]
+        )
+        let revealed = plan(
+            .revealed,
+            allowedBundleIdentifiers: [
+                "com.example.BlennyProbe",
+                "com.example.Revealable"
+            ]
+        )
+
+        #expect(!baseline.allowedBundleIdentifiers.contains("com.example.Hidden"))
+        #expect(!revealed.allowedBundleIdentifiers.contains("com.example.Hidden"))
+        try await writer.applySessionTransition(with: baseline)
+        await #expect(throws: FakeAssertionError.activationFailed) {
+            try await writer.applySessionTransition(with: revealed)
+        }
+
+        #expect(await writer.state == .active(.baseline))
+        #expect(!recorder.events.contains("invalidate-baseline-1"))
+    }
+
+    @Test("Failed conceal fully restores instead of leaving a revealed restriction")
+    func failedConcealRestoresEverything() async throws {
+        let recorder = AssertionRecorder()
+        let writer = RevealAssertionWriter(
+            factory: FakeAssertionFactory(
+                recorder: recorder,
+                behaviors: [.succeed, .succeed, .fail]
+            )
+        )
+
+        try await writer.applySessionTransition(with: plan(.baseline))
+        try await writer.applySessionTransition(with: plan(.revealed))
+        await #expect(throws: FakeAssertionError.activationFailed) {
+            try await writer.applySessionTransition(with: plan(.baseline))
+        }
+
+        #expect(await writer.state == .restored)
+        #expect(recorder.events.contains("invalidate-baseline-3"))
+        #expect(recorder.events.contains("invalidate-revealed-2"))
+        await #expect(throws: RevealAssertionWriterError.writerStopped) {
+            try await writer.replace(with: plan(.baseline))
+        }
+    }
+
     @Test("Activation timeout invalidates only the replacement")
     func timeoutPreservesOldAssertion() async throws {
         let recorder = AssertionRecorder()
@@ -80,8 +135,10 @@ struct RevealAssertionWriterTests {
         try await writer.replace(with: plan(.baseline))
 
         await writer.restoreAndStop()
+        await writer.restoreAndStop()
 
         #expect(recorder.events.last == "invalidate-baseline-1")
+        #expect(recorder.events.filter { $0 == "invalidate-baseline-1" }.count == 1)
         #expect(await writer.state == .restored)
         await #expect(throws: RevealAssertionWriterError.writerStopped) {
             try await writer.replace(with: plan(.revealed))
@@ -100,6 +157,9 @@ struct RevealAssertionWriterTests {
 
         #expect(recorder.events.last == "invalidate-revealed-1")
         #expect(await writer.state == .restored)
+        await #expect(throws: RevealAssertionWriterError.writerStopped) {
+            try await writer.replace(with: plan(.baseline))
+        }
     }
 
     @Test("Normal exit cannot resurrect an assertion whose activation was pending")
@@ -145,18 +205,21 @@ struct RevealAssertionWriterTests {
         await writer.connectionInvalidated()
         await gate.release()
 
-        await #expect(throws: RevealAssertionWriterError.transitionSuperseded) {
+        await #expect(throws: RevealAssertionWriterError.writerStopped) {
             try await replacement.value
         }
         #expect(await writer.state == .restored)
         #expect(recorder.events.filter { $0 == "invalidate-revealed-1" }.count == 1)
     }
 
-    private func plan(_ presentation: RevealSessionPresentation) -> RevealAllowlistPlan {
+    private func plan(
+        _ presentation: RevealSessionPresentation,
+        allowedBundleIdentifiers: [String] = ["com.example.BlennyProbe"]
+    ) -> RevealAllowlistPlan {
         RevealAllowlistPlan(
             presentation: presentation,
             allowedSystemItems: Array(0 ..< 9),
-            allowedBundleIdentifiers: ["com.example.BlennyProbe"]
+            allowedBundleIdentifiers: allowedBundleIdentifiers
         )
     }
 }

@@ -101,6 +101,22 @@ public actor RevealAssertionWriter {
         await preceding?.invalidate()
     }
 
+    public func applySessionTransition(
+        with plan: RevealAllowlistPlan
+    ) async throws {
+        do {
+            try await replace(with: plan)
+        } catch {
+            // A failed reveal leaves the preceding concealed baseline active.
+            // A failed conceal cannot safely leave a revealed assertion active,
+            // so it removes every owned restriction and stops this writer.
+            if plan.presentation == .baseline {
+                await restoreAndStop()
+            }
+            throw error
+        }
+    }
+
     public func restoreAndStop() async {
         stopped = true
         transitioning = false
@@ -116,6 +132,7 @@ public actor RevealAssertionWriter {
     public func connectionInvalidated() async {
         // Invalidation is idempotent. Calling it locally as well as relying on
         // MenuBarAgent's process-connection cleanup keeps the restore path clear.
+        stopped = true
         let pending = pendingAssertion?.candidate
         let preceding = activeAssertion
         pendingAssertion = nil

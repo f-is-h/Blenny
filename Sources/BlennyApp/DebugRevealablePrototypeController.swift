@@ -1,12 +1,16 @@
 #if DEBUG
 import AppKit
+import ApplicationServices
 import BlennyCore
 import Foundation
 
 @MainActor
-final class DebugRevealablePrototypeController {
-    static let targetEnvironmentKey = "BLENNY_0_0_2_REVEALABLE_BUNDLE_ID"
-    static let realWriteEnvironmentKey = "BLENNY_ENABLE_0_0_2_REAL_WRITES"
+final class DebugPolicyCoexistenceController {
+    static let revealableEnvironmentKey = "BLENNY_0_0_3_REVEALABLE_BUNDLE_ID"
+    static let hiddenEnvironmentKey = "BLENNY_0_0_3_HIDDEN_BUNDLE_ID"
+    static let realWriteEnvironmentKey = "BLENNY_ENABLE_0_0_3_REAL_WRITES"
+    static let approvedRevealableBundleIdentifier = "xyz.fi5h.Usage4Claude"
+    static let approvedHiddenBundleIdentifier = "pl.maketheweb.cleanshotx"
     static let revealSessionTimeout: Duration = .seconds(30)
     static let experimentTimeout: Duration = .seconds(300)
 
@@ -15,9 +19,11 @@ final class DebugRevealablePrototypeController {
     private let assignments: BundlePolicyAssignments
     private let observedBundleIdentifiers: Set<String>
     private let blennyBundleIdentifier: String
+    private let targetObservations: [MenuBarPolicyTargetObservation]
     private let realWritesEnabled: Bool
     private let fallbackInstalledAndRegistered: Bool
     private let writer: RevealAssertionWriter?
+    private let startedAt = ContinuousClock.now
 
     private var reducer = RevealSessionReducer()
     private var eventSequence: UInt64 = 0
@@ -31,34 +37,58 @@ final class DebugRevealablePrototypeController {
 
     init?(statusItemController: StatusItemController) {
         let environment = ProcessInfo.processInfo.environment
-        guard let targetBundleIdentifier = environment[Self.targetEnvironmentKey],
-              !targetBundleIdentifier.isEmpty,
+        guard let revealableBundleIdentifier = environment[Self.revealableEnvironmentKey],
+              let hiddenBundleIdentifier = environment[Self.hiddenEnvironmentKey],
+              revealableBundleIdentifier == Self.approvedRevealableBundleIdentifier,
+              hiddenBundleIdentifier == Self.approvedHiddenBundleIdentifier,
               let blennyBundleIdentifier = Bundle.main.bundleIdentifier else {
+            Self.debugLog(
+                "BLENNY_0_0_3 FAIL_CLOSED exact approved Revealable and Hidden "
+                    + "environment values are required"
+            )
             return nil
         }
 
         let observedBundleIdentifiers = Set(
             NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
         )
-        guard observedBundleIdentifiers.contains(targetBundleIdentifier) else {
+        guard AccessibilityAuthorization.isTrusted else {
+            Self.debugLog("BLENNY_0_0_3 FAIL_CLOSED Accessibility is not granted")
             return nil
         }
 
+        let assignments: BundlePolicyAssignments
         do {
-            self.assignments = try BundlePolicyAssignments(
+            assignments = try BundlePolicyAssignments(
                 pinned: [blennyBundleIdentifier],
-                revealable: [targetBundleIdentifier],
-                // Hidden is logic-only in 0.0.2. This deliberately nonexistent
-                // identifier cannot apply a policy to a real target application.
-                hidden: ["com.example.Blenny.Hidden.LogicalOnly"]
+                revealable: [revealableBundleIdentifier],
+                hidden: [hiddenBundleIdentifier]
             )
         } catch {
+            Self.debugLog("BLENNY_0_0_3 FAIL_CLOSED overlapping policy assignments")
+            return nil
+        }
+
+        let targetObservations = [revealableBundleIdentifier, hiddenBundleIdentifier]
+            .map { Self.observeMenuBarTarget(bundleIdentifier: $0) }
+        do {
+            try BoundedPolicyTargetValidator.validate(
+                assignments: assignments,
+                pinnedBundleIdentifier: blennyBundleIdentifier,
+                revealableBundleIdentifier: revealableBundleIdentifier,
+                hiddenBundleIdentifier: hiddenBundleIdentifier,
+                observations: targetObservations
+            )
+        } catch {
+            Self.debugLog("BLENNY_0_0_3 FAIL_CLOSED target ownership validation failed: \(error)")
             return nil
         }
 
         self.statusItemController = statusItemController
+        self.assignments = assignments
         self.observedBundleIdentifiers = observedBundleIdentifiers
         self.blennyBundleIdentifier = blennyBundleIdentifier
+        self.targetObservations = targetObservations
         self.realWritesEnabled = environment[Self.realWriteEnvironmentKey] == "YES"
         self.fallbackInstalledAndRegistered = Self.isInstalledAndRegistered(
             bundleIdentifier: blennyBundleIdentifier
@@ -81,6 +111,13 @@ final class DebugRevealablePrototypeController {
     var isRunning: Bool { !stopped }
 
     func start() {
+        for observation in targetObservations {
+            Self.debugLog(
+                "BLENNY_0_0_3 PREFLIGHT bundle=\(observation.bundleIdentifier) "
+                    + "pid=\(observation.processIdentifiers[0]) "
+                    + "menu_bar_items=\(observation.menuBarItemCount)"
+            )
+        }
         statusItemController.configureDebugRevealPrototype { [weak self] in
             self?.enqueueFallbackToggle()
         }
@@ -110,24 +147,29 @@ final class DebugRevealablePrototypeController {
             } catch {
                 return
             }
-            await self?.stop(reason: "five-minute experiment timeout restored")
+            guard let self else { return }
+            self.debugLog("lifecycle_event=experiment_timeout")
+            self.enqueue(.experimentTimedOut(sequence: self.nextSequence()))
         }
     }
 
     func stop(reason: String = "restored on exit") async {
         guard !stopped else { return }
+        debugLog("stop_begin reason=\(reason)")
         stopped = true
         sessionTimeoutTask?.cancel()
         experimentTimeoutTask?.cancel()
         eventProcessingTask?.cancel()
         nativeOverflowObserver.stop()
         await writer?.restoreAndStop()
+        statusItemController.restoreDebugStatusItemPlacement()
         statusItemController.updateDebugRevealPrototype(
             entryPoint: nil,
             presentation: .baseline,
             enabled: false,
             status: reason
         )
+        debugLog("stop_complete reason=\(reason)")
     }
 
     private func receivedNativeOverflow(
@@ -138,7 +180,7 @@ final class DebugRevealablePrototypeController {
             return
         }
         debugLog(
-            "BLENNY_0_0_2 native_present=\(snapshot.isPresent) "
+            "BLENNY_0_0_3 native_present=\(snapshot.isPresent) "
                 + "native_state=\(snapshot.presentationState.rawValue) "
                 + "observer_available=\(snapshot.observationAvailable)"
         )
@@ -146,8 +188,7 @@ final class DebugRevealablePrototypeController {
             .entryAvailabilityChanged(
                 nativeOverflowPresent: snapshot.isPresent
                     && snapshot.observationAvailable,
-                blennyFallbackInstalled: fallbackInstalledAndRegistered
-                    || !realWritesEnabled,
+                blennyFallbackInstalled: fallbackInstalledAndRegistered,
                 sequence: nextSequence()
             )
         )
@@ -169,8 +210,7 @@ final class DebugRevealablePrototypeController {
                 .entryAvailabilityChanged(
                     nativeOverflowPresent: snapshot.isPresent
                         && snapshot.observationAvailable,
-                    blennyFallbackInstalled: fallbackInstalledAndRegistered
-                        || !realWritesEnabled,
+                    blennyFallbackInstalled: fallbackInstalledAndRegistered,
                     sequence: nextSequence()
                 )
             )
@@ -180,7 +220,10 @@ final class DebugRevealablePrototypeController {
             updateStatus(entryPoint: reducer.entryPoint)
             let plan = try makePlan(presentation: .baseline)
             logPlan(plan)
-            try await writer?.replace(with: plan)
+            if !realWritesEnabled {
+                logPlan(try makePlan(presentation: .revealed))
+            }
+            try await writer?.applySessionTransition(with: plan)
             bootstrapping = false
             updateStatus(entryPoint: reducer.entryPoint)
         } catch {
@@ -228,10 +271,10 @@ final class DebugRevealablePrototypeController {
                 let plan = try makePlan(presentation: presentation)
                 logPlan(plan)
                 let transitionStart = ContinuousClock.now
-                try await writer?.replace(with: plan)
+                try await writer?.applySessionTransition(with: plan)
                 let elapsed = transitionStart.duration(to: .now)
                 debugLog(
-                    "BLENNY_0_0_2 transition=\(presentation.rawValue) "
+                    "BLENNY_0_0_3 transition=\(presentation.rawValue) "
                         + "elapsed=\(elapsed)"
                 )
                 updateTimeout(for: presentation)
@@ -249,8 +292,7 @@ final class DebugRevealablePrototypeController {
             }
 
         case .restoreRequired:
-            await writer?.connectionInvalidated()
-            updateStatus(entryPoint: reducer.entryPoint, detail: "connection restored")
+            await stop(reason: "bounded lifecycle ended; fully restored")
 
         case .failedClosed:
             await stop(reason: "no usable reveal entry; fully restored")
@@ -269,24 +311,34 @@ final class DebugRevealablePrototypeController {
     }
 
     private func logPlan(_ plan: RevealAllowlistPlan) {
-        let targetAllowed = plan.allowedBundleIdentifiers.contains(
+        let revealableAllowed = plan.allowedBundleIdentifiers.contains(
             assignments.revealable.first ?? ""
         )
         let hiddenAllowed = !assignments.hidden.isDisjoint(
             with: plan.allowedBundleIdentifiers
         )
         debugLog(
-            "BLENNY_0_0_2 mode=\(realWritesEnabled ? "REAL" : "DRY_RUN") "
+            "BLENNY_0_0_3 mode=\(realWritesEnabled ? "REAL" : "DRY_RUN") "
                 + "plan=\(plan.presentation.rawValue) "
                 + "bundle_count=\(plan.allowedBundleIdentifiers.count) "
                 + "system_items=\(plan.allowedSystemItems) "
-                + "revealable_allowed=\(targetAllowed) hidden_allowed=\(hiddenAllowed)"
+                + "pinned_allowed=\(plan.allowedBundleIdentifiers.contains(blennyBundleIdentifier)) "
+                + "revealable=\(assignments.revealable.first ?? "") "
+                + "revealable_allowed=\(revealableAllowed) "
+                + "hidden=\(assignments.hidden.first ?? "") "
+                + "hidden_allowed=\(hiddenAllowed)"
         )
     }
 
-    private func debugLog(_ message: String) {
+    private static func debugLog(_ message: String) {
         guard let data = "\(message)\n".data(using: .utf8) else { return }
         FileHandle.standardOutput.write(data)
+    }
+
+    private func debugLog(_ message: String) {
+        Self.debugLog(
+            "\(message) elapsed_since_start=\(startedAt.duration(to: .now))"
+        )
     }
 
     private func updateTimeout(for presentation: RevealSessionPresentation) {
@@ -300,6 +352,7 @@ final class DebugRevealablePrototypeController {
                 return
             }
             guard let self else { return }
+            self.debugLog("lifecycle_event=session_timeout")
             self.enqueue(.sessionTimedOut(sequence: self.nextSequence()))
         }
     }
@@ -312,7 +365,7 @@ final class DebugRevealablePrototypeController {
         let entry = entryPoint?.rawValue ?? "none"
         let detailSuffix = detail.map { "; \($0)" } ?? ""
         debugLog(
-            "BLENNY_0_0_2 state=\(reducer.presentation.rawValue) "
+            "BLENNY_0_0_3 state=\(reducer.presentation.rawValue) "
                 + "entry=\(entry)\(detailSuffix)"
         )
         statusItemController.updateDebugRevealPrototype(
@@ -345,6 +398,70 @@ final class DebugRevealablePrototypeController {
             return false
         }
         return registeredURL == bundleURL
+    }
+
+    private static func observeMenuBarTarget(
+        bundleIdentifier: String
+    ) -> MenuBarPolicyTargetObservation {
+        let applications = NSRunningApplication.runningApplications(
+            withBundleIdentifier: bundleIdentifier
+        )
+        var menuBarItemCount = 0
+
+        for application in applications {
+            let applicationElement = AXUIElementCreateApplication(
+                application.processIdentifier
+            )
+            guard AXUIElementSetMessagingTimeout(applicationElement, 0.5) == .success else {
+                continue
+            }
+            var extrasValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                applicationElement,
+                kAXExtrasMenuBarAttribute as CFString,
+                &extrasValue
+            ) == .success,
+            let extrasValue,
+            CFGetTypeID(extrasValue) == AXUIElementGetTypeID() else {
+                continue
+            }
+
+            let extrasMenuBar = unsafeDowncast(extrasValue, to: AXUIElement.self)
+            var childrenValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                extrasMenuBar,
+                kAXChildrenAttribute as CFString,
+                &childrenValue
+            ) == .success,
+            let children = childrenValue as? [AXUIElement] else {
+                continue
+            }
+            menuBarItemCount += children.filter(Self.isTopLevelMenuExtra).count
+        }
+
+        return MenuBarPolicyTargetObservation(
+            bundleIdentifier: bundleIdentifier,
+            processIdentifiers: applications.map { Int32($0.processIdentifier) },
+            menuBarItemCount: menuBarItemCount
+        )
+    }
+
+    private static func isTopLevelMenuExtra(_ element: AXUIElement) -> Bool {
+        copyStringAttribute(kAXRoleAttribute as CFString, from: element)
+            == (kAXMenuBarItemRole as String)
+            && copyStringAttribute(kAXSubroleAttribute as CFString, from: element)
+                == "AXMenuExtra"
+    }
+
+    private static func copyStringAttribute(
+        _ attribute: CFString,
+        from element: AXUIElement
+    ) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
+            return nil
+        }
+        return value as? String
     }
 }
 #endif

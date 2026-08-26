@@ -6,8 +6,8 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.0.2` Revealable-session technical prototype complete; proceed to `0.0.3`
-- Document date: 2026-08-25
+- Current phase: `0.0.3` real Revealable-and-Hidden coexistence validation complete; proceed to `0.0.4`
+- Document date: 2026-08-26
 - Product status: core architecture go on the tested macOS 27 build; no distributable build yet
 - Source lineage decision: clean implementation, not an Ice fork
 - License decision: pending; decide before the first public release
@@ -555,4 +555,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Begin the `0.0.3` persistent-policy prototype defined in [`docs/ROADMAP.md`](docs/ROADMAP.md). Preserve the validated Debug-only `0.0.2` Revealable-session boundary while adding bundle-level persistence, unknown-bundle reporting, a dry-run, and an explicit Stop Managing and Restore path.
+Begin the `0.0.4` Persistent Policy Prototype defined in [`docs/ROADMAP.md`](docs/ROADMAP.md). Preserve the bounded, Debug-only `0.0.3` Revealable-and-Hidden safety boundary while adding bundle-level policy persistence, unknown or ambiguous bundle reporting, a dry-run, and an explicit Stop Managing and Restore path. Do not promote the private macOS 27 assessment backend or the `0.0.3` validation UI into Release without a separate evidence-backed decision.

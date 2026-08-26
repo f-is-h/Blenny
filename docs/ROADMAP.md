@@ -47,7 +47,28 @@ Exit criteria met:
 - Normal quit, helper disconnect, failed replacement activation, rejected peers, and replayed or out-of-order commands restore or remain safely unchanged in automated or bounded integration tests.
 - No polling or reconciliation loop is introduced.
 
-## 0.0.3 — Persistent policy prototype
+## 0.0.3 — Real Revealable and Hidden coexistence
+
+Status: **Complete on macOS 27.0 build `26A5416b`.**
+
+Exit criteria met:
+
+- One bounded Debug-only session applies three distinct real bundle-level assignments at once: installed Blenny is Pinned, Usage4Claude is Revealable, and CleanShot X is Hidden.
+- The exact owning bundle identifiers, running processes, and menu-bar ownership of both third-party targets are established read-only before mutation. The milestone fails closed if the Revealable and Hidden identifiers are equal, overlap another policy, are absent, or cannot be attributed unambiguously.
+- Baseline admits Pinned, hard-conceals Revealable, and hard-conceals Hidden.
+- An ordinary reveal session admits Revealable while continuing to exclude Hidden, regardless of whether the observed native overflow or the installed Blenny fallback owns the session.
+- Conceal returns Revealable to the hard-concealed baseline while Hidden remains hard-concealed.
+- Native overflow is preferred when it is present and observable. Blenny's reveal action is then unavailable, while the Blenny status item remains present as a diagnostics and recovery entry and may mirror native presentation with a non-writing status arrow.
+- Installed Blenny owns the fallback only when native overflow is unavailable. A fallback-owned session remains stable until it ends even if revealing causes native overflow to appear.
+- There is never a state with no usable reveal entry or two simultaneously actionable entries for the same session, and AX event duplication or reordering cannot create a write loop.
+- Every replacement activates before the preceding safety assertion is invalidated. A failed reveal preserves the concealed baseline; a failed conceal performs complete restoration rather than retaining a stale restriction.
+- The 30-second reveal-session timeout, five-minute experiment timeout, normal exit, failed activation, connection invalidation, and process disconnect restore both real targets without restarting MenuBarAgent.
+- Debug and Release builds and all deterministic tests pass with Xcode 27. Release contains no private backend, real-write switch, or Debug validation UI.
+- The exact dry-run and bounded real-run evidence, user visual observations, transition latency, entry ownership, restoration, and final system state are recorded in `docs/TECH_SPIKE_0.0.3.md`.
+
+Not included: policy persistence, a formal Hidden settings or recovery UI, shortcuts, login launch, updating, or distribution work.
+
+## 0.0.4 — Persistent policy prototype
 
 Advance when:
 
@@ -57,7 +78,7 @@ Advance when:
 - A dry-run and explicit “Stop Managing and Restore” path are available.
 - Backups contain only scoped menu-bar state and never enter Git.
 
-## 0.0.4 — Minimal product interface
+## 0.0.5 — Minimal product interface
 
 Advance when:
 
@@ -67,7 +88,7 @@ Advance when:
 - Accessibility onboarding is clear and never repeatedly prompts.
 - No themes, profiles, animation system, or unrelated preferences are added.
 
-## 0.0.5 — Lifecycle and display hardening
+## 0.0.6 — Lifecycle and display hardening
 
 Advance when the supported matrix passes:
 
@@ -79,7 +100,7 @@ Advance when the supported matrix passes:
 - Native overflow present and absent.
 - Clock, Notification Center, and Control Center remain functional after every mutation class.
 
-## 0.0.6 — Distribution prototype
+## 0.0.7 — Distribution prototype
 
 Advance when:
 

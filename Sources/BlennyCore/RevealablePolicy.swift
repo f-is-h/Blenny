@@ -143,6 +143,7 @@ public enum RevealSessionEvent: Equatable, Sendable {
     case nativeOverflowChanged(expanded: Bool, sequence: UInt64)
     case blennyFallbackToggled(sequence: UInt64)
     case sessionTimedOut(sequence: UInt64)
+    case experimentTimedOut(sequence: UInt64)
     case connectionInvalidated(sequence: UInt64)
 
     var sequence: UInt64 {
@@ -151,6 +152,7 @@ public enum RevealSessionEvent: Equatable, Sendable {
              let .nativeOverflowChanged(_, sequence),
              let .blennyFallbackToggled(sequence),
              let .sessionTimedOut(sequence),
+             let .experimentTimedOut(sequence),
              let .connectionInvalidated(sequence):
             sequence
         }
@@ -233,7 +235,8 @@ public struct RevealSessionReducer: Equatable, Sendable {
         case .sessionTimedOut:
             return setPresentation(.baseline)
 
-        case .connectionInvalidated:
+        case .experimentTimedOut,
+             .connectionInvalidated:
             presentation = .baseline
             return .restoreRequired
         }
