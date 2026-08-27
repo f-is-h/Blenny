@@ -6,9 +6,9 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.1.0` Minimal Product Interface complete; local annotated tag authorized, push deferred
+- Current phase: `0.1.0` Minimal Product Interface closed at local annotated tag `v0.1.0`; planning `0.2.0` Icon-first Policy Presentation
 - Document date: 2026-08-27
-- Product status: minimal AppKit product interface complete on the tested macOS 27 build; no distributable build yet
+- Product status: minimal AppKit product interface complete on the tested macOS 27 build; the next increment is iconification only, and no distributable build exists yet
 - Source lineage decision: clean implementation, not an Ice fork
 - License decision: pending; decide before the first public release
 - Repository decision: one canonical repository; private through `0.0.x`, then source and binary become public together with the first `0.9.x` release candidate
@@ -270,17 +270,16 @@ Opening an ordinary reveal session includes Revealable bundles but not Hidden bu
 
 The system remains the source of truth for the currently rendered layout. Blenny remains the source of truth for user intent.
 
-### 8.2 MVP features after the spike
+### 8.2 Incremental product sequence
 
-- One native menu bar item owned by Blenny.
-- A minimal layout editor.
-- Visible, Revealable, and Hidden bundle-level policies.
-- Stable persistence across app relaunches and login sessions.
-- Observation of the native overflow state.
-- A simple on-demand shelf only where necessary.
-- Search and keyboard access if a shelf is included.
-- A one-click "Stop Managing and Restore" safety action.
-- Clear reporting when an item cannot be managed safely.
+Blenny develops through small, independently reviewable product increments. A roadmap entry records the current product judgment; it is not an obligation to preserve an earlier planning suggestion when the product has not reached that need.
+
+- `0.1.0` established the minimal text-first AppKit interface and deterministic review boundary.
+- `0.2.0` replaces text-dominant candidate presentation with stable application icons, semantic system icons, and an explicit fallback. It does not add drag-and-drop or system mutation.
+- `0.3.0` adds cross-lane drag assignment for editable application bundles while preserving the keyboard path and draft-only mutation boundary.
+- `0.4.0` closes the reviewed end-to-end management loop on the supported development build without broadening system-item scope.
+- `0.5.0` hardens the established product loop across lifecycle and display changes.
+- `0.6.0` prepares the distribution prototype.
 
 ### 8.3 Explicit non-goals through version 1.0
 
@@ -305,6 +304,7 @@ Keep product logic independent from unsupported system mechanisms.
 BlennyApp
 ├── StatusItemController
 ├── AccessibilityInventory
+├── PolicyIconResolver
 ├── NativeOverflowObserver
 ├── ItemIdentityStore
 ├── MenuBarPolicyEngine
@@ -326,6 +326,13 @@ BlennyApp
 - Attribute items to their owning app or `MenuBarAgent`.
 - Collect candidate identity attributes and frames.
 - Keep identifiable Apple system items visible as read-only presentation records rather than editable bundle candidates.
+
+`PolicyIconResolver`
+
+- Resolve application presentation from the owning bundle's installed icon without changing policy identity.
+- Map stable, known Apple system-item observations to semantic system symbols.
+- Produce an explicit generic fallback when no trustworthy icon source exists.
+- Never require Screen Recording, capture live menu-bar pixels, or persist icon image bytes as policy data.
 
 `NativeOverflowObserver`
 
@@ -558,4 +565,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Close the implemented `0.1.0` Minimal Product Interface with the authorized local annotated tag after the final release audit. Keep the restored policy persistently disabled and retain the Debug-only macOS 27 assertion backend and explicit real-write authorization boundary. Do not push `main` or `v0.1.0` without a separate owner confirmation after the exact pre-push receipt. Treat `0.2.0` lifecycle and display hardening as the next planning boundary, not part of the `0.1.0` tag.
+Implement only the iconification contract recorded for `0.2.0`: stable owning-application icons, semantic symbols for known read-only Apple items, an honest fallback, and accessible supplementary text in the existing three horizontal lanes. Do not add drag-and-drop, in-lane ordering, real policy writes, lifecycle/display hardening, Screen Recording, or live status-item capture in this milestone. Keep the restored policy persistently disabled and retain the Debug-only macOS 27 assertion backend and explicit real-write authorization boundary. Do not push `main` or `v0.1.0` without separate exact-ref confirmation.

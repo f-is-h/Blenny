@@ -83,7 +83,7 @@ Advance when:
 
 ## 0.0.5 — Policy editing core
 
-Status: **Complete on macOS 27.0 build `26A5416b`; local annotated tag authorized, push deferred.**
+Status: **Complete on macOS 27.0 build `26A5416b`; closed at annotated tag `v0.0.5`.**
 
 Advance when:
 
@@ -98,7 +98,7 @@ Advance when:
 
 ## 0.1.0 — Minimal product interface
 
-Status: **Complete on macOS 27.0 build `26A5416b`; local annotated tag authorized, push deferred.**
+Status: **Complete on macOS 27.0 build `26A5416b`; closed at local annotated tag `v0.1.0`, push deferred.**
 
 Exit criteria met:
 
@@ -112,19 +112,56 @@ Exit criteria met:
 - Accessibility onboarding is clear and never repeatedly prompts.
 - No themes, profiles, animation system, or unrelated preferences are added.
 
-## 0.2.0 — Lifecycle and display hardening
+## 0.2.0 — Icon-first policy presentation
+
+Status: **Planned; implementation has not started.**
+
+Advance when:
+
+- Every observed application-bundle candidate has an icon resolved from its owning installed application, with a deterministic generic fallback when resolution fails.
+- Known read-only Apple system-item observations use semantic system symbols keyed by stable observation identity, while unknown items use the same honest fallback.
+- Icons are presentation only: bundle identifiers remain policy identity, icon bytes do not enter policy persistence, and refresh ordering does not change icon selection.
+- The existing Visible, Revealable, and Hidden lanes become icon-first while names, policy state, bundle identity, item count, and read-only status remain available through supplementary text, tooltips, selection detail, and Accessibility labels.
+- Blenny requires neither Screen Recording nor live menu-bar pixel capture, and it does not imitate dynamic status-item content that cannot be obtained through a stable source.
+- Deterministic tests cover application-icon source selection, known system-symbol mapping, fallback behavior, duplicate observations, and refresh stability.
+- Xcode 27 Debug and Release tests and app builds pass, and installed visual review confirms recognizable icons, fallback clarity, keyboard navigation, and unchanged policy/recovery behavior.
+
+Not included: drag-and-drop, in-lane ordering, real policy writes, system-item reassignment, login launch, lifecycle/display hardening, helpers, IPC, updating, profiles, themes, animation systems, or polling.
+
+## 0.3.0 — Cross-lane draft dragging
+
+Advance when:
+
+- Editable application-bundle icons can be dragged between Visible, Revealable, and Hidden as one draft assignment per drop.
+- Dragging mutates only `BundlePolicyDraft`; persistence and assertion creation remain behind the existing deterministic Review and Apply boundary.
+- Blenny remains Visible, Apple system items remain read-only and non-draggable, and ordinary reveal never includes Hidden.
+- Standard keyboard assignment remains a complete alternative to dragging.
+- Drops outside a valid lane, duplicate delivery, stale candidates, and Discard Draft behave deterministically.
+- The milestone does not promise physical menu-bar ordering or within-lane priority.
+
+## 0.4.0 — Reviewed management loop
+
+Advance when:
+
+- A valid reviewed application-bundle draft can complete the intended baseline and ordinary-reveal behavior through the one serial writer on the explicitly supported development build.
+- The exact diff, impact report, validation state, and recovery plan remain visible before mutation.
+- Stop Managing and Restore Previous Policy close the same product loop without broadening approved targets or admitting mutable Apple system items.
+- Real validation remains bounded to explicitly approved bundles and ends in verified restoration.
+- Release promotion of the unsupported backend remains a separate, deliberate compatibility decision rather than an accidental consequence of UI integration.
+
+## 0.5.0 — Lifecycle and display hardening
 
 Advance when the supported matrix passes:
 
 - Login, logout, lock, unlock, sleep, and wake.
-- Blenny crash and policy-helper crash.
+- Blenny crash and serial-writer failure simulation; no helper is added merely to create a helper-crash scenario.
 - Managed-app launch, quit, relaunch, and update-like replacement.
 - MenuBarAgent recreation without Blenny restarting it.
 - One and multiple displays, scaling changes, Spaces, full-screen apps, and menu-bar auto-hide.
 - Native overflow present and absent.
 - Clock, Notification Center, and Control Center remain functional after every mutation class.
 
-## 0.3.0 — Distribution prototype
+## 0.6.0 — Distribution prototype
 
 Advance when:
 

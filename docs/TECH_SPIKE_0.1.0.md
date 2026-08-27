@@ -1,8 +1,8 @@
 # Blenny 0.1.0 Minimal Product Interface
 
-> Engineering and product record for the first AppKit interface over the validated `0.0.5` policy-editing core. This is not the `0.2.0` lifecycle/display-hardening milestone or a distributable release.
+> Engineering and product record for the first AppKit interface over the validated `0.0.5` policy-editing core. Icon-first presentation begins in `0.2.0`; this record is not a distributable release.
 
-Status: **Complete on macOS 27.0 build `26A5416b`; local annotated tag authorized, push deferred.**
+Status: **Complete on macOS 27.0 build `26A5416b`; closed at local annotated tag `v0.1.0`, push deferred.**
 
 Last updated: 2026-08-27
 
@@ -20,7 +20,7 @@ Version `0.1.0` adds the first product-facing interface without broadening the m
 - explicit, non-repeating Accessibility onboarding;
 - stable menu-bar open, manual refresh, keyboard navigation, quit, and management-recovery actions.
 
-Global shortcuts, login launch, updating, helpers, IPC, profiles, themes, animations, automatic rules, polling, reconciliation, lifecycle hardening, display-matrix work, and every other `0.2.0` capability remain excluded.
+Icon sourcing, icon-first candidate presentation, drag-and-drop, global shortcuts, login launch, updating, helpers, IPC, profiles, themes, animations, automatic rules, polling, reconciliation, lifecycle hardening, and display-matrix work remain excluded.
 
 ## Starting boundary
 
@@ -145,4 +145,4 @@ No real assertion write was authorized or performed for `0.1.0`. Any later real 
 
 ## Closeout boundary
 
-The owner reviewed the final interface and system-item evidence and explicitly authorized local release closure through `$blenny-release`. The skill must audit the complete `v0.0.5..HEAD` range and reachable history, run dirty and clean release audits, verify Xcode 27 Debug and Release tests and app builds, inspect Release isolation, confirm final restoration, and create the annotated `v0.1.0` tag only at the audited release commit. Do not push any branch or tag without a separate exact-ref confirmation.
+The owner reviewed the final interface and system-item evidence and explicitly authorized local release closure through `$blenny-release`. Annotated tag `v0.1.0` points to audited release commit `5df98625d1ee2493bd0ea0d0eea94d427cbcac20`; no branch or tag was pushed. Subsequent work begins from that immutable boundary. Version `0.2.0` is limited to icon-first presentation and must not absorb drag-and-drop, real policy writes, or lifecycle/display hardening.
