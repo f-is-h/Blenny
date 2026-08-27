@@ -19,6 +19,9 @@ private final class PolicyBundleButton: NSButton {
 final class PolicyEditorWindowController: NSWindowController {
     typealias AssignmentHandler = (String, MenuBarBundlePolicy) -> Void
 
+    private static let preferredContentSize = NSSize(width: 820, height: 720)
+    private static let minimumContentSize = NSSize(width: 760, height: 620)
+
     private let titleLabel = NSTextField(labelWithString: "Blenny")
     private let subtitleLabel = NSTextField(wrappingLabelWithString: "Set bundle-level menu bar intent. Changes stay local until you review and apply them.")
     private let managementLabel = NSTextField(labelWithString: "Management: Checking…")
@@ -75,13 +78,24 @@ final class PolicyEditorWindowController: NSWindowController {
         self.onRestorePreviousPolicy = onRestorePreviousPolicy
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 820, height: 720),
+            contentRect: NSRect(
+                origin: .zero,
+                size: Self.preferredContentSize
+            ),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Blenny 0.1.0"
-        window.minSize = NSSize(width: 760, height: 620)
+        window.contentMinSize = Self.minimumContentSize
+        window.isRestorable = false
+        let contentViewController = NSViewController()
+        contentViewController.view = NSView(
+            frame: NSRect(origin: .zero, size: Self.preferredContentSize)
+        )
+        contentViewController.preferredContentSize = Self.preferredContentSize
+        window.contentViewController = contentViewController
+        window.setContentSize(Self.preferredContentSize)
         window.center()
         window.isReleasedWhenClosed = false
         super.init(window: window)
@@ -96,8 +110,33 @@ final class PolicyEditorWindowController: NSWindowController {
 
     func showEditor() {
         showWindow(nil)
+        restoreUsableWindowSizeIfNeeded()
         window?.orderFrontRegardless()
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func restoreUsableWindowSizeIfNeeded() {
+        guard let window else { return }
+        window.contentMinSize = Self.minimumContentSize
+        let contentSize = window.contentLayoutRect.size
+        let needsWindowReset = contentSize.width < Self.minimumContentSize.width
+            || contentSize.height < Self.minimumContentSize.height
+
+        if needsWindowReset {
+            let visibleSize = (window.screen ?? NSScreen.main)?.visibleFrame.size
+            let targetSize = NSSize(
+                width: min(
+                    Self.preferredContentSize.width,
+                    max(Self.minimumContentSize.width, (visibleSize?.width ?? 900) - 80)
+                ),
+                height: min(
+                    Self.preferredContentSize.height,
+                    max(Self.minimumContentSize.height, (visibleSize?.height ?? 800) - 80)
+                )
+            )
+            window.setContentSize(targetSize)
+            window.center()
+        }
     }
 
     func setAccessibilityTrusted(
@@ -157,6 +196,15 @@ final class PolicyEditorWindowController: NSWindowController {
 
     private func configureContent() {
         guard let contentView = window?.contentView else { return }
+
+        NSLayoutConstraint.activate([
+            contentView.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: Self.minimumContentSize.width
+            ),
+            contentView.heightAnchor.constraint(
+                greaterThanOrEqualToConstant: Self.minimumContentSize.height
+            ),
+        ])
 
         titleLabel.font = .systemFont(ofSize: 28, weight: .semibold)
         subtitleLabel.font = .systemFont(ofSize: 13, weight: .regular)
@@ -270,6 +318,9 @@ final class PolicyEditorWindowController: NSWindowController {
             mainStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -22),
             mainStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
             mainStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -18),
+            mainStack.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: Self.minimumContentSize.width - 44
+            ),
             header.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
             permissionBox.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
             columns.widthAnchor.constraint(equalTo: mainStack.widthAnchor),

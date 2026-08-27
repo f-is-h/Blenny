@@ -92,8 +92,8 @@ The final Xcode 27 verification completed with:
 - successful Debug and Release `Blenny.app` builds using Xcode 27.0 build `27A5237l` and the macOS 27.0 SDK;
 - arm64 Debug and Release executables with deployment target and SDK both recorded as macOS 27.0;
 - valid ad-hoc deep signatures and bundle version `0.1.0`;
-- Debug executable SHA-256 `c93cdf6810c6ac539784b4d49e680b49562fde17fbfb3ec41bf04ddd5be40de0`;
-- Release executable SHA-256 `5d89ce77f388051aa62b2369e8fe3b5ca70ac9b70af5699e3e22a56750d48712`.
+- Debug executable SHA-256 `b19c22a24d575ce6ac2a27fa1d46db0e148c3a09c3b21f7c32b8871983e039b1`;
+- Release executable SHA-256 `d19608fbcd1ecf98196c27f7e6c416387f8cff71a271a5e9255491a8d7bb1026`.
 
 The Release executable links only public AppKit, ApplicationServices, Foundation, CoreFoundation, CryptoKit, Swift, Objective-C, and system libraries. Searches for the private assessment classes and selectors, Debug action gates, approved validation bundle identifiers, `_RBS`, the owner path, and approved Git email returned zero Release-binary matches.
 
@@ -118,13 +118,15 @@ The final Debug app was installed at `/Applications/Blenny 0.1.0 Validation.app`
 - report fingerprint `68df9daca00ea5df2ac9e7a666477098d4e1b916758b70353f26e1c1a406176c`;
 - baseline managed-policy fingerprint `4897816b591efc51227d0782635e0ee8126a4a60cced3d41a7abbe7c0c6f15e6`;
 - ordinary-reveal managed-policy fingerprint `942f1420016ae29b5dd33a94dba16f3f4ed7cd6220cc1296d63e2fb94b42c24a`;
-- exact baseline snapshot fingerprint `31534a533d3864063be8f061528f5f213e1b57070cd00d06e38905c55343dcbc`;
-- exact ordinary-reveal snapshot fingerprint `c05befe6a3542eda9196b7199a64e6318aeca08d779913b6af441f4c6dee780b`;
+- exact baseline snapshot fingerprint `972fa0d016f564ca434055a0a65373470420de7aa9b686827b4a3d4b03cbd33c`;
+- exact ordinary-reveal snapshot fingerprint `a52280026c601aa5abbaf056a6e726a10053e847c70d12bf7ea75a4f81b59059`;
 - `assertion_factory_created=false` and `assertion_candidate_created=false` on both runs.
 
 Before and after both runs, the accepted policy remained disabled with SHA-256 `0618f1078de2655c5d4263c030459e7a1e0a320237708018957df83f8b74a004`, and the previous-policy backup remained SHA-256 `938ad8a5611a0c9bb0459a77f61528ecc587457f96b160db4044bd41874c9599`. Both files remained mode `0600` with unchanged modification times. No Blenny validation process remained, the validation preferred-position key remained absent, and MenuBarAgent, Usage4Claude, and CleanShot X remained on PIDs 1590, 48268, and 48270 respectively.
 
 The standard installed interface was also exercised directly with Accessibility granted. It completed one bounded observation, excluded Apple-owned critical system bundles, moved a third-party bundle between draft groups without changing accepted state, displayed the complete deterministic Review Changes report, and returned to accepted intent through Discard Draft. Resume Managing displayed a passing accepted-policy-scoped preview. Apply was disabled for every assertion-changing plan. Tab navigation, close/reopen from the menu bar, and Command-Q were exercised successfully. No system prompt appeared at launch and no real write was attempted.
+
+Follow-up visual QA exposed an AppKit sizing defect: the window frame opened at the intended width while its root content view was allowed to collapse to approximately 215 points, producing an unusably narrow and vertically expanded editor. The editor now uses an explicit view-controller-owned content root, disables stale window restoration, declares matching content and root-layout minimum dimensions, and repairs an undersized restored window before presentation. Rebuilt installed-app QA confirmed normal-width headers, onboarding, all three policy columns, draft actions, and recovery controls in one window.
 
 No real assertion write was authorized or performed for `0.1.0`. Any later real write still requires an installed dry-run, presentation of the exact report and managed-policy fingerprints, and separate explicit owner confirmation.
 
