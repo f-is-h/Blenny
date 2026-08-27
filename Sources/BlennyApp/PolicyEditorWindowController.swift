@@ -44,6 +44,7 @@ final class PolicyEditorWindowController: NSWindowController {
     private let restoreButton = NSButton(title: "Restore Previous Policy…", target: nil, action: nil)
     private let refreshButton = NSButton(title: "Refresh", target: nil, action: nil)
     private var groupStacks: [MenuBarBundlePolicy: NSStackView] = [:]
+    private var groupScrollViews: [MenuBarBundlePolicy: NSScrollView] = [:]
     private var model: PolicyEditorViewModel?
     private var selectedBundleIdentifier: String?
     private var isRefreshing = false
@@ -238,11 +239,11 @@ final class PolicyEditorWindowController: NSWindowController {
             ])
         }
 
-        let columns = NSStackView(views: MenuBarBundlePolicy.allCases.map(makeColumn))
-        columns.orientation = .horizontal
-        columns.alignment = .top
-        columns.distribution = .fillEqually
-        columns.spacing = 12
+        let policyLanes = NSStackView(views: MenuBarBundlePolicy.allCases.map(makeLane))
+        policyLanes.orientation = .vertical
+        policyLanes.alignment = .leading
+        policyLanes.distribution = .fillEqually
+        policyLanes.spacing = 10
 
         moveControl.target = self
         moveControl.action = #selector(moveSelection)
@@ -297,7 +298,7 @@ final class PolicyEditorWindowController: NSWindowController {
         let mainStack = NSStackView(views: [
             header,
             permissionBox,
-            columns,
+            policyLanes,
             moveRow,
             statusLabel,
             draftActions,
@@ -311,7 +312,7 @@ final class PolicyEditorWindowController: NSWindowController {
         contentView.addSubview(mainStack)
 
         permissionBox.translatesAutoresizingMaskIntoConstraints = false
-        columns.translatesAutoresizingMaskIntoConstraints = false
+        policyLanes.translatesAutoresizingMaskIntoConstraints = false
         draftActions.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             mainStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 22),
@@ -323,15 +324,15 @@ final class PolicyEditorWindowController: NSWindowController {
             ),
             header.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
             permissionBox.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-            columns.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-            columns.heightAnchor.constraint(greaterThanOrEqualToConstant: 330),
+            policyLanes.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
+            policyLanes.heightAnchor.constraint(greaterThanOrEqualToConstant: 320),
             statusLabel.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
             draftActions.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
             recoveryHelp.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
         ])
     }
 
-    private func makeColumn(for policy: MenuBarBundlePolicy) -> NSView {
+    private func makeLane(for policy: MenuBarBundlePolicy) -> NSView {
         let box = NSBox()
         box.boxType = .custom
         box.cornerRadius = 10
@@ -352,28 +353,42 @@ final class PolicyEditorWindowController: NSWindowController {
         detail.maximumNumberOfLines = 3
 
         let itemStack = NSStackView()
-        itemStack.orientation = .vertical
-        itemStack.alignment = .leading
-        itemStack.spacing = 6
-        itemStack.translatesAutoresizingMaskIntoConstraints = false
+        itemStack.orientation = .horizontal
+        itemStack.alignment = .centerY
+        itemStack.spacing = 8
+        itemStack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        itemStack.translatesAutoresizingMaskIntoConstraints = true
         groupStacks[policy] = itemStack
 
-        let documentView = NSView()
-        documentView.addSubview(itemStack)
         let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.hasVerticalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
-        scrollView.documentView = documentView
+        scrollView.horizontalScrollElasticity = .automatic
+        scrollView.verticalScrollElasticity = .none
+        scrollView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        scrollView.documentView = itemStack
+        groupScrollViews[policy] = scrollView
 
         let headerRow = NSStackView(views: [accent, heading])
         headerRow.orientation = .horizontal
         headerRow.alignment = .centerY
         headerRow.spacing = 8
-        let stack = NSStackView(views: [headerRow, detail, scrollView])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
+        let descriptionStack = NSStackView(views: [headerRow, detail])
+        descriptionStack.orientation = .vertical
+        descriptionStack.alignment = .leading
+        descriptionStack.spacing = 6
+        descriptionStack.setContentCompressionResistancePriority(
+            .required,
+            for: .horizontal
+        )
+
+        let stack = NSStackView(views: [descriptionStack, scrollView])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
         box.contentView?.addSubview(stack)
 
@@ -385,14 +400,10 @@ final class PolicyEditorWindowController: NSWindowController {
             stack.bottomAnchor.constraint(equalTo: boxContent.bottomAnchor, constant: -12),
             accent.widthAnchor.constraint(equalToConstant: 5),
             accent.heightAnchor.constraint(equalToConstant: 20),
-            detail.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            scrollView.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 230),
-            itemStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
-            itemStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
-            itemStack.topAnchor.constraint(equalTo: documentView.topAnchor),
-            itemStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
-            documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            descriptionStack.widthAnchor.constraint(equalToConstant: 210),
+            detail.widthAnchor.constraint(equalTo: descriptionStack.widthAnchor),
+            scrollView.heightAnchor.constraint(equalToConstant: 74),
+            box.heightAnchor.constraint(equalToConstant: 100),
         ])
         return box
     }
@@ -411,16 +422,37 @@ final class PolicyEditorWindowController: NSWindowController {
                 empty.textColor = .tertiaryLabelColor
                 empty.font = .systemFont(ofSize: 11, weight: .regular)
                 stack.addArrangedSubview(empty)
-                empty.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+                empty.widthAnchor.constraint(equalToConstant: 150).isActive = true
+                empty.heightAnchor.constraint(equalToConstant: 48).isActive = true
+                sizeItemStrip(for: policy)
                 continue
             }
             for candidate in candidates {
                 let button = makeBundleButton(candidate, policy: policy)
                 stack.addArrangedSubview(button)
-                button.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+                button.widthAnchor.constraint(equalToConstant: 220).isActive = true
             }
+            sizeItemStrip(for: policy)
         }
         updateSelectionControls()
+    }
+
+    private func sizeItemStrip(for policy: MenuBarBundlePolicy) {
+        guard let stack = groupStacks[policy],
+              let scrollView = groupScrollViews[policy] else { return }
+        let itemWidths = stack.arrangedSubviews.reduce(CGFloat.zero) { total, view in
+            total + max(view.fittingSize.width, view.frame.width)
+        }
+        let spacing = CGFloat(max(0, stack.arrangedSubviews.count - 1)) * stack.spacing
+        let horizontalInsets = stack.edgeInsets.left + stack.edgeInsets.right
+        let contentWidth = max(
+            scrollView.contentSize.width,
+            itemWidths + spacing + horizontalInsets
+        )
+        stack.frame = NSRect(
+            origin: .zero,
+            size: NSSize(width: contentWidth, height: scrollView.contentSize.height)
+        )
     }
 
     private func makeBundleButton(
