@@ -1,6 +1,6 @@
 # Blenny 0.0.4 Persistent Policy Prototype
 
-> Engineering record for the bounded `0.0.4` prototype. This is not the `0.0.5` settings interface, a distributable build, or a supported public-API implementation.
+> Engineering record for the bounded `0.0.4` prototype. This is not the `0.0.5` Policy Editing Core, the `0.1.0` product interface, a distributable build, or a supported public-API implementation.
 
 Status: **Implementation, deterministic verification, Release isolation, and installed dry-runs pass on macOS 27.0 build `26A5416b`. Bounded real-write evidence remains pending explicit owner authorization. No `v0.0.4` tag has been created.**
 

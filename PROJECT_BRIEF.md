@@ -555,4 +555,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Review the complete `0.0.4` Persistent Policy Prototype evidence recorded in [`docs/TECH_SPIKE_0.0.4.md`](docs/TECH_SPIKE_0.0.4.md) before authorizing any tag. Preserve the Debug-only macOS 27 backend boundary, do not push without separate exact-ref confirmation, and begin the `0.0.5` interface milestone only in a separate owner-directed task.
+Review the complete `0.0.4` Persistent Policy Prototype evidence recorded in [`docs/TECH_SPIKE_0.0.4.md`](docs/TECH_SPIKE_0.0.4.md) before authorizing any tag. Preserve the Debug-only macOS 27 backend boundary, do not push without separate exact-ref confirmation, and begin the `0.0.5` Policy Editing Core only in a separate owner-directed task. The first minimal product interface is `0.1.0`.

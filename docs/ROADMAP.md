@@ -4,9 +4,10 @@ Blenny advances by verified exit criteria, not by elapsed time or commit count. 
 
 ## Versioning rules
 
-- `0.0.x` versions are private engineering milestones. They may be Debug-only and are not public releases.
+- `0.0.x` versions are private engineering-foundation milestones. They may add bounded experimental capability, may be Debug-only, and are not public releases.
+- `0.y.0` versions beginning with `0.1.0` introduce a coherent pre-release product capability built on the validated engineering foundation.
+- `0.y.z` patch versions after a `0.y.0` milestone contain fixes and compatibility updates without expanding that milestone's scope.
 - `0.9.x` versions are the first public, open-source release candidates. Source and signed binaries ship together.
-- Patch versions contain fixes and compatibility updates without expanding scope.
 - `1.0.0` begins the stable product contract and published macOS compatibility policy.
 - A version advances only when every required exit criterion is verified and restoration is complete.
 
@@ -80,7 +81,20 @@ Advance when:
 - A dry-run and explicit “Stop Managing and Restore” path are available.
 - Backups contain only scoped menu-bar state and never enter Git.
 
-## 0.0.5 — Minimal product interface
+## 0.0.5 — Policy editing core
+
+Advance when:
+
+- A UI-independent draft model supports bundle-level `Pinned`, `Revealable`, and `Hidden` assignments without per-status-item scope.
+- Every proposed edit produces a deterministic old-to-new policy diff and dry-run impact report before persistence or system mutation.
+- Invalid, overlapping, unknown, missing, or ambiguous bundle assignments fail closed with explicit reports.
+- Blenny remains Pinned, ordinary reveal never includes Hidden, and the approved validation scope cannot be broadened accidentally.
+- The persist/apply transaction has a deterministic failure and rollback contract, including restoration of the previous scoped policy.
+- Relaunch and update-like PID replacement preserve an accepted edit, while a failed edit leaves a recoverable prior policy and unrestricted or previously safe system state.
+- Deterministic and bounded real validation use only explicitly approved bundles and preserve the single serial writer and replacement-before-invalidation rules.
+- No formal settings window, drag-and-drop interface, shortcut, login launch, updater, helper, or distribution work is introduced.
+
+## 0.1.0 — Minimal product interface
 
 Advance when:
 
@@ -90,7 +104,7 @@ Advance when:
 - Accessibility onboarding is clear and never repeatedly prompts.
 - No themes, profiles, animation system, or unrelated preferences are added.
 
-## 0.0.6 — Lifecycle and display hardening
+## 0.2.0 — Lifecycle and display hardening
 
 Advance when the supported matrix passes:
 
@@ -102,7 +116,7 @@ Advance when the supported matrix passes:
 - Native overflow present and absent.
 - Clock, Notification Center, and Control Center remain functional after every mutation class.
 
-## 0.0.7 — Distribution prototype
+## 0.3.0 — Distribution prototype
 
 Advance when:
 
