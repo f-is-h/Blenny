@@ -287,6 +287,32 @@ struct PolicyEditingTransactionTests {
         #expect(await provider.creationCount == 0)
     }
 
+    @Test("Stop Managing is previewed before persistence and restoration")
+    func stopManagingUsesPreparedTransaction() async throws {
+        let accepted = try document(enabled: true, revealable: usage, hidden: cleanShot)
+        let store = MemoryPolicyStore(document: accepted)
+        let provider = TransactionWriterProvider()
+        let core = PolicyEditingCore(
+            store: store,
+            blennyBundleIdentifier: blenny,
+            scope: scope,
+            writerProvider: { try await provider.makeWriter() }
+        )
+
+        let preview = try await core.previewStopManaging(
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot]
+        )
+        let prepared = try #require(preview.1)
+
+        #expect(preview.0.diff?.changes.first?.description == "MANAGEMENT enabled -> disabled")
+        #expect(await store.saveCount == 0)
+        #expect(await provider.creationCount == 0)
+        #expect(try await core.commit(prepared) == .committed(prepared.newPolicy))
+        #expect(await store.document?.managementEnabled == false)
+        #expect(await provider.creationCount == 1)
+    }
+
     @Test("Malformed policy or unsupported backup cannot reach writer creation")
     func malformedFilesFailBeforeWriter() async throws {
         let directory = FileManager.default.temporaryDirectory

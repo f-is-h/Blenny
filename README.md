@@ -2,7 +2,7 @@
 
 Blenny is a minimal, native menu bar organizer designed exclusively for macOS 27 and later.
 
-The project is currently under private development. Versions `0.0.1` through `0.0.3` established the bounded macOS 27 feasibility, Revealable session, and real Revealable-and-Hidden coexistence baselines. Version `0.0.4` completed the persistent bundle-policy prototype. Version `0.0.5` completed the UI-independent draft, deterministic diff and impact report, strict candidate validation, transactional apply/rollback, Resume Managing, Restore Previous Policy, and draft-discard core. None of these milestones is a distributable release or a general compatibility claim; the first product interface remains `0.1.0` and has not started.
+The project is currently under private development. Versions `0.0.1` through `0.0.5` established the bounded macOS 27 backend, bundle-policy persistence, deterministic editing, rollback, and restoration foundations. Version `0.1.0` completed the first minimal AppKit product interface: three bundle-level policy groups, bounded read-only candidate refresh, local drafts, deterministic review before Apply, recovery actions, and non-repeating Accessibility onboarding. It is not yet a distributable release or a general compatibility claim; lifecycle and display hardening remain `0.2.0` work.
 
 ## Product direction
 
@@ -18,7 +18,7 @@ Blenny is a clean implementation. It does not use or link Ice or Thaw code or bi
 ## Repository layout
 
 - `Sources/` — product and bounded Debug-probe targets.
-- `Tests/` — deterministic tests for identity, traversal, policy editing, transactions, overflow classification, and reversible state.
+- `Tests/` — deterministic tests for identity, traversal, policy editing, the interface view model, transactions, overflow classification, and reversible state.
 - `Research/` — historical, unsupported experiments excluded from product targets.
 - `docs/` — roadmap, repository policy, API research, and technical-spike results.
 - `LocalData/` — ignored local diagnostics, backups, binaries, screenshots, and build artifacts.

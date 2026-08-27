@@ -18,11 +18,19 @@ private final class DebugStatusItemContentStack: NSStackView {
 final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let permissionItem = NSMenuItem(title: "Accessibility: Checking…", action: nil, keyEquivalent: "")
-    private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refresh), keyEquivalent: "r")
+    private let managementStateItem = NSMenuItem(title: "Management: Checking…", action: nil, keyEquivalent: "")
+    private let refreshItem = NSMenuItem(title: "Refresh Menu Bar Items", action: #selector(refresh), keyEquivalent: "r")
+    private let resumeManagingItem = NSMenuItem(title: "Resume Managing…", action: #selector(resumeManaging), keyEquivalent: "")
+    private let stopManagingItem = NSMenuItem(title: "Stop Managing and Restore…", action: #selector(stopManaging), keyEquivalent: "")
+    private let restorePreviousPolicyItem = NSMenuItem(title: "Restore Previous Policy…", action: #selector(restorePreviousPolicy), keyEquivalent: "")
     private let menu = NSMenu()
+    private var hasDraftChanges = false
     private let onOpenDiagnostics: () -> Void
     private let onRefresh: () -> Void
     private let onRequestAccess: () -> Void
+    private let onResumeManaging: () -> Void
+    private let onStopManaging: () -> Void
+    private let onRestorePreviousPolicy: () -> Void
     private let onQuit: () -> Void
     #if DEBUG
     private static let placementEnvironmentKey = "BLENNY_ENABLE_0_0_5_SELF_POSITION"
@@ -36,7 +44,7 @@ final class StatusItemController: NSObject {
     private var placementRestored = false
     private var lengthExperimentTask: Task<Void, Never>?
     private var revealPrototypeToggle: (() -> Void)?
-    private var stopManagingAndRestore: (() -> Void)?
+    private var debugStopManagingAndRestore: (() -> Void)?
     private var revealPrototypeEntryPoint: RevealEntryPoint?
     private var revealPrototypePresentation: RevealSessionPresentation = .baseline
     private var revealPrototypeEnabled = false
@@ -47,22 +55,23 @@ final class StatusItemController: NSObject {
         action: nil,
         keyEquivalent: ""
     )
-    private let stopManagingItem = NSMenuItem(
-        title: "Stop Managing and Restore",
-        action: nil,
-        keyEquivalent: ""
-    )
     #endif
 
     init(
         onOpenDiagnostics: @escaping () -> Void,
         onRefresh: @escaping () -> Void,
         onRequestAccess: @escaping () -> Void,
+        onResumeManaging: @escaping () -> Void,
+        onStopManaging: @escaping () -> Void,
+        onRestorePreviousPolicy: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.onOpenDiagnostics = onOpenDiagnostics
         self.onRefresh = onRefresh
         self.onRequestAccess = onRequestAccess
+        self.onResumeManaging = onResumeManaging
+        self.onStopManaging = onStopManaging
+        self.onRestorePreviousPolicy = onRestorePreviousPolicy
         self.onQuit = onQuit
         #if DEBUG
         let placementProbeEnabled = ProcessInfo.processInfo.environment[
@@ -107,8 +116,20 @@ final class StatusItemController: NSObject {
     }
 
     func setRefreshing(_ refreshing: Bool) {
-        refreshItem.isEnabled = !refreshing
-        refreshItem.title = refreshing ? "Refreshing…" : "Refresh"
+        refreshItem.isEnabled = !refreshing && !hasDraftChanges
+        refreshItem.title = refreshing ? "Refreshing Menu Bar Items…" : "Refresh Menu Bar Items"
+    }
+
+    func setDraftHasChanges(_ hasChanges: Bool) {
+        hasDraftChanges = hasChanges
+        refreshItem.isEnabled = !hasChanges
+    }
+
+    func setManagementEnabled(_ enabled: Bool, recoveryAvailable: Bool) {
+        managementStateItem.title = enabled ? "Management: On" : "Management: Stopped"
+        resumeManagingItem.isEnabled = !enabled
+        stopManagingItem.isEnabled = enabled
+        restorePreviousPolicyItem.isEnabled = recoveryAvailable
     }
 
     #if DEBUG
@@ -117,7 +138,7 @@ final class StatusItemController: NSObject {
         onStopManagingAndRestore: @escaping () -> Void
     ) {
         revealPrototypeToggle = onToggle
-        stopManagingAndRestore = onStopManagingAndRestore
+        debugStopManagingAndRestore = onStopManagingAndRestore
         revealPrototypeStateItem.isEnabled = false
         menu.insertItem(revealPrototypeStateItem, at: 0)
         menu.insertItem(.separator(), at: 1)
@@ -201,44 +222,48 @@ final class StatusItemController: NSObject {
         guard let button = statusItem.button else { return }
         let image = NSImage(
             systemSymbolName: "rectangle.3.group",
-            accessibilityDescription: "Blenny diagnostics"
+            accessibilityDescription: "Blenny"
         )
         image?.isTemplate = true
         button.image = image
         if image == nil {
             button.title = "B"
         }
-        #if DEBUG
-        button.toolTip = "Blenny 0.0.5 Policy Editing Core technical validation"
-        #else
-        button.toolTip = "Blenny 0.0.5 read-only Accessibility probe"
-        #endif
+        button.toolTip = "Blenny 0.1.0"
     }
 
     private func configureMenu() {
-        let openItem = NSMenuItem(title: "Open Diagnostics", action: #selector(openDiagnostics), keyEquivalent: "d")
-        let requestItem = NSMenuItem(title: "Request Accessibility Access…", action: #selector(requestAccess), keyEquivalent: "")
+        let openItem = NSMenuItem(title: "Open Blenny", action: #selector(openDiagnostics), keyEquivalent: "o")
+        let requestItem = NSMenuItem(title: "Accessibility Setup…", action: #selector(requestAccess), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Blenny", action: #selector(quit), keyEquivalent: "q")
 
-        for item in [openItem, refreshItem, requestItem, quitItem] {
+        for item in [
+            openItem,
+            refreshItem,
+            requestItem,
+            resumeManagingItem,
+            stopManagingItem,
+            restorePreviousPolicyItem,
+            quitItem,
+        ] {
             item.target = self
         }
-        #if DEBUG
-        stopManagingItem.target = self
-        stopManagingItem.action = #selector(stopManaging)
+        managementStateItem.isEnabled = false
         stopManagingItem.isEnabled = false
-        #endif
+        resumeManagingItem.isEnabled = false
+        restorePreviousPolicyItem.isEnabled = false
         permissionItem.isEnabled = false
 
         menu.addItem(openItem)
         menu.addItem(refreshItem)
         menu.addItem(.separator())
+        menu.addItem(managementStateItem)
+        menu.addItem(resumeManagingItem)
+        menu.addItem(stopManagingItem)
+        menu.addItem(restorePreviousPolicyItem)
+        menu.addItem(.separator())
         menu.addItem(permissionItem)
         menu.addItem(requestItem)
-        #if DEBUG
-        menu.addItem(.separator())
-        menu.addItem(stopManagingItem)
-        #endif
         menu.addItem(.separator())
         menu.addItem(quitItem)
         statusItem.menu = menu
@@ -382,11 +407,23 @@ final class StatusItemController: NSObject {
         onRequestAccess()
     }
 
-    #if DEBUG
-    @objc private func stopManaging() {
-        stopManagingAndRestore?()
+    @objc private func resumeManaging() {
+        onResumeManaging()
     }
-    #endif
+
+    @objc private func stopManaging() {
+        #if DEBUG
+        if let debugStopManagingAndRestore {
+            debugStopManagingAndRestore()
+            return
+        }
+        #endif
+        onStopManaging()
+    }
+
+    @objc private func restorePreviousPolicy() {
+        onRestorePreviousPolicy()
+    }
 
     @objc private func quit() {
         onQuit()

@@ -293,6 +293,22 @@ public actor PolicyEditingCore {
         )
     }
 
+    public func previewStopManaging(
+        candidates: PolicyCandidateInventory,
+        observedRunningBundleIdentifiers: Set<String>
+    ) async throws -> (PolicyDryRunImpactReport, PreparedPolicyEdit?) {
+        guard let accepted = try await store.load() else { return try missingPolicy() }
+        return try PolicyDryRunner.prepare(
+            oldPolicy: accepted,
+            draft: BundlePolicyDraft(acceptedPolicy: accepted),
+            managementEnabled: false,
+            candidates: candidates,
+            observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+            scope: scope,
+            blennyBundleIdentifier: blennyBundleIdentifier
+        )
+    }
+
     public func previewRestorePreviousPolicy(
         candidates: PolicyCandidateInventory,
         observedRunningBundleIdentifiers: Set<String>

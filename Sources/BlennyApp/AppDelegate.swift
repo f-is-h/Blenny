@@ -3,56 +3,67 @@ import BlennyCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let accessibilityPromptRequestedKey =
+        "AccessibilitySystemPromptRequestedForMenuBarOwnership"
+
     private let inventory = AccessibilityInventory()
     private var isRefreshing = false
-    private var requestedAccessibilityThisLaunch = false
+    private var persistentStore: PersistentBundlePolicyStore?
+    private var interfaceStore: PolicyInterfaceStore?
+    private var editingCore: PolicyEditingCore?
+    private var editorModel: PolicyEditorViewModel?
+    private var ownershipSnapshot: MenuBarOwnershipSnapshot?
+    private var observedRunningBundleIdentifiers = Set<String>()
+    private var recoveryAvailable = false
     #if DEBUG
     private var policyCoexistenceController: DebugPolicyCoexistenceController?
     private var terminationRestoreInProgress = false
     #endif
 
-    private lazy var diagnosticsWindowController: DiagnosticsWindowController = {
-        let controller = DiagnosticsWindowController(
-            onRefresh: { [weak self] in self?.refresh() },
-            onRequestAccess: { [weak self] in self?.requestAccessibilityAccess() },
-            onOpenSystemSettings: { [weak self] in self?.openAccessibilitySettings() }
-        )
-        #if DEBUG
-        controller.configureDebugLengthExperiment(
-            onRun: { [weak self] length in self?.runDebugLengthExperiment(length: length) },
-            onRestore: { [weak self] in self?.restoreDebugLengthExperiment() }
-        )
-        #endif
-        return controller
-    }()
-
-    private lazy var statusItemController = StatusItemController(
-        onOpenDiagnostics: { [weak self] in self?.showDiagnostics() },
+    private lazy var editorWindowController = PolicyEditorWindowController(
+        onAssign: { [weak self] bundleIdentifier, policy in
+            self?.assign(bundleIdentifier: bundleIdentifier, to: policy)
+        },
+        onReview: { [weak self] in self?.reviewDraft() },
+        onDiscard: { [weak self] in self?.discardDraft() },
         onRefresh: { [weak self] in self?.refresh() },
         onRequestAccess: { [weak self] in self?.requestAccessibilityAccess() },
+        onResumeManaging: { [weak self] in self?.reviewResumeManaging() },
+        onStopManaging: { [weak self] in self?.reviewStopManaging() },
+        onRestorePreviousPolicy: { [weak self] in self?.reviewRestorePreviousPolicy() }
+    )
+
+    private lazy var reviewWindowController = PolicyReviewWindowController()
+
+    private lazy var statusItemController = StatusItemController(
+        onOpenDiagnostics: { [weak self] in self?.showEditor() },
+        onRefresh: { [weak self] in self?.refresh() },
+        onRequestAccess: { [weak self] in self?.requestAccessibilityAccess() },
+        onResumeManaging: { [weak self] in self?.reviewResumeManaging() },
+        onStopManaging: { [weak self] in self?.reviewStopManaging() },
+        onRestorePreviousPolicy: { [weak self] in self?.reviewRestorePreviousPolicy() },
         onQuit: { NSApplication.shared.terminate(nil) }
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        configureMainMenu()
         _ = statusItemController
-        #if DEBUG
-        policyCoexistenceController = DebugPolicyCoexistenceController(
-            statusItemController: statusItemController
-        )
-        policyCoexistenceController?.start()
-        #endif
         updatePermissionPresentation()
+
         #if DEBUG
-        // Keep the user's current frontmost application and its leading menu
-        // width intact during the bounded policy experiment. Activating Blenny's
-        // diagnostics window can itself remove native overflow and force the
-        // fallback path before native ownership can be validated.
-        if policyCoexistenceController == nil {
-            showDiagnostics()
+        if ProcessInfo.processInfo.environment[
+            DebugPolicyCoexistenceController.editingActionEnvironmentKey
+        ] != nil {
+            policyCoexistenceController = DebugPolicyCoexistenceController(
+                statusItemController: statusItemController
+            )
+            policyCoexistenceController?.start()
+            return
         }
-        #else
-        showDiagnostics()
         #endif
+
+        showEditor()
+        refresh()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -87,60 +98,382 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
-        showDiagnostics()
+        showEditor()
         return true
     }
 
-    private func showDiagnostics() {
-        diagnosticsWindowController.showWindow(nil)
-        diagnosticsWindowController.window?.orderFrontRegardless()
-        NSApplication.shared.activate(ignoringOtherApps: true)
+    private func showEditor() {
+        editorWindowController.showEditor()
+    }
+
+    private func configureMainMenu() {
+        let mainMenu = NSMenu()
+
+        let applicationItem = NSMenuItem()
+        let applicationMenu = NSMenu(title: "Blenny")
+        let quitItem = NSMenuItem(
+            title: "Quit Blenny",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        quitItem.target = NSApplication.shared
+        applicationMenu.addItem(quitItem)
+        applicationItem.submenu = applicationMenu
+        mainMenu.addItem(applicationItem)
+
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(
+            withTitle: "Close",
+            action: #selector(NSWindow.performClose(_:)),
+            keyEquivalent: "w"
+        )
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+        NSApplication.shared.mainMenu = mainMenu
+        NSApplication.shared.windowsMenu = windowMenu
     }
 
     private func refresh() {
         guard !isRefreshing else { return }
+        updatePermissionPresentation()
+        guard AccessibilityAuthorization.isTrusted else {
+            editorWindowController.setStatus(
+                "Enable Accessibility, then choose Refresh. No menu bar scan has run.",
+                isError: false
+            )
+            return
+        }
 
         isRefreshing = true
-        let trusted = AccessibilityAuthorization.isTrusted
         let descriptors = runningApplicationDescriptors()
-        diagnosticsWindowController.setRefreshing(true)
         statusItemController.setRefreshing(true)
-        updatePermissionPresentation()
-
+        editorWindowController.setRefreshing(true)
         Task { [weak self, inventory] in
             let report = await inventory.capture(
                 applications: descriptors,
-                accessibilityTrusted: trusted
+                accessibilityTrusted: true
             )
             guard let self else { return }
-            self.isRefreshing = false
-            self.diagnosticsWindowController.setRefreshing(false)
-            self.statusItemController.setRefreshing(false)
-            self.diagnosticsWindowController.display(report: report)
-            self.updatePermissionPresentation()
+            await self.completeRefresh(report: report)
         }
     }
 
-    private func requestAccessibilityAccess() {
-        if AccessibilityAuthorization.isTrusted {
-            updatePermissionPresentation()
+    private func completeRefresh(report: DiagnosticReport) async {
+        isRefreshing = false
+        statusItemController.setRefreshing(false)
+        editorWindowController.setRefreshing(false)
+
+        let snapshot = MenuBarOwnershipSnapshotBuilder.make(from: report)
+        ownershipSnapshot = snapshot
+        guard snapshot.isComplete else {
+            let detail = snapshot.issues.map(\.description).joined(separator: "; ")
+            editorWindowController.setStatus(
+                "The read-only observation was incomplete: \(detail). Apply remains unavailable.",
+                isError: true
+            )
+            editingCore = nil
             return
         }
 
-        guard !requestedAccessibilityThisLaunch else {
-            openAccessibilitySettings()
-            diagnosticsWindowController.showPermissionMessage(
-                "The system prompt was already requested during this launch. Enable Blenny under Privacy & Security › Device Control and Data Access, then return and choose Refresh."
+        do {
+            let blennyBundleIdentifier = try currentBundleIdentifier()
+            let store = try makePersistentStore()
+            persistentStore = store
+            let accepted = try await store.load() ?? initialPolicy(
+                blennyBundleIdentifier: blennyBundleIdentifier
+            )
+            let candidateInventory = PolicyCandidateInventory(
+                observations: snapshot.observations
+            )
+            let model = try PolicyEditorViewModel(
+                acceptedPolicy: accepted,
+                candidateInventory: candidateInventory,
+                blennyBundleIdentifier: blennyBundleIdentifier
+            )
+            let interfaceStore = PolicyInterfaceStore(
+                persistentStore: store,
+                initialPolicy: accepted
+            )
+            let core = PolicyEditingCore(
+                store: interfaceStore,
+                blennyBundleIdentifier: blennyBundleIdentifier,
+                scope: model.validationScope,
+                writerProvider: {
+                    throw PolicyInterfaceWriteError.installedDryRunRequired
+                }
+            )
+            let runningIdentifiers = Set(
+                NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+            ).union([blennyBundleIdentifier])
+            let hasBackup = try await store.loadBackup() != nil
+
+            self.interfaceStore = interfaceStore
+            editingCore = core
+            editorModel = model
+            observedRunningBundleIdentifiers = runningIdentifiers
+            recoveryAvailable = hasBackup
+            statusItemController.setManagementEnabled(
+                accepted.managementEnabled,
+                recoveryAvailable: hasBackup
+            )
+            statusItemController.setDraftHasChanges(model.hasDraftChanges)
+            editorWindowController.display(
+                model: model,
+                observationCount: candidateInventory.candidates.count,
+                recoveryAvailable: hasBackup
+            )
+        } catch {
+            editingCore = nil
+            editorWindowController.setStatus(
+                "Could not prepare the policy editor: \(error.localizedDescription)",
+                isError: true
+            )
+        }
+    }
+
+    private func assign(
+        bundleIdentifier: String,
+        to policy: MenuBarBundlePolicy
+    ) {
+        guard var model = editorModel else { return }
+        let result = model.assign(bundleIdentifier: bundleIdentifier, to: policy)
+        editorModel = model
+        statusItemController.setDraftHasChanges(model.hasDraftChanges)
+        editorWindowController.display(
+            model: model,
+            observationCount: model.candidateInventory.candidates.count,
+            recoveryAvailable: recoveryAvailable
+        )
+        if result == .rejectedPinnedBlenny {
+            editorWindowController.setStatus(
+                "Blenny is a safety entry and must remain Pinned.",
+                isError: true
+            )
+        }
+    }
+
+    private func discardDraft() {
+        guard let core = editingCore else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                guard let acceptedDraft = try await core.discardDraft(),
+                      var model = editorModel else { return }
+                model.discardDraft(using: acceptedDraft)
+                editorModel = model
+                statusItemController.setDraftHasChanges(model.hasDraftChanges)
+                editorWindowController.display(
+                    model: model,
+                    observationCount: model.candidateInventory.candidates.count,
+                    recoveryAvailable: recoveryAvailable
+                )
+                editorWindowController.setStatus(
+                    "Draft discarded. Accepted policy and system state were not changed.",
+                    isError: false
+                )
+            } catch {
+                editorWindowController.setStatus(
+                    "Could not discard the draft: \(error.localizedDescription)",
+                    isError: true
+                )
+            }
+        }
+    }
+
+    private func reviewDraft() {
+        guard let core = editingCore, let model = editorModel else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let preview = try await core.preview(
+                    draft: model.draft,
+                    candidates: model.candidateInventory,
+                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers
+                )
+                presentReview(
+                    title: "Review Draft Changes",
+                    report: preview.0,
+                    prepared: preview.1
+                )
+            } catch {
+                editorWindowController.setStatus(
+                    "Could not prepare the draft review: \(error.localizedDescription)",
+                    isError: true
+                )
+            }
+        }
+    }
+
+    private func reviewResumeManaging() {
+        guard let model = editorModel else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let core = try makeCore(
+                    scope: model.acceptedPolicyScope
+                )
+                let preview = try await core.previewResumeManaging(
+                    candidates: model.candidateInventory,
+                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers
+                )
+                presentReview(
+                    title: "Review Resume Managing",
+                    report: preview.0,
+                    prepared: preview.1
+                )
+            } catch {
+                showPreviewError("Resume Managing", error: error)
+            }
+        }
+    }
+
+    private func reviewStopManaging() {
+        guard let model = editorModel else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let core = try makeCore(
+                    scope: model.acceptedPolicyScope
+                )
+                let preview = try await core.previewStopManaging(
+                    candidates: model.candidateInventory,
+                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers
+                )
+                presentReview(
+                    title: "Review Stop Managing and Restore",
+                    report: preview.0,
+                    prepared: preview.1
+                )
+            } catch {
+                showPreviewError("Stop Managing", error: error)
+            }
+        }
+    }
+
+    private func reviewRestorePreviousPolicy() {
+        guard let model = editorModel, let persistentStore else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                guard let backup = try await persistentStore.loadBackup() else {
+                    throw PolicyEditingCoreError.previousPolicyBackupMissing
+                }
+                let core = try makeCore(
+                    scope: PolicyValidationScope(
+                        approvedBundleIdentifiers: backup.previousPolicy.policies.map(
+                            \.bundleIdentifier
+                        )
+                    )
+                )
+                let preview = try await core.previewRestorePreviousPolicy(
+                    candidates: model.candidateInventory,
+                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers
+                )
+                presentReview(
+                    title: "Review Restore Previous Policy",
+                    report: preview.0,
+                    prepared: preview.1
+                )
+            } catch {
+                showPreviewError("Restore Previous Policy", error: error)
+            }
+        }
+    }
+
+    private func presentReview(
+        title: String,
+        report: PolicyDryRunImpactReport,
+        prepared: PreparedPolicyEdit?
+    ) {
+        reviewWindowController.present(
+            actionTitle: title,
+            report: report,
+            prepared: prepared,
+            onApply: { [weak self] prepared in
+                self?.apply(prepared)
+            }
+        )
+    }
+
+    private func apply(_ prepared: PreparedPolicyEdit) {
+        let changesSystemAssertion = prepared.newPolicy != prepared.oldPolicy
+            && (prepared.oldPolicy.managementEnabled || prepared.newPolicy.managementEnabled)
+        guard !changesSystemAssertion else {
+            editorWindowController.setStatus(
+                PolicyInterfaceWriteError.installedDryRunRequired.localizedDescription,
+                isError: true
             )
             return
         }
+        guard let core = editingCore else { return }
+        editorWindowController.setStatus("Applying reviewed policy intent…", isError: false)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await core.commit(prepared)
+                editorWindowController.setStatus(
+                    "Reviewed policy intent applied. No system assertion was created.",
+                    isError: false
+                )
+                refresh()
+            } catch {
+                editorWindowController.setStatus(
+                    "Apply failed without broadening system access: \(error.localizedDescription)",
+                    isError: true
+                )
+            }
+        }
+    }
 
-        requestedAccessibilityThisLaunch = true
-        _ = AccessibilityAuthorization.requestSystemPrompt()
-        updatePermissionPresentation()
-        diagnosticsWindowController.showPermissionMessage(
-            "Enable Blenny under Privacy & Security › Device Control and Data Access. The probe will not keep prompting; return here and choose Refresh after granting access."
+    private func showPreviewError(_ action: String, error: Error) {
+        editorWindowController.setStatus(
+            "Could not prepare \(action): \(error.localizedDescription)",
+            isError: true
         )
+    }
+
+    private func makeCore(scope: PolicyValidationScope) throws -> PolicyEditingCore {
+        guard let interfaceStore else {
+            throw PolicyInterfaceWriteError.interfaceStoreUnavailable
+        }
+        return PolicyEditingCore(
+            store: interfaceStore,
+            blennyBundleIdentifier: try currentBundleIdentifier(),
+            scope: scope,
+            writerProvider: {
+                throw PolicyInterfaceWriteError.installedDryRunRequired
+            }
+        )
+    }
+
+    private func requestAccessibilityAccess() {
+        let defaults = UserDefaults.standard
+        let action = AccessibilityOnboardingPolicy.action(
+            isTrusted: AccessibilityAuthorization.isTrusted,
+            hasRequestedSystemPrompt: defaults.bool(
+                forKey: Self.accessibilityPromptRequestedKey
+            )
+        )
+        switch action {
+        case .alreadyGranted:
+            refresh()
+        case .requestSystemPrompt:
+            defaults.set(true, forKey: Self.accessibilityPromptRequestedKey)
+            _ = AccessibilityAuthorization.requestSystemPrompt()
+            editorWindowController.setStatus(
+                "The one-time system prompt was requested. Enable Blenny, then return and choose Refresh.",
+                isError: false
+            )
+        case .openSystemSettings:
+            openAccessibilitySettings()
+            editorWindowController.setStatus(
+                "The system prompt will not be repeated. Enable Blenny in Device Control and Data Access, then choose Refresh.",
+                isError: false
+            )
+        }
+        updatePermissionPresentation()
+        showEditor()
     }
 
     private func openAccessibilitySettings() {
@@ -152,23 +485,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updatePermissionPresentation() {
         let trusted = AccessibilityAuthorization.isTrusted
-        diagnosticsWindowController.setAccessibilityTrusted(trusted)
+        let requested = UserDefaults.standard.bool(
+            forKey: Self.accessibilityPromptRequestedKey
+        )
+        editorWindowController.setAccessibilityTrusted(
+            trusted,
+            hasRequestedSystemPrompt: requested
+        )
         statusItemController.setAccessibilityTrusted(trusted)
     }
 
-    #if DEBUG
-    private func runDebugLengthExperiment(length: CGFloat) {
-        statusItemController.runDebugLengthExperiment(length: length) { [weak self] update in
-            self?.diagnosticsWindowController.displayDebugLengthUpdate(update)
-        }
+    private func makePersistentStore() throws -> PersistentBundlePolicyStore {
+        if let persistentStore { return persistentStore }
+        let applicationSupport = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = applicationSupport
+            .appendingPathComponent("Blenny", isDirectory: true)
+            .appendingPathComponent("PersistentPolicyPrototype", isDirectory: true)
+        return try PersistentBundlePolicyStore(
+            policyURL: directory.appendingPathComponent("bundle-policies.json"),
+            backupURL: directory.appendingPathComponent(
+                "bundle-policies.previous.blenny-backup.json"
+            )
+        )
     }
 
-    private func restoreDebugLengthExperiment() {
-        statusItemController.restoreDebugLengthExperiment { [weak self] update in
-            self?.diagnosticsWindowController.displayDebugLengthUpdate(update)
-        }
+    private func initialPolicy(
+        blennyBundleIdentifier: String
+    ) throws -> PersistentBundlePolicyDocument {
+        try PersistentBundlePolicyDocument(
+            managementEnabled: false,
+            policies: [
+                .init(bundleIdentifier: blennyBundleIdentifier, policy: .pinned)
+            ]
+        )
     }
-    #endif
+
+    private func currentBundleIdentifier() throws -> String {
+        guard let identifier = Bundle.main.bundleIdentifier else {
+            throw PersistentBundlePolicyDocumentError.invalidBundleIdentifier(
+                "Blenny bundle identifier is unavailable"
+            )
+        }
+        return identifier
+    }
 
     private func runningApplicationDescriptors() -> [RunningApplicationDescriptor] {
         var applications = NSWorkspace.shared.runningApplications
@@ -177,7 +541,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 withBundleIdentifier: "com.apple.MenuBarAgent"
             )
         )
-
         applications = applications.filter { application in
             application.activationPolicy != .prohibited
                 || application.bundleIdentifier == "com.apple.MenuBarAgent"

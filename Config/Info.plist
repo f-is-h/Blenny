@@ -17,7 +17,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.0.5</string>
+	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
@@ -25,7 +25,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>Blenny uses Accessibility to validate bundle ownership and observe native overflow presentation during this technical prototype.</string>
+	<string>Blenny uses Accessibility for a bounded, read-only observation of the apps that currently own menu bar items.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>

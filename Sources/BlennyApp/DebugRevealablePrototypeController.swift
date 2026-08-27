@@ -350,6 +350,7 @@ final class DebugPolicyCoexistenceController {
 
         guard action.isCommit else {
             await stop(reason: "0.0.5 installed dry-run complete; no persistence or assertion write")
+            NSApplication.shared.terminate(nil)
             return
         }
         guard realWritesEnabled,

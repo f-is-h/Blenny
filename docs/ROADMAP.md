@@ -98,7 +98,9 @@ Advance when:
 
 ## 0.1.0 — Minimal product interface
 
-Advance when:
+Status: **Complete on macOS 27.0 build `26A5416b`; local tag awaits owner evidence confirmation.**
+
+Exit criteria met:
 
 - A minimal AppKit-first editor exposes `Pinned`, `Revealable`, and `Hidden` groups with clear user-facing labels.
 - UI edits remain local and smooth; system policy applies only after the interaction completes.
