@@ -226,6 +226,110 @@ struct RevealablePolicyTests {
         #expect(reducer.presentation == .baseline)
     }
 
+    @Test("Plan fingerprint is stable across input ordering")
+    func planFingerprintIsDeterministic() {
+        let first = RevealAllowlistPlan(
+            presentation: .baseline,
+            allowedSystemItems: [2, 0, 1],
+            allowedBundleIdentifiers: [hidden, pinned, revealable]
+        )
+        let reordered = RevealAllowlistPlan(
+            presentation: .baseline,
+            allowedSystemItems: [1, 2, 0],
+            allowedBundleIdentifiers: [revealable, hidden, pinned]
+        )
+        #expect(first.fingerprint == reordered.fingerprint)
+    }
+
+    @Test("Any exact plan change produces a different fingerprint")
+    func planFingerprintDetectsChange() {
+        let baseline = RevealAllowlistPlan(
+            presentation: .baseline,
+            allowedSystemItems: [0, 1, 2],
+            allowedBundleIdentifiers: [pinned]
+        )
+        let revealed = RevealAllowlistPlan(
+            presentation: .revealed,
+            allowedSystemItems: [0, 1, 2],
+            allowedBundleIdentifiers: [pinned, revealable]
+        )
+        #expect(baseline.fingerprint != revealed.fingerprint)
+    }
+
+    @Test("Managed policy fingerprint ignores unrelated running bundles")
+    func managedPolicyFingerprintIgnoresUnrelatedBundles() throws {
+        let assignments = try BundlePolicyAssignments(
+            pinned: [pinned],
+            revealable: [revealable],
+            hidden: [hidden]
+        )
+        let first = RevealAllowlistPlan(
+            presentation: .baseline,
+            allowedSystemItems: [0, 1, 2],
+            allowedBundleIdentifiers: [pinned, "com.example.Unrelated"]
+        )
+        let changedSnapshot = RevealAllowlistPlan(
+            presentation: .baseline,
+            allowedSystemItems: [2, 1, 0],
+            allowedBundleIdentifiers: [
+                pinned,
+                "com.example.DifferentHelper",
+                "com.example.Unrelated",
+            ]
+        )
+
+        #expect(
+            first.managedPolicyFingerprint(assignments: assignments)
+                == changedSnapshot.managedPolicyFingerprint(assignments: assignments)
+        )
+        #expect(first.fingerprint != changedSnapshot.fingerprint)
+    }
+
+    @Test("Managed policy fingerprint detects effective managed changes")
+    func managedPolicyFingerprintDetectsManagedChanges() throws {
+        let assignments = try BundlePolicyAssignments(
+            pinned: [pinned],
+            revealable: [revealable],
+            hidden: [hidden]
+        )
+        let baseline = RevealAllowlistPlan(
+            presentation: .baseline,
+            allowedSystemItems: [0, 1, 2],
+            allowedBundleIdentifiers: [pinned]
+        )
+        let revealableIncorrectlyAllowed = RevealAllowlistPlan(
+            presentation: .baseline,
+            allowedSystemItems: [0, 1, 2],
+            allowedBundleIdentifiers: [pinned, revealable]
+        )
+        let changedSystemItems = RevealAllowlistPlan(
+            presentation: .baseline,
+            allowedSystemItems: [0, 1],
+            allowedBundleIdentifiers: [pinned]
+        )
+        let revealed = RevealAllowlistPlan(
+            presentation: .revealed,
+            allowedSystemItems: [0, 1, 2],
+            allowedBundleIdentifiers: [pinned, revealable]
+        )
+
+        let authorized = baseline.managedPolicyFingerprint(assignments: assignments)
+        #expect(
+            authorized
+                != revealableIncorrectlyAllowed.managedPolicyFingerprint(
+                    assignments: assignments
+                )
+        )
+        #expect(
+            authorized
+                != changedSystemItems.managedPolicyFingerprint(assignments: assignments)
+        )
+        #expect(
+            authorized
+                != revealed.managedPolicyFingerprint(assignments: assignments)
+        )
+    }
+
     @Test("Whole experiment timeout requests complete restoration")
     func experimentTimeoutRestores() {
         var reducer = RevealSessionReducer(

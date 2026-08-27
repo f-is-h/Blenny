@@ -70,6 +70,8 @@ Not included: policy persistence, a formal Hidden settings or recovery UI, short
 
 ## 0.0.4 — Persistent policy prototype
 
+Status: **Complete on macOS 27.0 build `26A5416b`.**
+
 Advance when:
 
 - Bundle-level policies persist across Blenny relaunches.

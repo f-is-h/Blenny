@@ -1,6 +1,7 @@
+import CryptoKit
 import Foundation
 
-public enum MenuBarBundlePolicy: String, CaseIterable, Sendable {
+public enum MenuBarBundlePolicy: String, CaseIterable, Codable, Sendable {
     case pinned
     case revealable
     case hidden
@@ -63,6 +64,49 @@ public struct RevealAllowlistPlan: Equatable, Sendable {
         self.presentation = presentation
         self.allowedSystemItems = allowedSystemItems
         self.allowedBundleIdentifiers = allowedBundleIdentifiers
+    }
+
+    public var fingerprint: String {
+        let canonical = [
+            "presentation=\(presentation.rawValue)",
+            "system=\(allowedSystemItems.sorted().map(String.init).joined(separator: ","))",
+            "bundles=\(allowedBundleIdentifiers.sorted().joined(separator: "\n"))",
+        ].joined(separator: "\n")
+        return Self.sha256(canonical)
+    }
+
+    /// A stable authorization fingerprint for owner-approved managed policy.
+    ///
+    /// The exact plan fingerprint above deliberately includes every observed
+    /// running bundle for audit evidence. This fingerprint excludes unrelated
+    /// bundles whose helper processes can appear between dry-run and mutation,
+    /// while still binding authorization to every managed bundle's policy,
+    /// effective allow/deny state, presentation, and system-item set.
+    public func managedPolicyFingerprint(
+        assignments: BundlePolicyAssignments
+    ) -> String {
+        let allowed = Set(allowedBundleIdentifiers)
+        let managedStates = [
+            (MenuBarBundlePolicy.pinned, assignments.pinned),
+            (MenuBarBundlePolicy.revealable, assignments.revealable),
+            (MenuBarBundlePolicy.hidden, assignments.hidden),
+        ].flatMap { policy, identifiers in
+            identifiers.sorted().map { identifier in
+                "\(identifier)|\(policy.rawValue)|allowed=\(allowed.contains(identifier))"
+            }
+        }
+        let canonical = [
+            "presentation=\(presentation.rawValue)",
+            "system=\(allowedSystemItems.sorted().map(String.init).joined(separator: ","))",
+            "managed=\(managedStates.joined(separator: "\n"))",
+        ].joined(separator: "\n")
+        return Self.sha256(canonical)
+    }
+
+    private static func sha256(_ canonical: String) -> String {
+        return SHA256.hash(data: Data(canonical.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 }
 

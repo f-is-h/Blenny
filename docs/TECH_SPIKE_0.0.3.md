@@ -2,7 +2,7 @@
 
 > Engineering record for the bounded `0.0.3` validation. This is not a product UI, a persistence prototype, or a supported public-API implementation.
 
-Status: **Complete on the tested macOS 27 build. Automated checks, dry-runs, real native/fallback Revealable-and-Hidden coexistence, visible restoration, and experiment cleanup pass. No `v0.0.3` tag has been created.**
+Status: **Complete on the tested macOS 27 build. Automated checks, dry-runs, real native/fallback Revealable-and-Hidden coexistence, visible restoration, and experiment cleanup pass. Annotated tag `v0.0.3` identifies commit `2cc67a73e7f441cba6a2daad88e234920d9f595d`.**
 
 Last updated: 2026-08-26
 
@@ -215,7 +215,7 @@ Status: **Passed.**
 - `/Applications/Blenny 0.0.3 Validation.app` was unregistered and deleted, the unique self-position key was absent, and the experiment-only Accessibility grant for `com.example.BlennyProbe` was reset.
 - No Blenny validation process remains. MenuBarAgent, Usage4Claude, and CleanShot X retained PIDs 1590, 21837, and 3438 through cleanup.
 - No raw log was written for the final runs. Existing ignored `LocalData/` material was left untouched because it predates this run and is not part of the `0.0.3` change.
-- Repository privacy and ignored-build-product checks pass. The release audit and local commit are recorded separately; the `v0.0.3` tag remains deliberately deferred.
+- Repository privacy and ignored-build-product checks pass. The release audit, local commit, and annotated `v0.0.3` tag are recorded in Git history.
 
 ## Unresolved issues
 

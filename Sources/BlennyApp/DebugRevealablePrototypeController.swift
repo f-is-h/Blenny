@@ -6,9 +6,13 @@ import Foundation
 
 @MainActor
 final class DebugPolicyCoexistenceController {
-    static let revealableEnvironmentKey = "BLENNY_0_0_3_REVEALABLE_BUNDLE_ID"
-    static let hiddenEnvironmentKey = "BLENNY_0_0_3_HIDDEN_BUNDLE_ID"
-    static let realWriteEnvironmentKey = "BLENNY_ENABLE_0_0_3_REAL_WRITES"
+    static let revealableEnvironmentKey = "BLENNY_0_0_4_REVEALABLE_BUNDLE_ID"
+    static let hiddenEnvironmentKey = "BLENNY_0_0_4_HIDDEN_BUNDLE_ID"
+    static let realWriteEnvironmentKey = "BLENNY_ENABLE_0_0_4_REAL_WRITES"
+    static let expectedBaselineFingerprintEnvironmentKey =
+        "BLENNY_0_0_4_EXPECTED_BASELINE_FINGERPRINT"
+    static let expectedRevealFingerprintEnvironmentKey =
+        "BLENNY_0_0_4_EXPECTED_REVEAL_FINGERPRINT"
     static let approvedRevealableBundleIdentifier = "xyz.fi5h.Usage4Claude"
     static let approvedHiddenBundleIdentifier = "pl.maketheweb.cleanshotx"
     static let revealSessionTimeout: Duration = .seconds(30)
@@ -16,15 +20,16 @@ final class DebugPolicyCoexistenceController {
 
     private let statusItemController: StatusItemController
     private let nativeOverflowObserver = NativeOverflowObserver()
-    private let assignments: BundlePolicyAssignments
-    private let observedBundleIdentifiers: Set<String>
     private let blennyBundleIdentifier: String
-    private let targetObservations: [MenuBarPolicyTargetObservation]
+    private let policyStore: PersistentBundlePolicyStore
     private let realWritesEnabled: Bool
     private let fallbackInstalledAndRegistered: Bool
-    private let writer: RevealAssertionWriter?
     private let startedAt = ContinuousClock.now
 
+    private var policyDocument: PersistentBundlePolicyDocument?
+    private var assignments: BundlePolicyAssignments?
+    private var observedBundleIdentifiers = Set<String>()
+    private var writer: RevealAssertionWriter?
     private var reducer = RevealSessionReducer()
     private var eventSequence: UInt64 = 0
     private var eventQueue: [RevealSessionEvent] = []
@@ -37,103 +42,62 @@ final class DebugPolicyCoexistenceController {
 
     init?(statusItemController: StatusItemController) {
         let environment = ProcessInfo.processInfo.environment
-        guard let revealableBundleIdentifier = environment[Self.revealableEnvironmentKey],
-              let hiddenBundleIdentifier = environment[Self.hiddenEnvironmentKey],
-              revealableBundleIdentifier == Self.approvedRevealableBundleIdentifier,
-              hiddenBundleIdentifier == Self.approvedHiddenBundleIdentifier,
-              let blennyBundleIdentifier = Bundle.main.bundleIdentifier else {
-            Self.debugLog(
-                "BLENNY_0_0_3 FAIL_CLOSED exact approved Revealable and Hidden "
-                    + "environment values are required"
-            )
+        guard let blennyBundleIdentifier = Bundle.main.bundleIdentifier,
+              let applicationSupport = try? FileManager.default.url(
+                  for: .applicationSupportDirectory,
+                  in: .userDomainMask,
+                  appropriateFor: nil,
+                  create: true
+              ) else {
+            Self.debugLog("BLENNY_0_0_4 FAIL_CLOSED policy storage unavailable")
             return nil
         }
-
-        let observedBundleIdentifiers = Set(
-            NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
-        )
-        guard AccessibilityAuthorization.isTrusted else {
-            Self.debugLog("BLENNY_0_0_3 FAIL_CLOSED Accessibility is not granted")
-            return nil
-        }
-
-        let assignments: BundlePolicyAssignments
+        let policyDirectory = applicationSupport
+            .appendingPathComponent("Blenny", isDirectory: true)
+            .appendingPathComponent("PersistentPolicyPrototype", isDirectory: true)
         do {
-            assignments = try BundlePolicyAssignments(
-                pinned: [blennyBundleIdentifier],
-                revealable: [revealableBundleIdentifier],
-                hidden: [hiddenBundleIdentifier]
+            self.policyStore = try PersistentBundlePolicyStore(
+                policyURL: policyDirectory.appendingPathComponent("bundle-policies.json"),
+                backupURL: policyDirectory.appendingPathComponent(
+                    "bundle-policies.previous.blenny-backup.json"
+                )
             )
         } catch {
-            Self.debugLog("BLENNY_0_0_3 FAIL_CLOSED overlapping policy assignments")
-            return nil
-        }
-
-        let targetObservations = [revealableBundleIdentifier, hiddenBundleIdentifier]
-            .map { Self.observeMenuBarTarget(bundleIdentifier: $0) }
-        do {
-            try BoundedPolicyTargetValidator.validate(
-                assignments: assignments,
-                pinnedBundleIdentifier: blennyBundleIdentifier,
-                revealableBundleIdentifier: revealableBundleIdentifier,
-                hiddenBundleIdentifier: hiddenBundleIdentifier,
-                observations: targetObservations
-            )
-        } catch {
-            Self.debugLog("BLENNY_0_0_3 FAIL_CLOSED target ownership validation failed: \(error)")
+            Self.debugLog("BLENNY_0_0_4 FAIL_CLOSED invalid policy storage paths")
             return nil
         }
 
         self.statusItemController = statusItemController
-        self.assignments = assignments
-        self.observedBundleIdentifiers = observedBundleIdentifiers
         self.blennyBundleIdentifier = blennyBundleIdentifier
-        self.targetObservations = targetObservations
         self.realWritesEnabled = environment[Self.realWriteEnvironmentKey] == "YES"
         self.fallbackInstalledAndRegistered = Self.isInstalledAndRegistered(
             bundleIdentifier: blennyBundleIdentifier
         )
-
-        if realWritesEnabled {
-            do {
-                self.writer = RevealAssertionWriter(
-                    factory: try ExperimentalMacOS27AssessmentFactory(),
-                    activationTimeout: .seconds(1)
-                )
-            } catch {
-                return nil
-            }
-        } else {
-            self.writer = nil
-        }
     }
 
     var isRunning: Bool { !stopped }
 
     func start() {
-        for observation in targetObservations {
-            Self.debugLog(
-                "BLENNY_0_0_3 PREFLIGHT bundle=\(observation.bundleIdentifier) "
-                    + "pid=\(observation.processIdentifiers[0]) "
-                    + "menu_bar_items=\(observation.menuBarItemCount)"
-            )
-        }
-        statusItemController.configureDebugRevealPrototype { [weak self] in
-            self?.enqueueFallbackToggle()
-        }
+        statusItemController.configureDebugRevealPrototype(
+            onToggle: { [weak self] in self?.enqueueFallbackToggle() },
+            onStopManagingAndRestore: { [weak self] in
+                Task { @MainActor in
+                    await self?.stopManagingAndRestore()
+                }
+            }
+        )
         statusItemController.updateDebugRevealPrototype(
             entryPoint: nil,
             presentation: .baseline,
             enabled: false,
-            status: realWritesEnabled ? "preparing bounded real run" : "dry-run"
+            status: realWritesEnabled ? "preparing persistent real run" : "persistent dry-run"
         )
-
-        // Establish the installed fallback before any baseline assertion.
-        guard !realWritesEnabled || fallbackInstalledAndRegistered else {
-            failClosed(status: "real run refused: installed fallback unavailable")
-            return
+        Task { @MainActor [weak self] in
+            await self?.preparePersistentPolicy()
         }
+    }
 
+    private func beginBoundedSession() {
         nativeOverflowObserver.start { [weak self] snapshot in
             self?.receivedNativeOverflow(snapshot)
         }
@@ -172,6 +136,161 @@ final class DebugPolicyCoexistenceController {
         debugLog("stop_complete reason=\(reason)")
     }
 
+    func stopManagingAndRestore() async {
+        let wasAlreadyStopped = stopped
+        var persistenceStatus = "management disabled persistently"
+        var persistenceSucceeded = false
+        do {
+            guard try await policyStore.disableManagement() != nil else {
+                persistenceStatus = "no stored policy; management remains disabled"
+                persistenceSucceeded = true
+                if !wasAlreadyStopped {
+                    await stop(reason: "Stop Managing restored; \(persistenceStatus)")
+                }
+                statusItemController.setDebugStopManagingEnabled(false)
+                return
+            }
+            policyDocument = try await policyStore.load()
+            persistenceSucceeded = true
+        } catch {
+            persistenceStatus = "disable persistence failed: \(error)"
+        }
+        if !wasAlreadyStopped {
+            await stop(reason: "Stop Managing restored; \(persistenceStatus)")
+        } else {
+            statusItemController.updateDebugRevealPrototype(
+                entryPoint: nil,
+                presentation: .baseline,
+                enabled: false,
+                status: "Stop Managing restored; \(persistenceStatus)"
+            )
+        }
+        statusItemController.setDebugStopManagingEnabled(!persistenceSucceeded)
+    }
+
+    private func preparePersistentPolicy() async {
+        guard AccessibilityAuthorization.isTrusted else {
+            failClosed(status: "unknown ownership: Accessibility is not granted")
+            return
+        }
+
+        do {
+            let document = try await loadOrSeedPolicy()
+            policyDocument = document
+            guard document.managementEnabled else {
+                await stop(reason: "management disabled; unrestricted state preserved")
+                return
+            }
+            try validatePrototypeScope(document)
+
+            let ownershipScan = Self.observeMenuBarOwnership()
+            guard ownershipScan.completed else {
+                throw PersistentPolicyResolverError.unresolved([.ownershipScanTimedOut])
+            }
+            let runningBundleIdentifiers = Set(
+                NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+            )
+            let resolved = try PersistentPolicyResolver.resolve(
+                document: document,
+                ownershipObservations: ownershipScan.observations,
+                observedRunningBundleIdentifiers: runningBundleIdentifiers,
+                blennyBundleIdentifier: blennyBundleIdentifier
+            )
+            assignments = resolved.assignments
+            observedBundleIdentifiers = resolved.observedRunningBundleIdentifiers
+
+            for entry in document.policies {
+                let pid = resolved.managedProcessIdentifiers[entry.bundleIdentifier] ?? -1
+                debugLog(
+                    "BLENNY_0_0_4 PREFLIGHT bundle=\(entry.bundleIdentifier) "
+                        + "policy=\(entry.policy.rawValue) pid=\(pid) ownership=unique"
+                )
+            }
+
+            // Establish the installed fallback before any baseline assertion.
+            guard !realWritesEnabled || fallbackInstalledAndRegistered else {
+                throw RevealEntryPointSelectionError.noUsableEntryPoint
+            }
+            if !realWritesEnabled {
+                debugLog(
+                    "BLENNY_0_0_4 assertion_factory_created=false "
+                        + "assertion_candidate_created=false"
+                )
+            } else {
+                debugLog(
+                    "BLENNY_0_0_4 assertion_factory_created=false "
+                        + "reason=awaiting_exact_plan_fingerprint_match"
+                )
+            }
+            statusItemController.setDebugStopManagingEnabled(true)
+            beginBoundedSession()
+        } catch let PersistentPolicyResolverError.unresolved(issues) {
+            for issue in issues {
+                debugLog("BLENNY_0_0_4 FAIL_CLOSED ownership_issue=\(issue)")
+            }
+            failClosed(status: "unknown or ambiguous bundle ownership; no write")
+        } catch {
+            debugLog("BLENNY_0_0_4 FAIL_CLOSED persistent preflight failed: \(error)")
+            failClosed(status: "persistent policy preflight failed; no write")
+        }
+    }
+
+    private func loadOrSeedPolicy() async throws -> PersistentBundlePolicyDocument {
+        if let existing = try await policyStore.load() {
+            debugLog(
+                "BLENNY_0_0_4 policy_source=persistent_store "
+                    + "management_enabled=\(existing.managementEnabled)"
+            )
+            return existing
+        }
+
+        let environment = ProcessInfo.processInfo.environment
+        guard environment[Self.revealableEnvironmentKey]
+                == Self.approvedRevealableBundleIdentifier,
+              environment[Self.hiddenEnvironmentKey]
+                == Self.approvedHiddenBundleIdentifier else {
+            throw PersistentBundlePolicyDocumentError.invalidBundleIdentifier(
+                "exact approved seed environment values are required"
+            )
+        }
+        let document = try PersistentBundlePolicyDocument(
+            managementEnabled: true,
+            policies: [
+                .init(bundleIdentifier: blennyBundleIdentifier, policy: .pinned),
+                .init(
+                    bundleIdentifier: Self.approvedRevealableBundleIdentifier,
+                    policy: .revealable
+                ),
+                .init(
+                    bundleIdentifier: Self.approvedHiddenBundleIdentifier,
+                    policy: .hidden
+                ),
+            ]
+        )
+        try await policyStore.save(document)
+        debugLog("BLENNY_0_0_4 policy_source=approved_seed persisted=true")
+        return document
+    }
+
+    private func validatePrototypeScope(
+        _ document: PersistentBundlePolicyDocument
+    ) throws {
+        _ = try document.validated(
+            forBlennyBundleIdentifier: blennyBundleIdentifier
+        )
+        let expected = Set([
+            "\(blennyBundleIdentifier)|\(MenuBarBundlePolicy.pinned.rawValue)",
+            "\(Self.approvedRevealableBundleIdentifier)|\(MenuBarBundlePolicy.revealable.rawValue)",
+            "\(Self.approvedHiddenBundleIdentifier)|\(MenuBarBundlePolicy.hidden.rawValue)",
+        ])
+        let actual = Set(
+            document.policies.map { "\($0.bundleIdentifier)|\($0.policy.rawValue)" }
+        )
+        guard actual == expected else {
+            throw BoundedPolicyTargetValidationError.assignmentMismatch
+        }
+    }
+
     private func receivedNativeOverflow(
         _ snapshot: NativeOverflowObservationSnapshot
     ) {
@@ -180,7 +299,7 @@ final class DebugPolicyCoexistenceController {
             return
         }
         debugLog(
-            "BLENNY_0_0_3 native_present=\(snapshot.isPresent) "
+            "BLENNY_0_0_4 native_present=\(snapshot.isPresent) "
                 + "native_state=\(snapshot.presentationState.rawValue) "
                 + "observer_available=\(snapshot.observationAvailable)"
         )
@@ -218,12 +337,22 @@ final class DebugPolicyCoexistenceController {
                 throw RevealEntryPointSelectionError.noUsableEntryPoint
             }
             updateStatus(entryPoint: reducer.entryPoint)
-            let plan = try makePlan(presentation: .baseline)
-            logPlan(plan)
-            if !realWritesEnabled {
-                logPlan(try makePlan(presentation: .revealed))
+            let baselinePlan = try makePlan(presentation: .baseline)
+            let revealPlan = try makePlan(presentation: .revealed)
+            logPlan(baselinePlan)
+            logPlan(revealPlan)
+            if realWritesEnabled {
+                try authorizeManagedPolicyPlans(
+                    baseline: baselinePlan,
+                    revealed: revealPlan
+                )
+                writer = RevealAssertionWriter(
+                    factory: try ExperimentalMacOS27AssessmentFactory(),
+                    activationTimeout: .seconds(1)
+                )
+                debugLog("BLENNY_0_0_4 assertion_factory_created=true managed_policy_match=true")
             }
-            try await writer?.applySessionTransition(with: plan)
+            try await writer?.applySessionTransition(with: baselinePlan)
             bootstrapping = false
             updateStatus(entryPoint: reducer.entryPoint)
         } catch {
@@ -274,7 +403,7 @@ final class DebugPolicyCoexistenceController {
                 try await writer?.applySessionTransition(with: plan)
                 let elapsed = transitionStart.duration(to: .now)
                 debugLog(
-                    "BLENNY_0_0_3 transition=\(presentation.rawValue) "
+                    "BLENNY_0_0_4 transition=\(presentation.rawValue) "
                         + "elapsed=\(elapsed)"
                 )
                 updateTimeout(for: presentation)
@@ -302,7 +431,10 @@ final class DebugPolicyCoexistenceController {
     private func makePlan(
         presentation: RevealSessionPresentation
     ) throws -> RevealAllowlistPlan {
-        try RevealAllowlistPlanner.plan(
+        guard let assignments else {
+            throw BoundedPolicyTargetValidationError.assignmentMismatch
+        }
+        return try RevealAllowlistPlanner.plan(
             presentation: presentation,
             assignments: assignments,
             observedRunningBundleIdentifiers: observedBundleIdentifiers,
@@ -311,15 +443,21 @@ final class DebugPolicyCoexistenceController {
     }
 
     private func logPlan(_ plan: RevealAllowlistPlan) {
+        guard let assignments else { return }
         let revealableAllowed = plan.allowedBundleIdentifiers.contains(
             assignments.revealable.first ?? ""
         )
         let hiddenAllowed = !assignments.hidden.isDisjoint(
             with: plan.allowedBundleIdentifiers
         )
+        let managedPolicyFingerprint = plan.managedPolicyFingerprint(
+            assignments: assignments
+        )
         debugLog(
-            "BLENNY_0_0_3 mode=\(realWritesEnabled ? "REAL" : "DRY_RUN") "
+            "BLENNY_0_0_4 mode=\(realWritesEnabled ? "REAL" : "DRY_RUN") "
                 + "plan=\(plan.presentation.rawValue) "
+                + "exact_snapshot_fingerprint=\(plan.fingerprint) "
+                + "managed_policy_fingerprint=\(managedPolicyFingerprint) "
                 + "bundle_count=\(plan.allowedBundleIdentifiers.count) "
                 + "system_items=\(plan.allowedSystemItems) "
                 + "pinned_allowed=\(plan.allowedBundleIdentifiers.contains(blennyBundleIdentifier)) "
@@ -328,6 +466,26 @@ final class DebugPolicyCoexistenceController {
                 + "hidden=\(assignments.hidden.first ?? "") "
                 + "hidden_allowed=\(hiddenAllowed)"
         )
+    }
+
+    private func authorizeManagedPolicyPlans(
+        baseline: RevealAllowlistPlan,
+        revealed: RevealAllowlistPlan
+    ) throws {
+        guard let assignments else {
+            throw BoundedPolicyTargetValidationError.assignmentMismatch
+        }
+        let environment = ProcessInfo.processInfo.environment
+        guard environment[Self.expectedBaselineFingerprintEnvironmentKey]
+                == baseline.managedPolicyFingerprint(assignments: assignments),
+              environment[Self.expectedRevealFingerprintEnvironmentKey]
+                == revealed.managedPolicyFingerprint(assignments: assignments) else {
+            debugLog(
+                "BLENNY_0_0_4 FAIL_CLOSED managed policy fingerprints were not authorized; "
+                    + "assertion_factory_created=false assertion_candidate_created=false"
+            )
+            throw RealPlanAuthorizationError.fingerprintMismatch
+        }
     }
 
     private static func debugLog(_ message: String) {
@@ -365,7 +523,7 @@ final class DebugPolicyCoexistenceController {
         let entry = entryPoint?.rawValue ?? "none"
         let detailSuffix = detail.map { "; \($0)" } ?? ""
         debugLog(
-            "BLENNY_0_0_3 state=\(reducer.presentation.rawValue) "
+            "BLENNY_0_0_4 state=\(reducer.presentation.rawValue) "
                 + "entry=\(entry)\(detailSuffix)"
         )
         statusItemController.updateDebugRevealPrototype(
@@ -378,6 +536,7 @@ final class DebugPolicyCoexistenceController {
 
     private func failClosed(status: String) {
         stopped = true
+        statusItemController.setDebugStopManagingEnabled(policyDocument?.managementEnabled == true)
         statusItemController.updateDebugRevealPrototype(
             entryPoint: nil,
             presentation: .baseline,
@@ -400,19 +559,34 @@ final class DebugPolicyCoexistenceController {
         return registeredURL == bundleURL
     }
 
-    private static func observeMenuBarTarget(
-        bundleIdentifier: String
-    ) -> MenuBarPolicyTargetObservation {
-        let applications = NSRunningApplication.runningApplications(
-            withBundleIdentifier: bundleIdentifier
+    private static func observeMenuBarOwnership() -> (
+        observations: [MenuBarPolicyOwnershipObservation],
+        completed: Bool
+    ) {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        var applications = NSWorkspace.shared.runningApplications
+        applications.append(
+            contentsOf: NSRunningApplication.runningApplications(
+                withBundleIdentifier: "com.apple.MenuBarAgent"
+            )
         )
-        var menuBarItemCount = 0
+        var seenProcesses = Set<pid_t>()
+        applications = applications.filter { application in
+            application.processIdentifier > 0
+                && seenProcesses.insert(application.processIdentifier).inserted
+                && (application.activationPolicy != .prohibited
+                    || application.bundleIdentifier == "com.apple.MenuBarAgent")
+        }
 
+        var observations: [MenuBarPolicyOwnershipObservation] = []
         for application in applications {
+            guard ContinuousClock.now < deadline else {
+                return (observations, false)
+            }
             let applicationElement = AXUIElementCreateApplication(
                 application.processIdentifier
             )
-            guard AXUIElementSetMessagingTimeout(applicationElement, 0.5) == .success else {
+            guard AXUIElementSetMessagingTimeout(applicationElement, 0.25) == .success else {
                 continue
             }
             var extrasValue: CFTypeRef?
@@ -436,14 +610,17 @@ final class DebugPolicyCoexistenceController {
             let children = childrenValue as? [AXUIElement] else {
                 continue
             }
-            menuBarItemCount += children.filter(Self.isTopLevelMenuExtra).count
+            let menuBarItemCount = children.filter(Self.isTopLevelMenuExtra).count
+            guard menuBarItemCount > 0 else { continue }
+            observations.append(
+                MenuBarPolicyOwnershipObservation(
+                    bundleIdentifier: application.bundleIdentifier,
+                    processIdentifier: Int32(application.processIdentifier),
+                    menuBarItemCount: menuBarItemCount
+                )
+            )
         }
-
-        return MenuBarPolicyTargetObservation(
-            bundleIdentifier: bundleIdentifier,
-            processIdentifiers: applications.map { Int32($0.processIdentifier) },
-            menuBarItemCount: menuBarItemCount
-        )
+        return (observations, true)
     }
 
     private static func isTopLevelMenuExtra(_ element: AXUIElement) -> Bool {
@@ -463,5 +640,9 @@ final class DebugPolicyCoexistenceController {
         }
         return value as? String
     }
+}
+
+private enum RealPlanAuthorizationError: Error {
+    case fingerprintMismatch
 }
 #endif

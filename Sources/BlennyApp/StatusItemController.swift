@@ -25,8 +25,8 @@ final class StatusItemController: NSObject {
     private let onRequestAccess: () -> Void
     private let onQuit: () -> Void
     #if DEBUG
-    private static let placementEnvironmentKey = "BLENNY_ENABLE_0_0_3_SELF_POSITION"
-    private static let placementAutosaveName = "Blenny0.0.3Validation"
+    private static let placementEnvironmentKey = "BLENNY_ENABLE_0_0_4_SELF_POSITION"
+    private static let placementAutosaveName = "Blenny0.0.4Validation"
     private static let placementPreferenceKey =
         "NSStatusItem Preferred Position \(placementAutosaveName)"
     private static let placementValue = 500
@@ -36,13 +36,19 @@ final class StatusItemController: NSObject {
     private var placementRestored = false
     private var lengthExperimentTask: Task<Void, Never>?
     private var revealPrototypeToggle: (() -> Void)?
+    private var stopManagingAndRestore: (() -> Void)?
     private var revealPrototypeEntryPoint: RevealEntryPoint?
     private var revealPrototypePresentation: RevealSessionPresentation = .baseline
     private var revealPrototypeEnabled = false
     private var revealPrototypeContentStack: DebugStatusItemContentStack?
     private var revealPrototypeArrowImageView: NSImageView?
     private let revealPrototypeStateItem = NSMenuItem(
-        title: "0.0.3 Revealable + Hidden prototype: inactive",
+        title: "0.0.4 Persistent Policy prototype: inactive",
+        action: nil,
+        keyEquivalent: ""
+    )
+    private let stopManagingItem = NSMenuItem(
+        title: "Stop Managing and Restore",
         action: nil,
         keyEquivalent: ""
     )
@@ -86,7 +92,7 @@ final class StatusItemController: NSObject {
         if placementProbeEnabled {
             statusItem.autosaveName = Self.placementAutosaveName
             Self.debugLog(
-                "BLENNY_0_0_3 self_position=\(Self.placementValue) "
+                "BLENNY_0_0_4 self_position=\(Self.placementValue) "
                     + "autosave=\(Self.placementAutosaveName) persistence=registration_domain"
             )
         }
@@ -106,8 +112,12 @@ final class StatusItemController: NSObject {
     }
 
     #if DEBUG
-    func configureDebugRevealPrototype(onToggle: @escaping () -> Void) {
+    func configureDebugRevealPrototype(
+        onToggle: @escaping () -> Void,
+        onStopManagingAndRestore: @escaping () -> Void
+    ) {
         revealPrototypeToggle = onToggle
+        stopManagingAndRestore = onStopManagingAndRestore
         revealPrototypeStateItem.isEnabled = false
         menu.insertItem(revealPrototypeStateItem, at: 0)
         menu.insertItem(.separator(), at: 1)
@@ -128,8 +138,12 @@ final class StatusItemController: NSObject {
         revealPrototypeEntryPoint = entryPoint
         revealPrototypePresentation = presentation
         revealPrototypeEnabled = enabled
-        revealPrototypeStateItem.title = "0.0.3: \(status)"
+        revealPrototypeStateItem.title = "0.0.4: \(status)"
         updateDebugRevealPrototypeButton()
+    }
+
+    func setDebugStopManagingEnabled(_ enabled: Bool) {
+        stopManagingItem.isEnabled = enabled
     }
 
     func runDebugLengthExperiment(
@@ -173,7 +187,7 @@ final class StatusItemController: NSObject {
             UserDefaults.standard.removeObject(forKey: Self.placementPreferenceKey)
         }
         _ = UserDefaults.standard.synchronize()
-        Self.debugLog("BLENNY_0_0_3 self_position_restored=true")
+        Self.debugLog("BLENNY_0_0_4 self_position_restored=true")
     }
 
     private func restoreStandardLength() {
@@ -195,9 +209,9 @@ final class StatusItemController: NSObject {
             button.title = "B"
         }
         #if DEBUG
-        button.toolTip = "Blenny 0.0.3 Revealable + Hidden technical prototype"
+        button.toolTip = "Blenny 0.0.4 Persistent Policy technical prototype"
         #else
-        button.toolTip = "Blenny 0.0.3 read-only Accessibility probe"
+        button.toolTip = "Blenny 0.0.4 read-only Accessibility probe"
         #endif
     }
 
@@ -209,6 +223,11 @@ final class StatusItemController: NSObject {
         for item in [openItem, refreshItem, requestItem, quitItem] {
             item.target = self
         }
+        #if DEBUG
+        stopManagingItem.target = self
+        stopManagingItem.action = #selector(stopManaging)
+        stopManagingItem.isEnabled = false
+        #endif
         permissionItem.isEnabled = false
 
         menu.addItem(openItem)
@@ -216,6 +235,10 @@ final class StatusItemController: NSObject {
         menu.addItem(.separator())
         menu.addItem(permissionItem)
         menu.addItem(requestItem)
+        #if DEBUG
+        menu.addItem(.separator())
+        menu.addItem(stopManagingItem)
+        #endif
         menu.addItem(.separator())
         menu.addItem(quitItem)
         statusItem.menu = menu
@@ -287,7 +310,7 @@ final class StatusItemController: NSObject {
         button.toolTip = revealPrototypeStateItem.title
         button.setAccessibilityLabel(accessibilityDescription)
         Self.debugLog(
-            "BLENNY_0_0_3 status_item_length=\(statusItem.length) "
+            "BLENNY_0_0_4 status_item_length=\(statusItem.length) "
                 + "arrow=\(arrowSymbolName ?? "none") native_symbol_views=true"
         )
     }
@@ -358,6 +381,12 @@ final class StatusItemController: NSObject {
     @objc private func requestAccess() {
         onRequestAccess()
     }
+
+    #if DEBUG
+    @objc private func stopManaging() {
+        stopManagingAndRestore?()
+    }
+    #endif
 
     @objc private func quit() {
         onQuit()
