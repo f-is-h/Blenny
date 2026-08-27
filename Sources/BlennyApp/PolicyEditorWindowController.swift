@@ -26,13 +26,16 @@ final class PolicyEditorWindowController: NSWindowController {
     private let subtitleLabel = NSTextField(wrappingLabelWithString: "Set bundle-level menu bar intent. Changes stay local until you review and apply them.")
     private let managementLabel = NSTextField(labelWithString: "Management: Checking…")
     private let observationLabel = NSTextField(labelWithString: "No menu bar observation yet.")
+    private let placementLimitLabel = NSTextField(
+        wrappingLabelWithString: "macOS controls final placement. Visible means Blenny does not conceal an item; limited space can still move it into system overflow."
+    )
     private let permissionBox = NSBox()
     private let permissionLabel = NSTextField(wrappingLabelWithString: "")
     private let permissionButton = NSButton(title: "Set Up Accessibility…", target: nil, action: nil)
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let moveLabel = NSTextField(labelWithString: "Select a bundle to change its group.")
     private let moveControl = NSSegmentedControl(
-        labels: ["Pinned", "Revealable", "Hidden"],
+        labels: ["Visible", "Revealable", "Hidden"],
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -179,12 +182,12 @@ final class PolicyEditorWindowController: NSWindowController {
             : "Management: Stopped — draft edits are safe and local"
         managementLabel.textColor = model.acceptedPolicy.managementEnabled
             ? .systemGreen : .secondaryLabelColor
-        observationLabel.stringValue = "Bounded read-only observation: \(observationCount) bundle owner\(observationCount == 1 ? "" : "s"). Manual refresh only; no polling."
+        observationLabel.stringValue = "Bounded read-only observation: \(observationCount) bundle owner\(observationCount == 1 ? "" : "s") and \(model.systemItems.count) identifiable macOS system item\(model.systemItems.count == 1 ? "" : "s"). Manual refresh only; no polling."
         renderGroups()
         setStatus(
             model.hasDraftChanges
                 ? "Draft has unapplied changes."
-                : "Draft matches the accepted policy and current candidate defaults.",
+                : "No policy changes. Newly observed apps remain effectively Visible without being persisted.",
             isError: false
         )
         updateControls()
@@ -214,6 +217,9 @@ final class PolicyEditorWindowController: NSWindowController {
         managementLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         observationLabel.font = .systemFont(ofSize: 11, weight: .regular)
         observationLabel.textColor = .tertiaryLabelColor
+        placementLimitLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        placementLimitLabel.textColor = .secondaryLabelColor
+        placementLimitLabel.maximumNumberOfLines = 2
 
         permissionBox.boxType = .custom
         permissionBox.cornerRadius = 8
@@ -299,6 +305,7 @@ final class PolicyEditorWindowController: NSWindowController {
             header,
             permissionBox,
             policyLanes,
+            placementLimitLabel,
             moveRow,
             statusLabel,
             draftActions,
@@ -325,7 +332,8 @@ final class PolicyEditorWindowController: NSWindowController {
             header.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
             permissionBox.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
             policyLanes.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-            policyLanes.heightAnchor.constraint(greaterThanOrEqualToConstant: 320),
+            policyLanes.heightAnchor.constraint(greaterThanOrEqualToConstant: 284),
+            placementLimitLabel.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
             draftActions.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
             recoveryHelp.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
@@ -350,13 +358,13 @@ final class PolicyEditorWindowController: NSWindowController {
         let detail = NSTextField(wrappingLabelWithString: detail(for: policy))
         detail.font = .systemFont(ofSize: 11, weight: .regular)
         detail.textColor = .secondaryLabelColor
-        detail.maximumNumberOfLines = 3
+        detail.maximumNumberOfLines = 2
 
         let itemStack = NSStackView()
         itemStack.orientation = .horizontal
         itemStack.alignment = .centerY
         itemStack.spacing = 8
-        itemStack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        itemStack.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
         itemStack.translatesAutoresizingMaskIntoConstraints = true
         groupStacks[policy] = itemStack
 
@@ -396,14 +404,14 @@ final class PolicyEditorWindowController: NSWindowController {
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: boxContent.leadingAnchor, constant: 12),
             stack.trailingAnchor.constraint(equalTo: boxContent.trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: boxContent.topAnchor, constant: 12),
-            stack.bottomAnchor.constraint(equalTo: boxContent.bottomAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: boxContent.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: boxContent.bottomAnchor, constant: -10),
             accent.widthAnchor.constraint(equalToConstant: 5),
             accent.heightAnchor.constraint(equalToConstant: 20),
             descriptionStack.widthAnchor.constraint(equalToConstant: 210),
             detail.widthAnchor.constraint(equalTo: descriptionStack.widthAnchor),
-            scrollView.heightAnchor.constraint(equalToConstant: 74),
-            box.heightAnchor.constraint(equalToConstant: 100),
+            scrollView.heightAnchor.constraint(equalToConstant: 64),
+            box.heightAnchor.constraint(equalToConstant: 88),
         ])
         return box
     }
@@ -416,8 +424,15 @@ final class PolicyEditorWindowController: NSWindowController {
                 stack.removeArrangedSubview(view)
                 view.removeFromSuperview()
             }
-            let candidates = model.candidates(in: policy)
-            if candidates.isEmpty {
+            var candidates = model.candidates(in: policy)
+            if policy == .visible {
+                candidates.append(contentsOf: model.implicitVisibleCandidates)
+                candidates.sort {
+                    ($0.bundleIdentifier.lowercased(), $0.bundleIdentifier)
+                        < ($1.bundleIdentifier.lowercased(), $1.bundleIdentifier)
+                }
+            }
+            if candidates.isEmpty && (policy != .visible || model.systemItems.isEmpty) {
                 let empty = NSTextField(labelWithString: "No observed bundles")
                 empty.textColor = .tertiaryLabelColor
                 empty.font = .systemFont(ofSize: 11, weight: .regular)
@@ -431,6 +446,13 @@ final class PolicyEditorWindowController: NSWindowController {
                 let button = makeBundleButton(candidate, policy: policy)
                 stack.addArrangedSubview(button)
                 button.widthAnchor.constraint(equalToConstant: 220).isActive = true
+            }
+            if policy == .visible {
+                for systemItem in model.systemItems {
+                    let card = makeSystemItemCard(systemItem)
+                    stack.addArrangedSubview(card)
+                    card.widthAnchor.constraint(equalToConstant: 190).isActive = true
+                }
             }
             sizeItemStrip(for: policy)
         }
@@ -467,16 +489,16 @@ final class PolicyEditorWindowController: NSWindowController {
         let displayName = candidate.bundleIdentifier.split(separator: ".").last
             .map(String.init) ?? candidate.bundleIdentifier
         let subtitle = isBlenny
-            ? "Always pinned · \(candidate.bundleIdentifier)"
+            ? "Required recovery control · \(candidate.bundleIdentifier)"
             : "\(candidate.bundleIdentifier) · \(candidate.menuBarItemCount) item\(candidate.menuBarItemCount == 1 ? "" : "s")"
-        let title = NSMutableAttributedString(
+        let attributedTitle = NSMutableAttributedString(
             string: "\(displayName)\n",
             attributes: [
                 .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
                 .foregroundColor: NSColor.labelColor,
             ]
         )
-        title.append(
+        attributedTitle.append(
             NSAttributedString(
                 string: subtitle,
                 attributes: [
@@ -485,17 +507,55 @@ final class PolicyEditorWindowController: NSWindowController {
                 ]
             )
         )
-        button.attributedTitle = title
+        button.attributedTitle = attributedTitle
         button.alignment = .left
         button.bezelStyle = .regularSquare
         button.setButtonType(.toggle)
         button.target = self
         button.action = #selector(selectBundle(_:))
         button.toolTip = candidate.bundleIdentifier
-        button.setAccessibilityLabel("\(displayName), \(policy.rawValue), \(subtitle)")
+        button.setAccessibilityLabel("\(displayName), \(title(for: policy)), \(subtitle)")
         button.state = selectedBundleIdentifier == candidate.bundleIdentifier ? .on : .off
         button.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
         return button
+    }
+
+    private func makeSystemItemCard(
+        _ observation: SystemMenuBarItemObservation
+    ) -> NSView {
+        let box = NSBox()
+        box.boxType = .custom
+        box.cornerRadius = 5
+        box.borderWidth = 1
+        box.borderColor = NSColor.separatorColor
+        box.fillColor = NSColor.controlBackgroundColor.withAlphaComponent(0.55)
+
+        let name = NSTextField(labelWithString: observation.displayName)
+        name.font = .systemFont(ofSize: 12, weight: .semibold)
+        let detail = NSTextField(labelWithString: "macOS System Item · Read Only")
+        detail.font = .systemFont(ofSize: 9, weight: .regular)
+        detail.textColor = .secondaryLabelColor
+        let stack = NSStackView(views: [name, detail])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        box.contentView?.addSubview(stack)
+        if let content = box.contentView {
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+                stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
+                stack.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            ])
+        }
+        box.toolTip = "\(observation.displayName) is observed read-only through \(observation.ownerBundleIdentifier) and cannot be reassigned in Blenny 0.1.0."
+        box.setAccessibilityElement(true)
+        box.setAccessibilityRole(.staticText)
+        box.setAccessibilityLabel(
+            "\(observation.displayName), macOS system item, read only"
+        )
+        box.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
+        return box
     }
 
     private func updateControls() {
@@ -522,7 +582,11 @@ final class PolicyEditorWindowController: NSWindowController {
         }
         moveLabel.stringValue = "Move \(selectedBundleIdentifier) to"
         let currentPolicy = MenuBarBundlePolicy.allCases.first { policy in
-            model.candidates(in: policy).contains {
+            var candidates = model.candidates(in: policy)
+            if policy == .visible {
+                candidates.append(contentsOf: model.implicitVisibleCandidates)
+            }
+            return candidates.contains {
                 $0.bundleIdentifier == selectedBundleIdentifier
             }
         }
@@ -539,7 +603,7 @@ final class PolicyEditorWindowController: NSWindowController {
 
     private func color(for policy: MenuBarBundlePolicy) -> NSColor {
         switch policy {
-        case .pinned: .systemBlue
+        case .visible: .systemBlue
         case .revealable: .systemTeal
         case .hidden: .secondaryLabelColor
         }
@@ -547,7 +611,7 @@ final class PolicyEditorWindowController: NSWindowController {
 
     private func title(for policy: MenuBarBundlePolicy) -> String {
         switch policy {
-        case .pinned: "Pinned"
+        case .visible: "Visible"
         case .revealable: "Revealable"
         case .hidden: "Hidden"
         }
@@ -555,8 +619,8 @@ final class PolicyEditorWindowController: NSWindowController {
 
     private func detail(for policy: MenuBarBundlePolicy) -> String {
         switch policy {
-        case .pinned:
-            "Kept visible whenever possible. Blenny always stays here."
+        case .visible:
+            "Not concealed by Blenny. macOS may still move items into overflow."
         case .revealable:
             "Concealed at baseline and included in an ordinary reveal."
         case .hidden:

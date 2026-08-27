@@ -3,17 +3,17 @@ import Testing
 
 @Suite("Revealable policy planning")
 struct RevealablePolicyTests {
-    private let pinned = "com.example.Pinned"
+    private let visible = "com.example.Visible"
     private let revealable = "com.example.Revealable"
     private let hidden = "com.example.Hidden"
     private let unmanaged = "com.example.Unmanaged"
     private let blenny = "com.example.BlennyProbe"
 
-    @Test("Pinned is present at baseline and during reveal")
-    func pinnedIsAlwaysPresent() throws {
+    @Test("Visible is present at baseline and during reveal")
+    func visibleIsAlwaysPresent() throws {
         let plans = try makePlans()
-        #expect(plans.baseline.allowedBundleIdentifiers.contains(pinned))
-        #expect(plans.revealed.allowedBundleIdentifiers.contains(pinned))
+        #expect(plans.baseline.allowedBundleIdentifiers.contains(visible))
+        #expect(plans.revealed.allowedBundleIdentifiers.contains(visible))
     }
 
     @Test("Revealable is present only during an ordinary reveal session")
@@ -44,8 +44,8 @@ struct RevealablePolicyTests {
     func overlappingPoliciesAreRejected() {
         #expect(throws: BundlePolicyAssignmentsError.self) {
             _ = try BundlePolicyAssignments(
-                pinned: [pinned],
-                revealable: [pinned],
+                visible: [visible],
+                revealable: [visible],
                 hidden: []
             )
         }
@@ -54,11 +54,11 @@ struct RevealablePolicyTests {
     @Test("Hidden stays excluded through both ordinary reveal entries")
     func hiddenIsExcludedForBothEntries() throws {
         let assignments = try BundlePolicyAssignments(
-            pinned: [pinned],
+            visible: [visible],
             revealable: [revealable],
             hidden: [hidden]
         )
-        let observed = Set([pinned, revealable, hidden, unmanaged])
+        let observed = Set([visible, revealable, hidden, unmanaged])
 
         for entryPoint in [RevealEntryPoint.nativeOverflow, .blennyFallback] {
             var reducer = RevealSessionReducer(entryPoint: entryPoint)
@@ -79,7 +79,7 @@ struct RevealablePolicyTests {
                 observedRunningBundleIdentifiers: observed,
                 blennyBundleIdentifier: blenny
             )
-            #expect(plan.allowedBundleIdentifiers.contains(pinned))
+            #expect(plan.allowedBundleIdentifiers.contains(visible))
             #expect(plan.allowedBundleIdentifiers.contains(revealable))
             #expect(!plan.allowedBundleIdentifiers.contains(hidden))
         }
@@ -231,12 +231,12 @@ struct RevealablePolicyTests {
         let first = RevealAllowlistPlan(
             presentation: .baseline,
             allowedSystemItems: [2, 0, 1],
-            allowedBundleIdentifiers: [hidden, pinned, revealable]
+            allowedBundleIdentifiers: [hidden, visible, revealable]
         )
         let reordered = RevealAllowlistPlan(
             presentation: .baseline,
             allowedSystemItems: [1, 2, 0],
-            allowedBundleIdentifiers: [revealable, hidden, pinned]
+            allowedBundleIdentifiers: [revealable, hidden, visible]
         )
         #expect(first.fingerprint == reordered.fingerprint)
     }
@@ -246,12 +246,12 @@ struct RevealablePolicyTests {
         let baseline = RevealAllowlistPlan(
             presentation: .baseline,
             allowedSystemItems: [0, 1, 2],
-            allowedBundleIdentifiers: [pinned]
+            allowedBundleIdentifiers: [visible]
         )
         let revealed = RevealAllowlistPlan(
             presentation: .revealed,
             allowedSystemItems: [0, 1, 2],
-            allowedBundleIdentifiers: [pinned, revealable]
+            allowedBundleIdentifiers: [visible, revealable]
         )
         #expect(baseline.fingerprint != revealed.fingerprint)
     }
@@ -259,20 +259,20 @@ struct RevealablePolicyTests {
     @Test("Managed policy fingerprint ignores unrelated running bundles")
     func managedPolicyFingerprintIgnoresUnrelatedBundles() throws {
         let assignments = try BundlePolicyAssignments(
-            pinned: [pinned],
+            visible: [visible],
             revealable: [revealable],
             hidden: [hidden]
         )
         let first = RevealAllowlistPlan(
             presentation: .baseline,
             allowedSystemItems: [0, 1, 2],
-            allowedBundleIdentifiers: [pinned, "com.example.Unrelated"]
+            allowedBundleIdentifiers: [visible, "com.example.Unrelated"]
         )
         let changedSnapshot = RevealAllowlistPlan(
             presentation: .baseline,
             allowedSystemItems: [2, 1, 0],
             allowedBundleIdentifiers: [
-                pinned,
+                visible,
                 "com.example.DifferentHelper",
                 "com.example.Unrelated",
             ]
@@ -288,29 +288,29 @@ struct RevealablePolicyTests {
     @Test("Managed policy fingerprint detects effective managed changes")
     func managedPolicyFingerprintDetectsManagedChanges() throws {
         let assignments = try BundlePolicyAssignments(
-            pinned: [pinned],
+            visible: [visible],
             revealable: [revealable],
             hidden: [hidden]
         )
         let baseline = RevealAllowlistPlan(
             presentation: .baseline,
             allowedSystemItems: [0, 1, 2],
-            allowedBundleIdentifiers: [pinned]
+            allowedBundleIdentifiers: [visible]
         )
         let revealableIncorrectlyAllowed = RevealAllowlistPlan(
             presentation: .baseline,
             allowedSystemItems: [0, 1, 2],
-            allowedBundleIdentifiers: [pinned, revealable]
+            allowedBundleIdentifiers: [visible, revealable]
         )
         let changedSystemItems = RevealAllowlistPlan(
             presentation: .baseline,
             allowedSystemItems: [0, 1],
-            allowedBundleIdentifiers: [pinned]
+            allowedBundleIdentifiers: [visible]
         )
         let revealed = RevealAllowlistPlan(
             presentation: .revealed,
             allowedSystemItems: [0, 1, 2],
-            allowedBundleIdentifiers: [pinned, revealable]
+            allowedBundleIdentifiers: [visible, revealable]
         )
 
         let authorized = baseline.managedPolicyFingerprint(assignments: assignments)
@@ -348,11 +348,11 @@ struct RevealablePolicyTests {
         revealed: RevealAllowlistPlan
     ) {
         let assignments = try BundlePolicyAssignments(
-            pinned: [pinned],
+            visible: [visible],
             revealable: [revealable],
             hidden: [hidden]
         )
-        let observed = Set([pinned, revealable, hidden, unmanaged])
+        let observed = Set([visible, revealable, hidden, unmanaged])
         return (
             try RevealAllowlistPlanner.plan(
                 presentation: .baseline,

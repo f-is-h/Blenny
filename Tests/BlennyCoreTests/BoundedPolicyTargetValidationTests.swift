@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Bounded real policy target validation")
 struct BoundedPolicyTargetValidationTests {
-    private let pinned = "com.example.BlennyProbe"
+    private let visible = "com.example.BlennyProbe"
     private let revealable = "xyz.fi5h.Usage4Claude"
     private let hidden = "pl.maketheweb.cleanshotx"
 
@@ -17,7 +17,7 @@ struct BoundedPolicyTargetValidationTests {
     func identicalTargetsFailClosed() {
         #expect(throws: BundlePolicyAssignmentsError.self) {
             _ = try BundlePolicyAssignments(
-                pinned: [pinned],
+                visible: [visible],
                 revealable: [revealable],
                 hidden: [revealable]
             )
@@ -27,7 +27,7 @@ struct BoundedPolicyTargetValidationTests {
     @Test("Role assignments must match the approved bounded targets")
     func assignmentMismatchFailsClosed() throws {
         let assignments = try BundlePolicyAssignments(
-            pinned: [pinned],
+            visible: [visible],
             revealable: [revealable],
             hidden: [hidden]
         )
@@ -36,7 +36,7 @@ struct BoundedPolicyTargetValidationTests {
         ) {
             try BoundedPolicyTargetValidator.validate(
                 assignments: assignments,
-                pinnedBundleIdentifier: pinned,
+                visibleBundleIdentifier: visible,
                 revealableBundleIdentifier: hidden,
                 hiddenBundleIdentifier: revealable,
                 observations: validObservations
@@ -124,13 +124,13 @@ struct BoundedPolicyTargetValidationTests {
         observations: [MenuBarPolicyTargetObservation]
     ) throws {
         let assignments = try BundlePolicyAssignments(
-            pinned: [pinned],
+            visible: [visible],
             revealable: [revealable],
             hidden: [hidden]
         )
         try BoundedPolicyTargetValidator.validate(
             assignments: assignments,
-            pinnedBundleIdentifier: pinned,
+            visibleBundleIdentifier: visible,
             revealableBundleIdentifier: revealable,
             hiddenBundleIdentifier: hidden,
             observations: observations

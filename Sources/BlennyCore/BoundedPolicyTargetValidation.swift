@@ -27,12 +27,12 @@ public enum BoundedPolicyTargetValidationError: Error, Equatable, Sendable {
 public enum BoundedPolicyTargetValidator {
     public static func validate(
         assignments: BundlePolicyAssignments,
-        pinnedBundleIdentifier: String,
+        visibleBundleIdentifier: String,
         revealableBundleIdentifier: String,
         hiddenBundleIdentifier: String,
         observations: [MenuBarPolicyTargetObservation]
     ) throws {
-        guard assignments.pinned == [pinnedBundleIdentifier],
+        guard assignments.visible == [visibleBundleIdentifier],
             assignments.revealable == [revealableBundleIdentifier],
             assignments.hidden == [hiddenBundleIdentifier]
         else {

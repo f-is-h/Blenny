@@ -36,11 +36,11 @@ public enum PersistentBundlePolicyDocumentError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
     case invalidBundleIdentifier(String)
     case duplicateBundleIdentifier(String)
-    case missingPinnedBlenny(String)
+    case missingVisibleBlenny(String)
 }
 
 public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public let schemaVersion: Int
     public let managementEnabled: Bool
@@ -83,10 +83,10 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
             )
         }
         guard policies.contains(where: { entry in
-            entry.policy == .pinned
+            entry.policy == .visible
                 && BundlePolicyIdentity.canonicalKey(for: entry.bundleIdentifier) == blennyKey
         }) else {
-            throw PersistentBundlePolicyDocumentError.missingPinnedBlenny(
+            throw PersistentBundlePolicyDocumentError.missingVisibleBlenny(
                 blennyBundleIdentifier
             )
         }
@@ -103,17 +103,46 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
         case policies
     }
 
+    private enum LegacyPolicy: String, Decodable {
+        case pinned
+        case revealable
+        case hidden
+
+        var current: MenuBarBundlePolicy {
+            switch self {
+            case .pinned: .visible
+            case .revealable: .revealable
+            case .hidden: .hidden
+            }
+        }
+    }
+
+    private struct LegacyEntry: Decodable {
+        let bundleIdentifier: String
+        let policy: LegacyPolicy
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
-        guard schemaVersion == Self.currentSchemaVersion else {
+        guard schemaVersion == 1 || schemaVersion == Self.currentSchemaVersion else {
             throw PersistentBundlePolicyDocumentError.unsupportedSchemaVersion(schemaVersion)
         }
         let managementEnabled = try container.decode(Bool.self, forKey: .managementEnabled)
-        let policies = try container.decode(
-            [PersistentBundlePolicyEntry].self,
-            forKey: .policies
-        )
+        let policies: [PersistentBundlePolicyEntry]
+        if schemaVersion == 1 {
+            policies = try container.decode([LegacyEntry].self, forKey: .policies).map {
+                PersistentBundlePolicyEntry(
+                    bundleIdentifier: $0.bundleIdentifier,
+                    policy: $0.policy.current
+                )
+            }
+        } else {
+            policies = try container.decode(
+                [PersistentBundlePolicyEntry].self,
+                forKey: .policies
+            )
+        }
         self = try Self(
             managementEnabled: managementEnabled,
             policies: policies

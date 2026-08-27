@@ -2,7 +2,7 @@
 
 Blenny is a minimal, native menu bar organizer designed exclusively for macOS 27 and later.
 
-The project is currently under private development. Versions `0.0.1` through `0.0.5` established the bounded macOS 27 backend, bundle-policy persistence, deterministic editing, rollback, and restoration foundations. Version `0.1.0` completed the first minimal AppKit product interface: three bundle-level policy groups, bounded read-only candidate refresh, local drafts, deterministic review before Apply, recovery actions, and non-repeating Accessibility onboarding. It is not yet a distributable release or a general compatibility claim; lifecycle and display hardening remain `0.2.0` work.
+The project is currently under private development. Versions `0.0.1` through `0.0.5` established the bounded macOS 27 backend, bundle-policy persistence, deterministic editing, rollback, and restoration foundations. Version `0.1.0` completed the first minimal AppKit product interface: Visible, Revealable, and Hidden bundle-level states, bounded read-only candidate refresh, read-only Apple system-item presentation, local drafts, deterministic review before Apply, recovery actions, and non-repeating Accessibility onboarding. Visible means Blenny does not conceal an item; macOS still owns final placement and native overflow. It is not yet a distributable release or a general compatibility claim; lifecycle and display hardening remain `0.2.0` work.
 
 ## Product direction
 

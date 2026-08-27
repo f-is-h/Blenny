@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 public enum MenuBarBundlePolicy: String, CaseIterable, Codable, Hashable, Sendable {
-    case pinned
+    case visible
     case revealable
     case hidden
 }
@@ -13,22 +13,22 @@ public enum BundlePolicyAssignmentsError: Error, Equatable, Sendable {
 }
 
 public struct BundlePolicyAssignments: Equatable, Sendable {
-    public let pinned: Set<String>
+    public let visible: Set<String>
     public let revealable: Set<String>
     public let hidden: Set<String>
 
     public init(
-        pinned: Set<String>,
+        visible: Set<String>,
         revealable: Set<String>,
         hidden: Set<String>
     ) throws {
-        let allIdentifiers = pinned.union(revealable).union(hidden)
+        let allIdentifiers = visible.union(revealable).union(hidden)
         guard allIdentifiers.allSatisfy(Self.isValidBundleIdentifier) else {
             throw BundlePolicyAssignmentsError.emptyBundleIdentifier
         }
 
-        let overlaps = pinned.intersection(revealable)
-            .union(pinned.intersection(hidden))
+        let overlaps = visible.intersection(revealable)
+            .union(visible.intersection(hidden))
             .union(revealable.intersection(hidden))
         if let overlap = overlaps.sorted().first {
             throw BundlePolicyAssignmentsError.overlappingPolicies(
@@ -36,7 +36,7 @@ public struct BundlePolicyAssignments: Equatable, Sendable {
             )
         }
 
-        self.pinned = pinned
+        self.visible = visible
         self.revealable = revealable
         self.hidden = hidden
     }
@@ -87,7 +87,7 @@ public struct RevealAllowlistPlan: Equatable, Sendable {
     ) -> String {
         let allowed = Set(allowedBundleIdentifiers)
         let managedStates = [
-            (MenuBarBundlePolicy.pinned, assignments.pinned),
+            (MenuBarBundlePolicy.visible, assignments.visible),
             (MenuBarBundlePolicy.revealable, assignments.revealable),
             (MenuBarBundlePolicy.hidden, assignments.hidden),
         ].flatMap { policy, identifiers in
@@ -130,7 +130,7 @@ public enum RevealAllowlistPlanner {
         }
 
         var allowed = observedRunningBundleIdentifiers
-        allowed.formUnion(assignments.pinned)
+        allowed.formUnion(assignments.visible)
         allowed.insert(blennyBundleIdentifier)
         allowed.subtract(assignments.hidden)
 

@@ -250,15 +250,17 @@ Do not add a license file until the project owner chooses one.
 
 ### 8.1 Proposed user model
 
-Blenny's management unit is an owning application bundle, not an individual status-item instance. Every status item exposed by the same bundle inherits one policy; Blenny does not offer per-icon control within one app.
+Blenny's management unit is an owning application bundle, not an individual status-item instance. Every status item exposed by the same bundle inherits one policy; Blenny does not offer per-icon control within one app. Apple system items remain MenuBarAgent-owned presentation records rather than application-bundle policy candidates.
 
-Each manageable application has one of three policies. The working internal names are deliberately distinct from Accessibility's `AXHidden` attribute and the native overflow control's collapsed state:
+Each manageable application has one of three effective states. A newly observed application is effectively Visible without adding a persistent policy entry; persistence records only explicit user intent. The names are deliberately distinct from Accessibility's `AXHidden` attribute and the native overflow control's collapsed state:
 
-1. **Pinned** — keep visible whenever possible.
+1. **Visible** — Blenny does not deliberately conceal the bundle. macOS remains free to place it in native overflow when space is limited.
 2. **Revealable** — keep normally concealed through Blenny's bundle-level visibility policy, then include it only during a user-initiated reveal session.
 3. **Hidden** — keep excluded from ordinary reveal sessions; it must still be discoverable and temporarily recoverable from Blenny's main interface, with a global shortcut as a possible later convenience.
 
-The initial settings interface may present these as three columns. User-facing labels remain subject to interface testing; the intended Chinese concepts are fixed display, revealable hidden, and fully hidden.
+The settings interface presents these as three horizontal lanes. `Visible` is an allow state, not a fixed position or a guarantee that an item remains physically present in the collapsed menu bar.
+
+Current Apple system items with stable read-only Accessibility observations may appear in the Visible lane with an explicit read-only marker. They cannot enter an application-bundle draft or be reassigned until a bounded version-specific mapping from the observed system identity to the backend's system-item identity has been separately validated. Blenny must not imply that Wi-Fi, Bluetooth, Control Center, the clock, or another critical system control is safely mutable merely because it is observable.
 
 Revealable and Hidden are not two different low-level hiding mechanisms. Both use the reversible bundle-level concealment path validated by the spike. The difference is which bundles Blenny admits into an ordinary reveal session.
 
@@ -272,7 +274,7 @@ The system remains the source of truth for the currently rendered layout. Blenny
 
 - One native menu bar item owned by Blenny.
 - A minimal layout editor.
-- Pinned, Revealable, and Hidden bundle-level policies.
+- Visible, Revealable, and Hidden bundle-level policies.
 - Stable persistence across app relaunches and login sessions.
 - Observation of the native overflow state.
 - A simple on-demand shelf only where necessary.
@@ -323,6 +325,7 @@ BlennyApp
 - Enumerate menu bar items without mutating them.
 - Attribute items to their owning app or `MenuBarAgent`.
 - Collect candidate identity attributes and frames.
+- Keep identifiable Apple system items visible as read-only presentation records rather than editable bundle candidates.
 
 `NativeOverflowObserver`
 
@@ -343,7 +346,7 @@ Candidate identity components:
 
 `MenuBarPolicyEngine`
 
-- Convert Pinned/Revealable/Hidden user intent into deterministic baseline and reveal-session states.
+- Convert Visible/Revealable/Hidden user intent into deterministic baseline and reveal-session states.
 - Remain deterministic and testable without macOS private APIs.
 
 `MacOS27LayoutBackend`

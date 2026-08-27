@@ -37,16 +37,38 @@ extension MenuBarOwnershipSnapshotIssue: CustomStringConvertible {
 
 public struct MenuBarOwnershipSnapshot: Equatable, Sendable {
     public let observations: [MenuBarPolicyOwnershipObservation]
+    public let systemItems: [SystemMenuBarItemObservation]
     public let issues: [MenuBarOwnershipSnapshotIssue]
 
     public var isComplete: Bool { issues.isEmpty }
 
     public init(
         observations: [MenuBarPolicyOwnershipObservation],
+        systemItems: [SystemMenuBarItemObservation],
         issues: [MenuBarOwnershipSnapshotIssue]
     ) {
         self.observations = observations
+        self.systemItems = systemItems
         self.issues = issues
+    }
+}
+
+public struct SystemMenuBarItemObservation: Equatable, Sendable {
+    public let observationIdentifier: String
+    public let ownerBundleIdentifier: String
+    public let displayName: String
+    public let observationCount: Int
+
+    public init(
+        observationIdentifier: String,
+        ownerBundleIdentifier: String,
+        displayName: String,
+        observationCount: Int
+    ) {
+        self.observationIdentifier = observationIdentifier
+        self.ownerBundleIdentifier = ownerBundleIdentifier
+        self.displayName = displayName
+        self.observationCount = observationCount
     }
 }
 
@@ -93,7 +115,80 @@ public enum MenuBarOwnershipSnapshotBuilder {
             return (firstIdentifier.lowercased(), firstIdentifier, first.processIdentifier)
                 < (secondIdentifier.lowercased(), secondIdentifier, second.processIdentifier)
         }
-        return MenuBarOwnershipSnapshot(observations: observations, issues: issues)
+        let systemItems = makeSystemItems(from: report.items)
+        return MenuBarOwnershipSnapshot(
+            observations: observations,
+            systemItems: systemItems,
+            issues: issues
+        )
+    }
+
+    private static func makeSystemItems(
+        from records: [MenuBarItemRecord]
+    ) -> [SystemMenuBarItemObservation] {
+        let identifiableItems = records.filter { record in
+            (record.source == .menuBarAgent
+                || isCriticalSystemOwner(record.ownerBundleIdentifier))
+                && record.classification != .nativeOverflowPresentationControl
+                && record.role == "AXMenuBarItem"
+                && record.subrole == "AXMenuExtra"
+                && systemItemObservationIdentifier(for: record) != nil
+                && systemItemObservedName(for: record) != nil
+        }
+        let grouped = Dictionary(grouping: identifiableItems) {
+            systemItemObservationIdentifier(for: $0) ?? ""
+        }
+        return grouped.compactMap { identifier, records in
+            guard !identifier.isEmpty, let first = records.first else { return nil }
+            return SystemMenuBarItemObservation(
+                observationIdentifier: identifier,
+                ownerBundleIdentifier: first.ownerBundleIdentifier
+                    ?? "com.apple.MenuBarAgent",
+                displayName: systemItemDisplayName(
+                    identifier: identifier,
+                    records: records
+                ),
+                observationCount: records.count
+            )
+        }.sorted {
+            ($0.displayName.lowercased(), $0.observationIdentifier)
+                < ($1.displayName.lowercased(), $1.observationIdentifier)
+        }
+    }
+
+    private static func systemItemObservationIdentifier(
+        for record: MenuBarItemRecord
+    ) -> String? {
+        if let identifier = record.accessibilityIdentifier, !identifier.isEmpty {
+            return identifier
+        }
+        return record.identity?.stableKey
+    }
+
+    private static func systemItemObservedName(
+        for record: MenuBarItemRecord
+    ) -> String? {
+        [record.title, record.itemDescription].compactMap { $0 }.first { !$0.isEmpty }
+    }
+
+    private static func systemItemDisplayName(
+        identifier: String,
+        records: [MenuBarItemRecord]
+    ) -> String {
+        let knownNames = [
+            "com.apple.menuextra.bluetooth": "Bluetooth",
+            "com.apple.menuextra.clock": "Clock",
+            "com.apple.menuextra.controlcenter": "Control Center",
+            "com.apple.menuextra.now-playing": "Now Playing",
+            "com.apple.menuextra.sound": "Sound",
+            "com.apple.menuextra.wifi": "Wi-Fi",
+        ]
+        if let knownName = knownNames[identifier.lowercased()] {
+            return knownName
+        }
+        let observedName = records.lazy.compactMap(systemItemObservedName(for:)).first
+        return observedName ?? identifier.split(separator: ".").last.map(String.init)
+            ?? identifier
     }
 
     private static func isCriticalSystemOwner(_ bundleIdentifier: String?) -> Bool {
@@ -104,13 +199,14 @@ public enum MenuBarOwnershipSnapshotBuilder {
 public enum PolicyEditorAssignmentResult: Equatable, Sendable {
     case changed
     case unchanged
-    case rejectedPinnedBlenny
+    case rejectedBlennyMustRemainVisible
     case unknownCandidate
 }
 
 public struct PolicyEditorViewModel: Equatable, Sendable {
     public let acceptedPolicy: PersistentBundlePolicyDocument
     public let candidateInventory: PolicyCandidateInventory
+    public let systemItems: [SystemMenuBarItemObservation]
     public let blennyBundleIdentifier: String
     public private(set) var draft: BundlePolicyDraft
 
@@ -119,16 +215,17 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
     public init(
         acceptedPolicy: PersistentBundlePolicyDocument,
         candidateInventory: PolicyCandidateInventory,
+        systemItems: [SystemMenuBarItemObservation] = [],
         blennyBundleIdentifier: String
     ) throws {
         self.acceptedPolicy = try acceptedPolicy.validated(
             forBlennyBundleIdentifier: blennyBundleIdentifier
         )
         self.candidateInventory = candidateInventory
+        self.systemItems = systemItems
         self.blennyBundleIdentifier = blennyBundleIdentifier
         let draft = Self.makeDraft(
             acceptedPolicy: acceptedPolicy,
-            candidateInventory: candidateInventory,
             blennyBundleIdentifier: blennyBundleIdentifier
         )
         self.initialDraft = draft
@@ -138,11 +235,9 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
     public var hasDraftChanges: Bool { draft != initialDraft }
 
     public var validationScope: PolicyValidationScope {
-        let identifiers = Set(
-            acceptedPolicy.policies.map(\.bundleIdentifier)
-                + candidateInventory.bundleIdentifiers
+        PolicyValidationScope(
+            approvedBundleIdentifiers: draft.visible + draft.revealable + draft.hidden
         )
-        return PolicyValidationScope(approvedBundleIdentifiers: Array(identifiers))
     }
 
     public var acceptedPolicyScope: PolicyValidationScope {
@@ -161,6 +256,19 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
         }
     }
 
+    public var implicitVisibleCandidates: [PolicyCandidate] {
+        let assigned = Set(
+            (draft.visible + draft.revealable + draft.hidden)
+                .compactMap(BundlePolicyIdentity.canonicalKey)
+        )
+        return candidateInventory.candidates.filter { candidate in
+            guard let canonical = BundlePolicyIdentity.canonicalKey(
+                for: candidate.bundleIdentifier
+            ) else { return false }
+            return !assigned.contains(canonical)
+        }
+    }
+
     @discardableResult
     public mutating func assign(
         bundleIdentifier: String,
@@ -174,8 +282,8 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
         }
         if BundlePolicyIdentity.canonicalKey(for: bundleIdentifier)
             == BundlePolicyIdentity.canonicalKey(for: blennyBundleIdentifier),
-           policy != .pinned {
-            return .rejectedPinnedBlenny
+           policy != .visible {
+            return .rejectedBlennyMustRemainVisible
         }
         let updated = draft.assigning(bundleIdentifier, to: policy)
         guard updated != draft else { return .unchanged }
@@ -185,26 +293,13 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
 
     public mutating func discardDraft(using acceptedDraft: BundlePolicyDraft) {
         var reset = acceptedDraft
-        let assigned = Set(
-            (reset.pinned + reset.revealable + reset.hidden)
-                .compactMap(BundlePolicyIdentity.canonicalKey)
-        )
-        for candidate in candidateInventory.candidates {
-            guard let canonical = BundlePolicyIdentity.canonicalKey(
-                for: candidate.bundleIdentifier
-            ), !assigned.contains(canonical) else { continue }
-            let policy: MenuBarBundlePolicy = canonical
-                == BundlePolicyIdentity.canonicalKey(for: blennyBundleIdentifier)
-                ? .pinned : .revealable
-            reset = reset.assigning(candidate.bundleIdentifier, to: policy)
-        }
-        reset = reset.assigning(blennyBundleIdentifier, to: .pinned)
+        reset = reset.assigning(blennyBundleIdentifier, to: .visible)
         draft = Self.sorted(reset)
     }
 
     private func values(for policy: MenuBarBundlePolicy) -> [String] {
         switch policy {
-        case .pinned: draft.pinned
+        case .visible: draft.visible
         case .revealable: draft.revealable
         case .hidden: draft.hidden
         }
@@ -212,24 +307,10 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
 
     private static func makeDraft(
         acceptedPolicy: PersistentBundlePolicyDocument,
-        candidateInventory: PolicyCandidateInventory,
         blennyBundleIdentifier: String
     ) -> BundlePolicyDraft {
         var draft = BundlePolicyDraft(acceptedPolicy: acceptedPolicy)
-        let assigned = Set(
-            (draft.pinned + draft.revealable + draft.hidden)
-                .compactMap(BundlePolicyIdentity.canonicalKey)
-        )
-        for candidate in candidateInventory.candidates {
-            guard let canonical = BundlePolicyIdentity.canonicalKey(
-                for: candidate.bundleIdentifier
-            ), !assigned.contains(canonical) else { continue }
-            let policy: MenuBarBundlePolicy = canonical
-                == BundlePolicyIdentity.canonicalKey(for: blennyBundleIdentifier)
-                ? .pinned : .revealable
-            draft = draft.assigning(candidate.bundleIdentifier, to: policy)
-        }
-        draft = draft.assigning(blennyBundleIdentifier, to: .pinned)
+        draft = draft.assigning(blennyBundleIdentifier, to: .visible)
         return sorted(draft)
     }
 
@@ -238,7 +319,7 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
             values.sorted { ($0.lowercased(), $0) < ($1.lowercased(), $1) }
         }
         return BundlePolicyDraft(
-            pinned: sort(draft.pinned),
+            visible: sort(draft.visible),
             revealable: sort(draft.revealable),
             hidden: sort(draft.hidden)
         )

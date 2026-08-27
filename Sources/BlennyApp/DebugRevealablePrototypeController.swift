@@ -296,7 +296,7 @@ final class DebugPolicyCoexistenceController {
             preview = try PolicyDryRunner.prepare(
                 oldPolicy: oldPolicy,
                 draft: BundlePolicyDraft(
-                    pinned: [blennyBundleIdentifier],
+                    visible: [blennyBundleIdentifier],
                     revealable: [revealable],
                     hidden: [hidden]
                 ),
@@ -405,7 +405,7 @@ final class DebugPolicyCoexistenceController {
         from document: PersistentBundlePolicyDocument
     ) throws -> BundlePolicyAssignments {
         try BundlePolicyAssignments(
-            pinned: Set(document.policies.filter { $0.policy == .pinned }.map(\.bundleIdentifier)),
+            visible: Set(document.policies.filter { $0.policy == .visible }.map(\.bundleIdentifier)),
             revealable: Set(
                 document.policies.filter { $0.policy == .revealable }.map(\.bundleIdentifier)
             ),
@@ -450,7 +450,7 @@ final class DebugPolicyCoexistenceController {
         let document = try PersistentBundlePolicyDocument(
             managementEnabled: true,
             policies: [
-                .init(bundleIdentifier: blennyBundleIdentifier, policy: .pinned),
+                .init(bundleIdentifier: blennyBundleIdentifier, policy: .visible),
                 .init(
                     bundleIdentifier: Self.approvedRevealableBundleIdentifier,
                     policy: .revealable
@@ -645,7 +645,7 @@ final class DebugPolicyCoexistenceController {
                 + "managed_policy_fingerprint=\(managedPolicyFingerprint) "
                 + "bundle_count=\(plan.allowedBundleIdentifiers.count) "
                 + "system_items=\(plan.allowedSystemItems) "
-                + "pinned_allowed=\(plan.allowedBundleIdentifiers.contains(blennyBundleIdentifier)) "
+                + "visible_allowed=\(plan.allowedBundleIdentifiers.contains(blennyBundleIdentifier)) "
                 + "revealable=\(assignments.revealable.first ?? "") "
                 + "revealable_allowed=\(revealableAllowed) "
                 + "hidden=\(assignments.hidden.first ?? "") "

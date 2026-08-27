@@ -91,7 +91,7 @@ public enum PersistentPolicyResolver {
             observationsByCanonicalIdentifier[canonical, default: []].append(observation)
         }
 
-        var pinned = Set<String>()
+        var visible = Set<String>()
         var revealable = Set<String>()
         var hidden = Set<String>()
         var managedProcessIdentifiers: [String: Int32] = [:]
@@ -124,8 +124,8 @@ public enum PersistentPolicyResolver {
                 ?? entry.bundleIdentifier
             managedProcessIdentifiers[entry.bundleIdentifier] = processIdentifier
             switch entry.policy {
-            case .pinned:
-                pinned.insert(observedIdentifier)
+            case .visible:
+                visible.insert(observedIdentifier)
             case .revealable:
                 revealable.insert(observedIdentifier)
             case .hidden:
@@ -139,7 +139,7 @@ public enum PersistentPolicyResolver {
 
         return ResolvedPersistentPolicy(
             assignments: try BundlePolicyAssignments(
-                pinned: pinned,
+                visible: visible,
                 revealable: revealable,
                 hidden: hidden
             ),

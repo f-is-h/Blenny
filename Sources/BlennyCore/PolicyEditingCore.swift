@@ -2,24 +2,24 @@ import CryptoKit
 import Foundation
 
 public struct BundlePolicyDraft: Equatable, Sendable {
-    public let pinned: [String]
+    public let visible: [String]
     public let revealable: [String]
     public let hidden: [String]
 
     public init(
-        pinned: [String],
+        visible: [String],
         revealable: [String],
         hidden: [String]
     ) {
-        self.pinned = pinned
+        self.visible = visible
         self.revealable = revealable
         self.hidden = hidden
     }
 
     public init(acceptedPolicy: PersistentBundlePolicyDocument) {
         self.init(
-            pinned: acceptedPolicy.policies
-                .filter { $0.policy == .pinned }
+            visible: acceptedPolicy.policies
+                .filter { $0.policy == .visible }
                 .map(\.bundleIdentifier),
             revealable: acceptedPolicy.policies
                 .filter { $0.policy == .revealable }
@@ -39,18 +39,18 @@ public struct BundlePolicyDraft: Equatable, Sendable {
             values.filter { BundlePolicyIdentity.canonicalKey(for: $0) != canonical }
         }
 
-        var pinned = removingMatch(from: self.pinned)
+        var visible = removingMatch(from: self.visible)
         var revealable = removingMatch(from: self.revealable)
         var hidden = removingMatch(from: self.hidden)
         switch policy {
-        case .pinned:
-            pinned.append(bundleIdentifier)
+        case .visible:
+            visible.append(bundleIdentifier)
         case .revealable:
             revealable.append(bundleIdentifier)
         case .hidden:
             hidden.append(bundleIdentifier)
         }
-        return Self(pinned: pinned, revealable: revealable, hidden: hidden)
+        return Self(visible: visible, revealable: revealable, hidden: hidden)
     }
 }
 
@@ -180,7 +180,7 @@ public enum PolicyEditIssue: Error, Equatable, Hashable, Sendable {
     case missingCurrentOwnership(String)
     case missingApprovedBundle(String)
     case unapprovedBundle(String)
-    case missingPinnedBlenny(String)
+    case missingVisibleBlenny(String)
 }
 
 extension PolicyEditIssue: CustomStringConvertible {
@@ -204,8 +204,8 @@ extension PolicyEditIssue: CustomStringConvertible {
             return "approved bundle \(bundleIdentifier) is missing from the draft"
         case let .unapprovedBundle(bundleIdentifier):
             return "draft bundle \(bundleIdentifier) is outside the approved validation scope"
-        case let .missingPinnedBlenny(bundleIdentifier):
-            return "Blenny bundle \(bundleIdentifier) must remain pinned"
+        case let .missingVisibleBlenny(bundleIdentifier):
+            return "Blenny bundle \(bundleIdentifier) must remain visible"
         }
     }
 }
@@ -234,7 +234,7 @@ public enum PolicyDraftValidator {
         var occurrences: [String: [Occurrence]] = [:]
 
         let groups: [(MenuBarBundlePolicy, [String])] = [
-            (.pinned, draft.pinned),
+            (.visible, draft.visible),
             (.revealable, draft.revealable),
             (.hidden, draft.hidden),
         ]
@@ -300,13 +300,13 @@ public enum PolicyDraftValidator {
         if let blennyCanonical = BundlePolicyIdentity.canonicalKey(
             for: blennyBundleIdentifier
         ) {
-            let pinnedCanonicals = Set(draft.pinned.compactMap(BundlePolicyIdentity.canonicalKey))
-            if !pinnedCanonicals.contains(blennyCanonical) {
-                issues.append(.missingPinnedBlenny(blennyBundleIdentifier))
+            let visibleCanonicals = Set(draft.visible.compactMap(BundlePolicyIdentity.canonicalKey))
+            if !visibleCanonicals.contains(blennyCanonical) {
+                issues.append(.missingVisibleBlenny(blennyBundleIdentifier))
             }
         } else {
             issues.append(
-                .invalidBundleIdentifier(policy: .pinned, value: blennyBundleIdentifier)
+                .invalidBundleIdentifier(policy: .visible, value: blennyBundleIdentifier)
             )
         }
 
@@ -336,7 +336,7 @@ public enum PolicyDraftValidator {
         } catch {
             return ValidatedPolicyDraft(
                 document: nil,
-                issues: [.missingPinnedBlenny(blennyBundleIdentifier)]
+                issues: [.missingVisibleBlenny(blennyBundleIdentifier)]
             )
         }
     }
@@ -525,7 +525,7 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
 
     private static func draftLines(_ draft: BundlePolicyDraft) -> [String] {
         [
-            "pinned=\(draft.pinned.joined(separator: ","))",
+            "visible=\(draft.visible.joined(separator: ","))",
             "revealable=\(draft.revealable.joined(separator: ","))",
             "hidden=\(draft.hidden.joined(separator: ","))",
         ]
@@ -552,7 +552,7 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
             return "\(identifier):\(assignment.rawValue):\(allowed.contains(identifier) ? "allowed" : "denied")"
         }.joined(separator: ",")
         let assignments = try? BundlePolicyAssignments(
-            pinned: Set(policy.policies.filter { $0.policy == .pinned }.map(\.bundleIdentifier)),
+            visible: Set(policy.policies.filter { $0.policy == .visible }.map(\.bundleIdentifier)),
             revealable: Set(
                 policy.policies.filter { $0.policy == .revealable }.map(\.bundleIdentifier)
             ),
@@ -662,7 +662,7 @@ public enum PolicyDryRunner {
         from document: PersistentBundlePolicyDocument
     ) throws -> BundlePolicyAssignments {
         try BundlePolicyAssignments(
-            pinned: Set(document.policies.filter { $0.policy == .pinned }.map(\.bundleIdentifier)),
+            visible: Set(document.policies.filter { $0.policy == .visible }.map(\.bundleIdentifier)),
             revealable: Set(
                 document.policies.filter { $0.policy == .revealable }.map(\.bundleIdentifier)
             ),

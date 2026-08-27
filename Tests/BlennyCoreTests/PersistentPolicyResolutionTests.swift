@@ -167,7 +167,7 @@ struct PersistentPolicyResolutionTests {
         try PersistentBundlePolicyDocument(
             managementEnabled: true,
             policies: [
-                .init(bundleIdentifier: blenny, policy: .pinned),
+                .init(bundleIdentifier: blenny, policy: .visible),
                 .init(bundleIdentifier: revealable, policy: .revealable),
                 .init(bundleIdentifier: hidden, policy: .hidden),
             ]

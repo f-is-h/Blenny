@@ -42,7 +42,7 @@ Exit criteria met:
 - When the native overflow control is absent, Blenny's normally installed status item supplies a stable reveal/conceal control without modifying another application's menu or status item.
 - The native and Blenny-owned controls never create a state in which the Revealable group has no usable reveal affordance.
 - Ending either reveal path deterministically restores the concealed baseline without visible flicker, an unrestricted gap, polling, or continuous reconciliation.
-- Pinned, Revealable, and Hidden remain distinct bundle-level policy inputs; ordinary reveal sessions never include Hidden bundles. The fully Hidden recovery UI and shortcut are not implemented or mutation-tested in `0.0.2`.
+- Visible, Revealable, and Hidden remain distinct bundle-level policy inputs; ordinary reveal sessions never include Hidden bundles. The fully Hidden recovery UI and shortcut are not implemented or mutation-tested in `0.0.2`.
 - Any separate policy writer uses a point-to-point, session-scoped local channel that authenticates the requesting Blenny component's code identity, rejects untrusted or stale commands, and cannot accept arbitrary allowlists from a client.
 - The backend fails closed when private classes, selectors, or expected encodings differ.
 - Normal quit, helper disconnect, failed replacement activation, rejected peers, and replayed or out-of-order commands restore or remain safely unchanged in automated or bounded integration tests.
@@ -54,9 +54,9 @@ Status: **Complete on macOS 27.0 build `26A5416b`.**
 
 Exit criteria met:
 
-- One bounded Debug-only session applies three distinct real bundle-level assignments at once: installed Blenny is Pinned, Usage4Claude is Revealable, and CleanShot X is Hidden.
+- One bounded Debug-only session applies three distinct real bundle-level assignments at once: installed Blenny is Visible, Usage4Claude is Revealable, and CleanShot X is Hidden.
 - The exact owning bundle identifiers, running processes, and menu-bar ownership of both third-party targets are established read-only before mutation. The milestone fails closed if the Revealable and Hidden identifiers are equal, overlap another policy, are absent, or cannot be attributed unambiguously.
-- Baseline admits Pinned, hard-conceals Revealable, and hard-conceals Hidden.
+- Baseline admits Visible, hard-conceals Revealable, and hard-conceals Hidden.
 - An ordinary reveal session admits Revealable while continuing to exclude Hidden, regardless of whether the observed native overflow or the installed Blenny fallback owns the session.
 - Conceal returns Revealable to the hard-concealed baseline while Hidden remains hard-concealed.
 - Native overflow is preferred when it is present and observable. Blenny's reveal action is then unavailable, while the Blenny status item remains present as a diagnostics and recovery entry and may mirror native presentation with a non-writing status arrow.
@@ -87,10 +87,10 @@ Status: **Complete on macOS 27.0 build `26A5416b`; local annotated tag authorize
 
 Advance when:
 
-- A UI-independent draft model supports bundle-level `Pinned`, `Revealable`, and `Hidden` assignments without per-status-item scope.
+- A UI-independent draft model supports bundle-level `Visible`, `Revealable`, and `Hidden` assignments without per-status-item scope.
 - Every proposed edit produces a deterministic old-to-new policy diff and dry-run impact report before persistence or system mutation.
 - Invalid, overlapping, unknown, missing, or ambiguous bundle assignments fail closed with explicit reports.
-- Blenny remains Pinned, ordinary reveal never includes Hidden, and the approved validation scope cannot be broadened accidentally.
+- Blenny remains Visible, ordinary reveal never includes Hidden, and the approved validation scope cannot be broadened accidentally.
 - The persist/apply transaction has a deterministic failure and rollback contract, including restoration of the previous scoped policy.
 - Relaunch and update-like PID replacement preserve an accepted edit, while a failed edit leaves a recoverable prior policy and unrestricted or previously safe system state.
 - Deterministic and bounded real validation use only explicitly approved bundles and preserve the single serial writer and replacement-before-invalidation rules.
@@ -102,7 +102,11 @@ Status: **Complete on macOS 27.0 build `26A5416b`; local tag awaits owner eviden
 
 Exit criteria met:
 
-- A minimal AppKit-first editor exposes `Pinned`, `Revealable`, and `Hidden` groups with clear user-facing labels.
+- A minimal AppKit-first editor exposes `Visible`, `Revealable`, and `Hidden` groups with clear user-facing labels.
+- `Visible` means Blenny does not deliberately conceal the bundle; it does not promise a fixed physical position when macOS has insufficient menu-bar space.
+- Newly observed application bundles are effectively Visible without silently adding persistent policy entries.
+- Identifiable Apple system items are shown read-only in the Visible lane and remain outside the editable bundle-policy draft.
+- The current policy schema and all product logic use `visible`, `revealable`, and `hidden`; schema-1 documents decode through a bounded persistence migration and re-encode as schema 2.
 - UI edits remain local and smooth; system policy applies only after the interaction completes.
 - Blenny's menu-bar control has stable click, keyboard, and quit behavior.
 - Accessibility onboarding is clear and never repeatedly prompts.
@@ -134,7 +138,7 @@ Advance when:
 
 Publish the repository and signed prerelease together when:
 
-- The core installed experience supports bundle-level `Pinned`, `Revealable`, and `Hidden` policies.
+- The core installed experience supports bundle-level `Visible`, `Revealable`, and `Hidden` policies.
 - Reveal/conceal is fast, visually stable, and safely reversible.
 - Known unsupported items are surfaced clearly.
 - App updates preserve policies and the Blenny control's registration identity.

@@ -17,6 +17,15 @@ struct PolicyEditorViewModelTests {
             item(bundleIdentifier: revealable, pid: 20),
             item(bundleIdentifier: "com.apple.systemuiserver", pid: 25),
             item(bundleIdentifier: hidden, pid: 30, classification: .systemOwnedPresentation),
+            systemItem(identifier: "com.apple.menuextra.wifi", description: "Wi-Fi"),
+            systemItem(identifier: "com.apple.menuextra.bluetooth", description: "Bluetooth"),
+            systemItem(identifier: "com.apple.menuextra.wifi", description: "Wi-Fi"),
+            systemItem(
+                identifier: nil,
+                description: "Siri",
+                ownerBundleIdentifier: "com.apple.systemuiserver",
+                stableIdentityLabel: "siri"
+            ),
         ])
 
         let snapshot = MenuBarOwnershipSnapshotBuilder.make(from: report)
@@ -25,6 +34,12 @@ struct PolicyEditorViewModelTests {
         #expect(snapshot.isComplete)
         #expect(inventory.bundleIdentifiers == [blenny, revealable])
         #expect(inventory.candidates.last?.menuBarItemCount == 2)
+        #expect(snapshot.systemItems.map(\.displayName) == ["Bluetooth", "Siri", "Wi-Fi"])
+        #expect(snapshot.systemItems.first { $0.displayName == "Wi-Fi" }?.observationCount == 2)
+        #expect(
+            snapshot.systemItems.first { $0.displayName == "Siri" }?.ownerBundleIdentifier
+                == "com.apple.systemuiserver"
+        )
     }
 
     @Test("A truncated or unauthorized scan is explicit and incomplete")
@@ -42,7 +57,7 @@ struct PolicyEditorViewModelTests {
         #expect(!truncated.isComplete)
     }
 
-    @Test("Draft edits stay local and Blenny cannot leave Pinned")
+    @Test("Draft edits stay local and Blenny cannot leave Visible")
     func localDraftEditing() throws {
         let accepted = try policy()
         let inventory = PolicyCandidateInventory(observations: [
@@ -57,18 +72,56 @@ struct PolicyEditorViewModelTests {
             blennyBundleIdentifier: blenny
         )
 
-        #expect(model.candidates(in: .revealable).map(\.bundleIdentifier) == [
-            newCandidate,
-            revealable,
-        ])
+        #expect(model.candidates(in: .revealable).map(\.bundleIdentifier) == [revealable])
+        #expect(model.implicitVisibleCandidates.map(\.bundleIdentifier) == [newCandidate])
         #expect(model.assign(bundleIdentifier: revealable, to: .hidden) == .changed)
         #expect(model.hasDraftChanges)
         #expect(accepted.policies.first(where: { $0.bundleIdentifier == revealable })?.policy == .revealable)
-        #expect(model.assign(bundleIdentifier: blenny, to: .hidden) == .rejectedPinnedBlenny)
-        #expect(model.candidates(in: .pinned).map(\.bundleIdentifier) == [blenny])
+        #expect(model.assign(bundleIdentifier: blenny, to: .hidden) == .rejectedBlennyMustRemainVisible)
+        #expect(model.candidates(in: .visible).map(\.bundleIdentifier) == [blenny])
     }
 
-    @Test("Discard reconstructs the accepted policy and current defaults")
+    @Test("An implicitly Visible bundle enters validation scope only after explicit assignment")
+    func implicitVisibleCandidateStaging() throws {
+        let accepted = try policy()
+        let inventory = PolicyCandidateInventory(observations: [
+            observation(blenny, pid: 10),
+            observation(revealable, pid: 20),
+            observation(hidden, pid: 30),
+            observation(newCandidate, pid: 40),
+        ])
+        var model = try PolicyEditorViewModel(
+            acceptedPolicy: accepted,
+            candidateInventory: inventory,
+            blennyBundleIdentifier: blenny
+        )
+
+        #expect(!model.hasDraftChanges)
+        #expect(model.implicitVisibleCandidates.map(\.bundleIdentifier) == [newCandidate])
+        #expect(model.validationScope.approvedBundleIdentifiers == [
+            blenny,
+            hidden,
+            revealable,
+        ])
+
+        #expect(model.assign(bundleIdentifier: newCandidate, to: .revealable) == .changed)
+        #expect(model.implicitVisibleCandidates.isEmpty)
+        #expect(model.validationScope.approvedBundleIdentifiers == [
+            blenny,
+            hidden,
+            newCandidate,
+            revealable,
+        ])
+
+        #expect(model.assign(bundleIdentifier: newCandidate, to: .visible) == .changed)
+        #expect(model.candidates(in: .visible).map(\.bundleIdentifier) == [
+            blenny,
+            newCandidate,
+        ])
+        #expect(model.assign(bundleIdentifier: blenny, to: .hidden) == .rejectedBlennyMustRemainVisible)
+    }
+
+    @Test("Discard restores the accepted policy and implicit Visible observations")
     func discardDraft() throws {
         let accepted = try policy()
         let inventory = PolicyCandidateInventory(observations: [
@@ -87,14 +140,11 @@ struct PolicyEditorViewModelTests {
         model.discardDraft(using: BundlePolicyDraft(acceptedPolicy: accepted))
 
         #expect(!model.hasDraftChanges)
-        #expect(model.candidates(in: .revealable).map(\.bundleIdentifier) == [
-            newCandidate,
-            revealable,
-        ])
+        #expect(model.candidates(in: .revealable).map(\.bundleIdentifier) == [revealable])
+        #expect(model.implicitVisibleCandidates.map(\.bundleIdentifier) == [newCandidate])
         #expect(model.validationScope.approvedBundleIdentifiers == [
             blenny,
             hidden,
-            newCandidate,
             revealable,
         ])
         #expect(model.acceptedPolicyScope.approvedBundleIdentifiers == [
@@ -130,7 +180,7 @@ struct PolicyEditorViewModelTests {
         try PersistentBundlePolicyDocument(
             managementEnabled: false,
             policies: [
-                .init(bundleIdentifier: blenny, policy: .pinned),
+                .init(bundleIdentifier: blenny, policy: .visible),
                 .init(bundleIdentifier: revealable, policy: .revealable),
                 .init(bundleIdentifier: hidden, policy: .hidden),
             ]
@@ -208,6 +258,58 @@ struct PolicyEditorViewModelTests {
             ),
             classification: classification,
             classificationReason: "test"
+        )
+    }
+
+    private func systemItem(
+        identifier: String?,
+        description: String,
+        ownerBundleIdentifier: String = "com.apple.MenuBarAgent",
+        stableIdentityLabel: String? = nil
+    ) -> MenuBarItemRecord {
+        MenuBarItemRecord(
+            source: .menuBarAgent,
+            ownerPID: 99,
+            ownerBundleIdentifier: ownerBundleIdentifier,
+            depth: 2,
+            role: "AXMenuBarItem",
+            subrole: "AXMenuExtra",
+            title: nil,
+            itemDescription: description,
+            accessibilityIdentifier: identifier,
+            frame: nil,
+            actions: [],
+            hiddenAttribute: .init(
+                value: nil,
+                readResult: "success",
+                isSettable: false,
+                settableResult: "success"
+            ),
+            positionAttribute: .init(
+                value: nil,
+                readResult: "success",
+                isSettable: false,
+                settableResult: "success"
+            ),
+            sizeAttribute: .init(
+                value: nil,
+                readResult: "success",
+                isSettable: false,
+                settableResult: "success"
+            ),
+            classification: .systemOwnedPresentation,
+            classificationReason: "test system presentation",
+            identity: stableIdentityLabel.map {
+                MenuBarItemIdentity(
+                    ownerBundleIdentifier: ownerBundleIdentifier.lowercased(),
+                    accessibilityIdentifier: nil,
+                    semanticLabel: $0,
+                    role: "axmenubaritem",
+                    subrole: "axmenuextra",
+                    instanceOrdinal: 0,
+                    confidence: .moderate
+                )
+            }
         )
     }
 }

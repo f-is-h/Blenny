@@ -361,7 +361,7 @@ struct PolicyEditingTransactionTests {
         try PersistentBundlePolicyDocument(
             managementEnabled: enabled,
             policies: [
-                .init(bundleIdentifier: blenny, policy: .pinned),
+                .init(bundleIdentifier: blenny, policy: .visible),
                 .init(bundleIdentifier: revealable, policy: .revealable),
                 .init(bundleIdentifier: hidden, policy: .hidden),
             ]
@@ -387,7 +387,7 @@ struct PolicyEditingTransactionTests {
         let result = try PolicyDryRunner.prepare(
             oldPolicy: old,
             draft: BundlePolicyDraft(
-                pinned: [blenny],
+                visible: [blenny],
                 revealable: [newRevealable],
                 hidden: [newHidden]
             ),

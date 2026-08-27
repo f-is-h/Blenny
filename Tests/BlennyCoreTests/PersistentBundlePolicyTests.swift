@@ -21,11 +21,40 @@ struct PersistentBundlePolicyTests {
         )
 
         #expect(decoded == document)
+        #expect(decoded.schemaVersion == 2)
         #expect(decoded.policies.map(\.bundleIdentifier) == [
             blenny,
             hidden,
             revealable,
         ])
+        let encodedText = try #require(String(data: data, encoding: .utf8))
+        #expect(encodedText.contains("\"policy\":\"visible\""))
+        #expect(!encodedText.contains("\"policy\":\"pinned\""))
+    }
+
+    @Test("Schema 1 policy terminology migrates into the unified schema 2 model")
+    func legacyTerminologyMigration() throws {
+        let json = """
+        {
+          "schemaVersion": 1,
+          "managementEnabled": false,
+          "policies": [
+            {"bundleIdentifier": "com.example.BlennyProbe", "policy": "pinned"},
+            {"bundleIdentifier": "xyz.fi5h.Usage4Claude", "policy": "revealable"}
+          ]
+        }
+        """
+        let document = try JSONDecoder().decode(
+            PersistentBundlePolicyDocument.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(document.schemaVersion == 2)
+        #expect(document.policies.first?.policy == .visible)
+        let encoded = try JSONEncoder().encode(document)
+        let encodedText = try #require(String(data: encoded, encoding: .utf8))
+        #expect(encodedText.contains("\"policy\":\"visible\""))
+        #expect(!encodedText.contains("\"policy\":\"pinned\""))
     }
 
     @Test("Invalid and case-colliding bundle identifiers fail closed")
@@ -34,7 +63,7 @@ struct PersistentBundlePolicyTests {
             _ = try PersistentBundlePolicyDocument(
                 managementEnabled: true,
                 policies: [
-                    .init(bundleIdentifier: "not a bundle", policy: .pinned),
+                    .init(bundleIdentifier: "not a bundle", policy: .visible),
                 ]
             )
         }
@@ -42,7 +71,7 @@ struct PersistentBundlePolicyTests {
             _ = try PersistentBundlePolicyDocument(
                 managementEnabled: true,
                 policies: [
-                    .init(bundleIdentifier: "com..example", policy: .pinned),
+                    .init(bundleIdentifier: "com..example", policy: .visible),
                 ]
             )
         }
@@ -132,7 +161,7 @@ struct PersistentBundlePolicyTests {
             managementEnabled: true,
             policies: [
                 .init(bundleIdentifier: revealable, policy: .revealable),
-                .init(bundleIdentifier: blenny, policy: .pinned),
+                .init(bundleIdentifier: blenny, policy: .visible),
                 .init(bundleIdentifier: hidden, policy: .hidden),
             ]
         )

@@ -5,6 +5,13 @@ import BlennyCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let accessibilityPromptRequestedKey =
         "AccessibilitySystemPromptRequestedForMenuBarOwnership"
+    private static let readOnlySystemMenuBarOwners = Set([
+        "com.apple.controlcenter",
+        "com.apple.menubaragent",
+        "com.apple.systemuiserver",
+        "com.apple.textinputmenuagent",
+        "com.apple.weather.menu",
+    ])
 
     private let inventory = AccessibilityInventory()
     private var isRefreshing = false
@@ -189,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let model = try PolicyEditorViewModel(
                 acceptedPolicy: accepted,
                 candidateInventory: candidateInventory,
+                systemItems: snapshot.systemItems,
                 blennyBundleIdentifier: blennyBundleIdentifier
             )
             let interfaceStore = PolicyInterfaceStore(
@@ -238,6 +246,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) {
         guard var model = editorModel else { return }
         let result = model.assign(bundleIdentifier: bundleIdentifier, to: policy)
+        do {
+            editingCore = try makeCore(scope: model.validationScope)
+        } catch {
+            editorWindowController.setStatus(
+                "Could not update the draft validation scope: \(error.localizedDescription)",
+                isError: true
+            )
+            return
+        }
         editorModel = model
         statusItemController.setDraftHasChanges(model.hasDraftChanges)
         editorWindowController.display(
@@ -245,9 +262,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             observationCount: model.candidateInventory.candidates.count,
             recoveryAvailable: recoveryAvailable
         )
-        if result == .rejectedPinnedBlenny {
+        if result == .rejectedBlennyMustRemainVisible {
             editorWindowController.setStatus(
-                "Blenny is a safety entry and must remain Pinned.",
+                "Blenny is a safety entry and must remain Visible.",
                 isError: true
             )
         }
@@ -261,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let acceptedDraft = try await core.discardDraft(),
                       var model = editorModel else { return }
                 model.discardDraft(using: acceptedDraft)
+                editingCore = try makeCore(scope: model.validationScope)
                 editorModel = model
                 statusItemController.setDraftHasChanges(model.hasDraftChanges)
                 editorWindowController.display(
@@ -520,7 +538,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try PersistentBundlePolicyDocument(
             managementEnabled: false,
             policies: [
-                .init(bundleIdentifier: blennyBundleIdentifier, policy: .pinned)
+                .init(bundleIdentifier: blennyBundleIdentifier, policy: .visible)
             ]
         )
     }
@@ -543,7 +561,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         applications = applications.filter { application in
             application.activationPolicy != .prohibited
-                || application.bundleIdentifier == "com.apple.MenuBarAgent"
+                || isReadOnlySystemMenuBarOwner(application.bundleIdentifier)
         }
         applications.sort { first, second in
             scanPriority(for: first) < scanPriority(for: second)
@@ -563,8 +581,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func scanPriority(for application: NSRunningApplication) -> Int {
-        if application.bundleIdentifier == "com.apple.MenuBarAgent" { return 0 }
-        if application.processIdentifier == ProcessInfo.processInfo.processIdentifier { return 1 }
-        return 2
+        if application.bundleIdentifier?.lowercased() == "com.apple.menubaragent" {
+            return 0
+        }
+        if isReadOnlySystemMenuBarOwner(application.bundleIdentifier) { return 1 }
+        if application.processIdentifier == ProcessInfo.processInfo.processIdentifier { return 2 }
+        return 3
+    }
+
+    private func isReadOnlySystemMenuBarOwner(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return Self.readOnlySystemMenuBarOwners.contains(bundleIdentifier.lowercased())
     }
 }

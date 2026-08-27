@@ -30,7 +30,7 @@ struct PolicyEditingCoreTests {
         let old = try PersistentBundlePolicyDocument(
             managementEnabled: true,
             policies: [
-                .init(bundleIdentifier: blenny, policy: .pinned),
+                .init(bundleIdentifier: blenny, policy: .visible),
                 .init(bundleIdentifier: usage, policy: .revealable),
                 .init(bundleIdentifier: cleanShot, policy: .hidden),
             ]
@@ -39,7 +39,7 @@ struct PolicyEditingCoreTests {
             managementEnabled: true,
             policies: [
                 .init(bundleIdentifier: "com.example.Added", policy: .revealable),
-                .init(bundleIdentifier: blenny, policy: .pinned),
+                .init(bundleIdentifier: blenny, policy: .visible),
                 .init(bundleIdentifier: usage, policy: .hidden),
             ]
         )
@@ -145,7 +145,7 @@ struct PolicyEditingCoreTests {
     func invalidDraftsFailClosed() throws {
         let old = try document(enabled: false, revealable: usage, hidden: cleanShot)
         let invalid = BundlePolicyDraft(
-            pinned: [blenny, "not a bundle"],
+            visible: [blenny, "not a bundle"],
             revealable: [usage, usage, cleanShot],
             hidden: [usage.uppercased(), "com.example.Unknown"]
         )
@@ -170,12 +170,12 @@ struct PolicyEditingCoreTests {
         #expect(text.contains("outside the approved validation scope"))
     }
 
-    @Test("Missing approved bundles and missing pinned Blenny fail closed")
+    @Test("Missing approved bundles and missing visible Blenny fail closed")
     func missingAssignmentsFailClosed() throws {
         let old = try document(enabled: false, revealable: usage, hidden: cleanShot)
         let result = try PolicyDryRunner.prepare(
             oldPolicy: old,
-            draft: BundlePolicyDraft(pinned: [], revealable: [usage], hidden: []),
+            draft: BundlePolicyDraft(visible: [], revealable: [usage], hidden: []),
             managementEnabled: false,
             candidates: inventory(),
             observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
@@ -186,7 +186,7 @@ struct PolicyEditingCoreTests {
         #expect(result.prepared == nil)
         #expect(result.report.issues.contains(.missingApprovedBundle(cleanShot)))
         #expect(result.report.issues.contains(.missingApprovedBundle(blenny)))
-        #expect(result.report.issues.contains(.missingPinnedBlenny(blenny)))
+        #expect(result.report.issues.contains(.missingVisibleBlenny(blenny)))
     }
 
     @Test("An approved bundle missing from current ownership observation is explicit")
@@ -227,7 +227,7 @@ struct PolicyEditingCoreTests {
         let result = try PolicyDryRunner.prepare(
             oldPolicy: document(enabled: false, revealable: usage, hidden: cleanShot),
             draft: BundlePolicyDraft(
-                pinned: [blenny],
+                visible: [blenny],
                 revealable: [usage],
                 hidden: [cleanShot]
             ),
@@ -244,7 +244,7 @@ struct PolicyEditingCoreTests {
         #expect(issueText.contains("ambiguous owner PIDs [20, 88]"))
     }
 
-    @Test("Blenny stays pinned and Hidden stays excluded from ordinary reveal")
+    @Test("Blenny stays visible and Hidden stays excluded from ordinary reveal")
     func safetyInvariantsHold() throws {
         let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)
         let result = try PolicyDryRunner.prepare(
@@ -305,7 +305,7 @@ struct PolicyEditingCoreTests {
         try PersistentBundlePolicyDocument(
             managementEnabled: enabled,
             policies: [
-                .init(bundleIdentifier: blenny, policy: .pinned),
+                .init(bundleIdentifier: blenny, policy: .visible),
                 .init(bundleIdentifier: revealable, policy: .revealable),
                 .init(bundleIdentifier: hidden, policy: .hidden),
             ]
