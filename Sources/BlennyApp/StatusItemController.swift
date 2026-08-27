@@ -220,16 +220,20 @@ final class StatusItemController: NSObject {
 
     private func configureButton() {
         guard let button = statusItem.button else { return }
-        let image = NSImage(
+        let image = Bundle.main.url(
+            forResource: "BlennyMenuBarTemplate",
+            withExtension: "svg"
+        ).flatMap(NSImage.init(contentsOf:)) ?? NSImage(
             systemSymbolName: "rectangle.3.group",
             accessibilityDescription: "Blenny"
         )
+        image?.size = NSSize(width: 18, height: 18)
         image?.isTemplate = true
         button.image = image
         if image == nil {
             button.title = "B"
         }
-        button.toolTip = "Blenny 0.1.0"
+        button.toolTip = "Blenny 0.2.0"
     }
 
     private func configureMenu() {

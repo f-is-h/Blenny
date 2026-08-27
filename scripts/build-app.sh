@@ -20,10 +20,12 @@ binary_directory=$(swift build --package-path "$repository_root" --configuration
 application_directory="$repository_root/build/$configuration/Blenny.app"
 contents_directory="$application_directory/Contents"
 executable_directory="$contents_directory/MacOS"
+resources_directory="$contents_directory/Resources"
 
-mkdir -p "$executable_directory"
+mkdir -p "$executable_directory" "$resources_directory"
 cp "$binary_directory/Blenny" "$executable_directory/Blenny"
 cp "$repository_root/Config/Info.plist" "$contents_directory/Info.plist"
+cp "$repository_root/Assets/MenuBar/BlennyMenuBarTemplate.svg" "$resources_directory/BlennyMenuBarTemplate.svg"
 
 bundle_identifier=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$repository_root/Config/Info.plist")
 codesign --force --sign - --identifier "$bundle_identifier" "$application_directory"

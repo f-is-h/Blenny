@@ -1,14 +1,14 @@
 # Blenny 0.2.0 Icon-first Policy Presentation
 
-> Planning and engineering contract for one independently reviewable product increment. This document contains no implementation or runtime evidence yet.
+> Engineering record for one independently reviewable product increment.
 
-Status: **Planned; implementation has not started.**
+Status: **Complete on macOS 27.0 build `26A5416b`; local tag and push deferred.**
 
 Last updated: 2026-08-27
 
 ## Starting boundary
 
-Development starts after local annotated tag `v0.1.0`, peeled commit `5df98625d1ee2493bd0ea0d0eea94d427cbcac20`. Version `0.1.0` already provides the three horizontal policy lanes, bounded current observation, read-only Apple system-item cards, local drafts, deterministic review, recovery paths, and Accessibility onboarding.
+Development started from clean commit `5966c02c` after local annotated tag `v0.1.0`, peeled commit `5df98625d1ee2493bd0ea0d0eea94d427cbcac20`. The tag object and peeled commit were left unchanged. Version `0.1.0` already provides the three horizontal policy lanes, bounded current observation, read-only Apple system-item cards, local drafts, deterministic review, recovery paths, and Accessibility onboarding.
 
 The installed policy remains disabled. Version `0.2.0` does not authorize a real assertion write or broaden the private backend.
 
@@ -27,12 +27,22 @@ Version `0.2.0` therefore delivers one capability only: replace text-dominant ca
 - Use a deterministic generic application fallback when the bundle URL or icon cannot be resolved.
 - Do not attempt to reproduce live status-item glyphs, animated status, counters, graphs, or text embedded in the real menu bar.
 
+The implementation uses `NSWorkspace.urlForApplication(withBundleIdentifier:)` and `NSWorkspace.icon(forFile:)`. A resolved bundle must also declare an application icon in its public bundle metadata; otherwise the editor presents the shared fallback rather than an unrelated generic application placeholder. Application icons remain full color because they are the stable public recognition source. Artificially grayscaling them would not reproduce the owning app's live menu-bar glyph.
+
 ### Apple system items
 
 - Map stable, known observation identifiers such as Wi-Fi, Bluetooth, Clock, Control Center, Sound, Now Playing, and Siri to semantic system symbols.
 - Keep every Apple system item read-only and outside `BundlePolicyDraft`.
 - Use a generic read-only system-item fallback when no explicit semantic mapping exists.
 - Do not infer mutability from successful observation or symbol mapping.
+
+The semantic map covers Bluetooth, Clock, Control Center, Now Playing, Siri, Sound, Wi-Fi, Weather, Text Input, and Time Machine identifiers observed through the bounded Accessibility reader. Matching operates on normalized stable observation-identifier tokens, never on icon pixels.
+
+### Blenny status item
+
+- `Assets/MenuBar/BlennyMenuBarTemplate.svg` is the source asset for Blenny's own menu-bar status item.
+- The build copies it into the application resources and AppKit loads it as a template image at status-item size, allowing the system to choose the appropriate monochrome rendering for appearance and emphasis.
+- This template asset is deliberately separate from the future color application icon. Until that color asset exists, Blenny is represented by the shared fallback inside the policy editor.
 
 ### Presentation and accessibility
 
@@ -51,7 +61,7 @@ Version `0.2.0` therefore delivers one capability only: replace text-dominant ca
 
 ## Deterministic verification
 
-Add tests for:
+Tests cover:
 
 - application icon-source eligibility and deterministic fallback selection;
 - stable icon descriptors across observation and candidate ordering;
@@ -61,12 +71,32 @@ Add tests for:
 - Blenny remaining Visible and ordinary reveal continuing to exclude Hidden;
 - no draft, persistence, report, or policy fingerprint change caused solely by icon resolution.
 
+The deterministic suite now verifies all of those presentation boundaries in `PolicyIconResolverTests`, including installed-application eligibility, known and unknown system identifiers, stable results across ordering and duplicate observations, the shared fallback, and unchanged document, managed-policy, draft, diff, report, and fingerprint values.
+
 Installed visual review must confirm:
 
 - application and known system candidates are recognizable primarily by icon;
 - missing icons produce an honest, consistent fallback rather than a blank or clipped card;
 - long horizontal lanes still scroll cleanly;
 - keyboard navigation, tooltips, read-only system markers, Review, Discard Draft, Resume Managing, Stop Managing, Restore Previous Policy, close, and Quit remain stable.
+
+## Verification record
+
+- Host: macOS 27.0 build `26A5416b`, Apple silicon.
+- Toolchain: Xcode 27.0 build `27A5237l`, macOS 27.0 SDK selected explicitly through `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`.
+- Debug tests: 115 tests in 16 suites passed.
+- Release tests: 113 tests in 15 suites passed.
+- Debug and Release application builds passed; both declare a macOS 27 minimum and SDK 27 in their Mach-O load commands and pass deep ad-hoc signature verification.
+- Final Debug executable SHA-256: `b8fee38e6ca2ac853c2f1348e2aeec1767e5e9f42dee19de61678260099414c7`.
+- Final Release executable SHA-256: `e0c312fb665dbe0b4d39c41ccd8287eb5d5ad450d4e1d507641ad77c427627fc`.
+- Source, Debug-resource, Release-resource, and installed-resource copies of the menu-bar SVG share SHA-256 `db83c97a9e27da5b816d5b18e29f94b9ffd6abd3e9c2f1b4150c46949ade88e9`; AppKit successfully decodes the packaged SVG.
+- The Release executable links only the expected public Apple frameworks and Swift runtime. Privacy scans found no Screen Recording descriptions, live-pixel capture path, owner path, private validation identifiers, or enablement tokens.
+- The final installed icon-first Debug build populated all three horizontal lanes with 20 bundle owners and nine identifiable system items. It showed recognizable color application icons, Blenny's explicit fallback, semantic monochrome system symbols including Text Input, local horizontal scrolling, and complete selection/accessibility detail without clipping.
+- Installed interaction acceptance exercised selection details, keyboard focus traversal, a reversible draft move, deterministic Review, Discard Draft, the assertion-blocked Resume preview, the disabled Stop state, Restore preview, manual Refresh, close, reopen, and Quit. No Apply action was used during the final acceptance pass.
+
+A post-QA recovery check detected that two disabled-policy saves had occurred during an earlier installed-interface exercise: the accepted document had gained local candidate assignments and the single backup had rotated. Both files remained disabled and mode `0600`, and no writer or assertion could be created through this path. Before closeout, the observed files were copied to ignored `LocalData/` evidence and the versioned schema-1 baseline was regenerated deterministically. The restored accepted-policy SHA-256 is `0618f1078de2655c5d4263c030459e7a1e0a320237708018957df83f8b74a004`; the restored backup SHA-256 is `938ad8a5611a0c9bb0459a77f61528ecc587457f96b160db4044bd41874c9599`; both are `0600`. The unexpected writes changed filesystem modification times, so this record does not claim timestamp preservation.
+
+Management remains disabled, the validation preferred-position key remains absent, no Blenny validation process remains, and MenuBarAgent, Usage4Claude, and CleanShot X remain running. No real assertion write, retry, Screen Recording request, persisted screenshot, or menu-bar pixel capture occurred.
 
 ## Explicit exclusions
 

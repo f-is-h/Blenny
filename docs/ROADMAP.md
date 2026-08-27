@@ -114,9 +114,9 @@ Exit criteria met:
 
 ## 0.2.0 — Icon-first policy presentation
 
-Status: **Planned; implementation has not started.**
+Status: **Complete on macOS 27.0 build `26A5416b`; installed acceptance passed, tag and push deferred.**
 
-Advance when:
+Exit criteria met:
 
 - Every observed application-bundle candidate has an icon resolved from its owning installed application, with a deterministic generic fallback when resolution fails.
 - Known read-only Apple system-item observations use semantic system symbols keyed by stable observation identity, while unknown items use the same honest fallback.
