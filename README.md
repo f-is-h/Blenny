@@ -4,7 +4,7 @@ Blenny is a minimal, native menu bar organizer designed exclusively for macOS 27
 
 The project is currently under private development. Versions `0.0.1` through `0.0.5` established the bounded macOS 27 backend, bundle-policy persistence, deterministic editing, rollback, and restoration foundations. Version `0.1.0` completed the first minimal AppKit product interface. Version `0.2.0` completed icon-first policy presentation: installed application icons from public AppKit/Workspace APIs, semantic SF Symbols for known read-only Apple system items, and one explicit fallback for unresolved candidates. Names, policies, bundle identifiers, observation counts, and read-only state remain available as supplementary text and accessibility information. Visible means Blenny does not conceal an item; macOS still owns final placement and native overflow. This remains a local engineering milestone, not a distributable release or a general compatibility claim.
 
-Blenny's own status item uses a bundled monochrome template SVG so AppKit can adapt it to the current menu-bar appearance. That status-item asset is intentionally separate from the future color application icon. Blenny never captures live menu-bar pixels and does not require Screen Recording.
+Blenny's own status item uses a bundled, 18-point optical-size monochrome template SVG so AppKit can adapt it to the current menu-bar appearance without rescaling fine details. The more detailed vector design master remains separate under `Design/MenuBar/`, and both are intentionally separate from the future color application icon. Blenny never captures live menu-bar pixels and does not require Screen Recording.
 
 ## Product direction
 

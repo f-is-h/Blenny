@@ -40,8 +40,9 @@ The semantic map covers Bluetooth, Clock, Control Center, Now Playing, Siri, Sou
 
 ### Blenny status item
 
-- `Assets/MenuBar/BlennyMenuBarTemplate.svg` is the source asset for Blenny's own menu-bar status item.
-- The build copies it into the application resources and AppKit loads it as a template image at status-item size, allowing the system to choose the appropriate monochrome rendering for appearance and emphasis.
+- `Design/MenuBar/BlennyMenuBarOpenMouthMaster.svg` preserves the detailed open-mouth vector design independently from production rendering constraints.
+- `Assets/MenuBar/BlennyMenuBarTemplate.svg` is the 18-by-18-point optical-size production asset for Blenny's own menu-bar status item. It uses direct even-odd paths and status-size details instead of a nested SVG mask whose subpixel cutouts blurred when rasterized by AppKit.
+- The build copies only the production asset into the application resources. AppKit loads it as a template image without additional button scaling, allowing the system to choose the appropriate monochrome rendering for appearance and emphasis.
 - This template asset is deliberately separate from the future color application icon. Until that color asset exists, Blenny is represented by the shared fallback inside the policy editor.
 
 ### Presentation and accessibility
@@ -87,9 +88,9 @@ Installed visual review must confirm:
 - Debug tests: 115 tests in 16 suites passed.
 - Release tests: 113 tests in 15 suites passed.
 - Debug and Release application builds passed; both declare a macOS 27 minimum and SDK 27 in their Mach-O load commands and pass deep ad-hoc signature verification.
-- Final Debug executable SHA-256: `b8fee38e6ca2ac853c2f1348e2aeec1767e5e9f42dee19de61678260099414c7`.
-- Final Release executable SHA-256: `e0c312fb665dbe0b4d39c41ccd8287eb5d5ad450d4e1d507641ad77c427627fc`.
-- Source, Debug-resource, Release-resource, and installed-resource copies of the menu-bar SVG share SHA-256 `db83c97a9e27da5b816d5b18e29f94b9ffd6abd3e9c2f1b4150c46949ade88e9`; AppKit successfully decodes the packaged SVG.
+- Final Debug executable SHA-256: `c9497fabd849b23f068ced9a95031c08be9d4a8b7f0535bc6eb2042d9145c5cc`.
+- Final Release executable SHA-256: `502702ad1d64d110187ac7e3fea4e7bba24234e5202597226588f3fbfe1b58cb`.
+- The preserved detailed vector master has SHA-256 `db83c97a9e27da5b816d5b18e29f94b9ffd6abd3e9c2f1b4150c46949ade88e9`, exactly matching the pre-optical production asset. Source, Debug-resource, Release-resource, and installed-resource copies of the 18-point production SVG share SHA-256 `53edfd091d35ec50a5a9aabc9322fa71986b9fc76465a0e77e97627ccda52d20`; AppKit successfully decodes the packaged SVG.
 - The Release executable links only the expected public Apple frameworks and Swift runtime. Privacy scans found no Screen Recording descriptions, live-pixel capture path, owner path, private validation identifiers, or enablement tokens.
 - The final installed icon-first Debug build populated all three horizontal lanes with 20 bundle owners and nine identifiable system items. It showed recognizable color application icons, Blenny's explicit fallback, semantic monochrome system symbols including Text Input, local horizontal scrolling, and complete selection/accessibility detail without clipping.
 - Installed interaction acceptance exercised selection details, keyboard focus traversal, a reversible draft move, deterministic Review, Discard Draft, the assertion-blocked Resume preview, the disabled Stop state, Restore preview, manual Refresh, close, reopen, and Quit. No Apply action was used during the final acceptance pass.

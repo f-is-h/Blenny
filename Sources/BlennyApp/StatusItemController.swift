@@ -230,6 +230,7 @@ final class StatusItemController: NSObject {
         image?.size = NSSize(width: 18, height: 18)
         image?.isTemplate = true
         button.image = image
+        button.imageScaling = .scaleNone
         if image == nil {
             button.title = "B"
         }
