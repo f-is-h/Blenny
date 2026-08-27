@@ -6,7 +6,7 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.1.0` Minimal Product Interface complete; local tag awaits owner evidence confirmation
+- Current phase: `0.1.0` Minimal Product Interface complete; local annotated tag authorized, push deferred
 - Document date: 2026-08-27
 - Product status: minimal AppKit product interface complete on the tested macOS 27 build; no distributable build yet
 - Source lineage decision: clean implementation, not an Ice fork
@@ -558,4 +558,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Close the implemented `0.1.0` Minimal Product Interface against the evidence recorded in [`docs/TECH_SPIKE_0.1.0.md`](docs/TECH_SPIKE_0.1.0.md). Keep the restored policy persistently disabled and retain the Debug-only macOS 27 assertion backend and explicit real-write authorization boundary. Do not start `0.2.0` lifecycle or display hardening, create `v0.1.0`, or push without the required evidence review and separate owner confirmation.
+Close the implemented `0.1.0` Minimal Product Interface with the authorized local annotated tag after the final release audit. Keep the restored policy persistently disabled and retain the Debug-only macOS 27 assertion backend and explicit real-write authorization boundary. Do not push `main` or `v0.1.0` without a separate owner confirmation after the exact pre-push receipt. Treat `0.2.0` lifecycle and display hardening as the next planning boundary, not part of the `0.1.0` tag.

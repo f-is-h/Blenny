@@ -22,7 +22,7 @@ These rules apply to every task in this repository.
 ## Scope and architecture
 
 - Manage policy at the owning application bundle level; per-status-item control within one app is out of scope.
-- Preserve distinct `Pinned`, `Revealable`, and `Hidden` intent. Ordinary reveal sessions must not include `Hidden` bundles.
+- Preserve distinct `Visible`, `Revealable`, and `Hidden` intent. Ordinary reveal sessions must not include `Hidden` bundles.
 - Keep product logic independent from the unsupported backend and keep the backend narrow and replaceable.
 - Do not add themes, profiles, animation systems, synthetic-input ordering, or unrelated product features without an explicit roadmap change.
 

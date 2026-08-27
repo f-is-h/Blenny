@@ -98,7 +98,7 @@ Advance when:
 
 ## 0.1.0 — Minimal product interface
 
-Status: **Complete on macOS 27.0 build `26A5416b`; local tag awaits owner evidence confirmation.**
+Status: **Complete on macOS 27.0 build `26A5416b`; local annotated tag authorized, push deferred.**
 
 Exit criteria met:
 

@@ -2,7 +2,7 @@
 
 > Engineering and product record for the first AppKit interface over the validated `0.0.5` policy-editing core. This is not the `0.2.0` lifecycle/display-hardening milestone or a distributable release.
 
-Status: **Complete on macOS 27.0 build `26A5416b`; local tag awaits owner evidence confirmation.**
+Status: **Complete on macOS 27.0 build `26A5416b`; local annotated tag authorized, push deferred.**
 
 Last updated: 2026-08-27
 
@@ -135,7 +135,7 @@ Before and after both runs, the accepted policy remained disabled with SHA-256 `
 
 The standard installed interface was also exercised directly with Accessibility granted. It completed one bounded observation, excluded Apple-owned critical system bundles, moved a third-party bundle between draft groups without changing accepted state, displayed the complete deterministic Review Changes report, and returned to accepted intent through Discard Draft. Resume Managing displayed a passing accepted-policy-scoped preview. Apply was disabled for every assertion-changing plan. Tab navigation, close/reopen from the menu bar, and Command-Q were exercised successfully. No system prompt appeared at launch and no real write was attempted.
 
-The final system-item change was verified against a separate bounded live Accessibility observation that returned Bluetooth, Wi-Fi, Now Playing, Sound, Control Center, and Clock from MenuBarAgent, plus current SystemUIServer, Weather, and TextInputMenuAgent items. Unit coverage verifies that these observations become deterministic read-only Visible cards and never enter the editable bundle-policy draft. Rebuilding the ad-hoc installed app reset its Accessibility grant, and the Mac was locked during the final UI inspection attempt, so visual confirmation of those populated cards remains an explicit owner-side check after re-enabling Accessibility and selecting Refresh; it is not claimed as completed release evidence.
+The final system-item change was verified against a separate bounded live Accessibility observation that returned Bluetooth, Wi-Fi, Now Playing, Sound, Control Center, and Clock from MenuBarAgent, plus current SystemUIServer, Weather, and TextInputMenuAgent items. Unit coverage verifies that these observations become deterministic read-only Visible cards and never enter the editable bundle-policy draft. After re-enabling Accessibility for the rebuilt ad-hoc app and selecting Refresh, owner visual review confirmed populated application and system cards in the Visible lane. A final Accessibility-tree inspection confirmed nine current read-only system cards: Bluetooth, Clock, Control Center, Now Playing, Siri, Sound, Wi-Fi, Weather, and the active input source. The horizontal strip requires scrolling to reach later cards. Time Machine was not present in that identifiable snapshot; `0.1.0` promises only stable current observations, not exhaustive enumeration or mutation of every Apple system item.
 
 Follow-up visual QA exposed an AppKit sizing defect: the window frame opened at the intended width while its root content view was allowed to collapse to approximately 215 points, producing an unusably narrow and vertically expanded editor. The editor now uses an explicit view-controller-owned content root, disables stale window restoration, declares matching content and root-layout minimum dimensions, and repairs an undersized restored window before presentation. Rebuilt installed-app QA confirmed normal-width headers, onboarding, all three policy regions, draft actions, and recovery controls in one window.
 
@@ -145,4 +145,4 @@ No real assertion write was authorized or performed for `0.1.0`. Any later real 
 
 ## Closeout boundary
 
-`$blenny-release` must audit the complete `v0.0.5..HEAD` range and reachable history, run dirty and clean release audits, verify Xcode 27 Debug and Release tests and app builds, inspect Release isolation, confirm final restoration, and create only authorized local commits. Do not create `v0.1.0` until the owner reviews the final evidence and explicitly confirms tagging. Do not push any branch or tag.
+The owner reviewed the final interface and system-item evidence and explicitly authorized local release closure through `$blenny-release`. The skill must audit the complete `v0.0.5..HEAD` range and reachable history, run dirty and clean release audits, verify Xcode 27 Debug and Release tests and app builds, inspect Release isolation, confirm final restoration, and create the annotated `v0.1.0` tag only at the audited release commit. Do not push any branch or tag without a separate exact-ref confirmation.
