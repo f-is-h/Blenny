@@ -6,7 +6,7 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.0.4` Persistent Policy Prototype complete; evidence review pending before tagging
+- Current phase: `0.0.4` Persistent Policy Prototype complete; local release closeout in progress
 - Document date: 2026-08-27
 - Product status: core architecture go on the tested macOS 27 build; no distributable build yet
 - Source lineage decision: clean implementation, not an Ice fork

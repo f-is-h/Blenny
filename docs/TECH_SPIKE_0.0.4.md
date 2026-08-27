@@ -2,9 +2,9 @@
 
 > Engineering record for the bounded `0.0.4` prototype. This is not the `0.0.5` Policy Editing Core, the `0.1.0` product interface, a distributable build, or a supported public-API implementation.
 
-Status: **Implementation, deterministic verification, Release isolation, and installed dry-runs pass on macOS 27.0 build `26A5416b`. Bounded real-write evidence remains pending explicit owner authorization. No `v0.0.4` tag has been created.**
+Status: **Complete on macOS 27.0 build `26A5416b`, including deterministic verification, Release isolation, installed dry-runs, owner-authorized real-write validation, persistent disable, and complete restoration.**
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 ## Scope
 
@@ -160,4 +160,4 @@ No third-party application binary was updated or modified during validation. No 
 
 ## Closeout boundary
 
-All required implementation, deterministic, installed dry-run, real-write, relaunch, Stop Managing, backup, and restoration evidence is complete. Version closeout performs the repository audit and local commit without creating `v0.0.4` or pushing any ref. The owner must review the complete evidence and explicitly authorize a later tag operation; prior real-write authorization is not tag or push authorization.
+All required implementation, deterministic, installed dry-run, real-write, relaunch, Stop Managing, backup, and restoration evidence is complete. An annotated `v0.0.4` tag may be created only after the final clean release audit. Creating the local tag is not Push authorization; publishing the exact branch and tag requires a separate owner confirmation after the pre-push receipt is presented.
