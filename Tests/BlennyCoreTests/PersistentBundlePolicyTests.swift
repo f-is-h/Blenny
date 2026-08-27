@@ -105,9 +105,18 @@ struct PersistentBundlePolicyTests {
 
         #expect(try await store.restoreBackup() == enabled)
         #expect(try await store.load() == enabled)
+        #expect(try await store.restoreBackup() == enabled)
+        #expect(try await store.loadBackup()?.previousPolicy == enabled)
 
         let attributes = try FileManager.default.attributesOfItem(atPath: policyURL.path)
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        let backupAttributes = try FileManager.default.attributesOfItem(atPath: backupURL.path)
+        #expect((backupAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        #expect(
+            try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .filter { $0.lastPathComponent.hasSuffix(".blenny-backup.json") }
+                .count == 1
+        )
     }
 
     @Test("Policy and backup paths cannot alias")

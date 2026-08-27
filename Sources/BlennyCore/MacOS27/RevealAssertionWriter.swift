@@ -28,6 +28,7 @@ public actor RevealAssertionWriter {
     private let factory: any RevealAssertionCandidateFactory
     private let activationTimeout: Duration
     private var activeAssertion: (any RevealAssertionCandidate)?
+    private var activePlan: RevealAllowlistPlan?
     private var pendingAssertion: (
         identifier: UInt64,
         candidate: any RevealAssertionCandidate
@@ -51,7 +52,7 @@ public actor RevealAssertionWriter {
         guard !transitioning else {
             throw RevealAssertionWriterError.transitionAlreadyInProgress
         }
-        if state == .active(plan.presentation) { return }
+        if activePlan == plan { return }
 
         transitioning = true
         let replacement: any RevealAssertionCandidate
@@ -96,6 +97,7 @@ public actor RevealAssertionWriter {
         let preceding = activeAssertion
         pendingAssertion = nil
         activeAssertion = replacement
+        activePlan = plan
         state = .active(plan.presentation)
         transitioning = false
         await preceding?.invalidate()
@@ -124,6 +126,7 @@ public actor RevealAssertionWriter {
         let preceding = activeAssertion
         pendingAssertion = nil
         activeAssertion = nil
+        activePlan = nil
         state = .restored
         await pending?.invalidate()
         await preceding?.invalidate()
@@ -137,10 +140,15 @@ public actor RevealAssertionWriter {
         let preceding = activeAssertion
         pendingAssertion = nil
         activeAssertion = nil
+        activePlan = nil
         transitioning = false
         state = .restored
         await pending?.invalidate()
         await preceding?.invalidate()
+    }
+
+    public func activePlanSnapshot() -> RevealAllowlistPlan? {
+        activePlan
     }
 
     private func activate(

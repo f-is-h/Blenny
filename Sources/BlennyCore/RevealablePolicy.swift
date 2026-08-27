@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-public enum MenuBarBundlePolicy: String, CaseIterable, Codable, Sendable {
+public enum MenuBarBundlePolicy: String, CaseIterable, Codable, Hashable, Sendable {
     case pinned
     case revealable
     case hidden

@@ -48,6 +48,32 @@ struct RevealAssertionWriterTests {
         #expect(await writer.state == .active(.baseline))
     }
 
+    @Test("A different plan with the same presentation still replaces the assertion")
+    func samePresentationPolicyEditReplacesAssertion() async throws {
+        let recorder = AssertionRecorder()
+        let writer = RevealAssertionWriter(
+            factory: FakeAssertionFactory(
+                recorder: recorder,
+                behaviors: [.succeed, .succeed]
+            )
+        )
+        let oldBaseline = plan(
+            .baseline,
+            allowedBundleIdentifiers: ["com.example.BlennyProbe"]
+        )
+        let editedBaseline = plan(
+            .baseline,
+            allowedBundleIdentifiers: ["com.example.BlennyProbe", "com.example.Edited"]
+        )
+
+        try await writer.replace(with: oldBaseline)
+        try await writer.replace(with: editedBaseline)
+
+        #expect(recorder.events.contains("make-baseline-2"))
+        #expect(recorder.events.contains("activate-baseline-2"))
+        #expect(recorder.events.contains("invalidate-baseline-1"))
+    }
+
     @Test("Failed Revealable activation preserves baseline and cannot admit Hidden")
     func failedRevealKeepsHiddenConcealed() async throws {
         let recorder = AssertionRecorder()

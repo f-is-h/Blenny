@@ -40,9 +40,9 @@ final class DiagnosticsWindowController: NSWindowController {
             defer: false
         )
         #if DEBUG
-        window.title = "Blenny 0.0.4 — Persistent Policy Prototype (Debug)"
+        window.title = "Blenny 0.0.5 — Policy Editing Core Validation (Debug)"
         #else
-        window.title = "Blenny 0.0.4 — Read-only Accessibility Probe"
+        window.title = "Blenny 0.0.5 — Read-only Accessibility Probe"
         #endif
         window.center()
         window.isReleasedWhenClosed = false
@@ -262,7 +262,7 @@ final class DiagnosticsWindowController: NSWindowController {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
         panel.canCreateDirectories = true
-        panel.nameFieldStringValue = "Blenny-0.0.4-\(Self.fileTimestamp()).blenny-diagnostics.json"
+        panel.nameFieldStringValue = "Blenny-0.0.5-\(Self.fileTimestamp()).blenny-diagnostics.json"
         panel.message = "Exports only menu-bar Accessibility metadata shown in this window."
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let destination = panel.url else { return }

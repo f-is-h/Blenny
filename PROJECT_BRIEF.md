@@ -6,7 +6,7 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.0.4` Persistent Policy Prototype complete; local release closeout in progress
+- Current phase: `0.0.5` Policy Editing Core complete; `0.1.0` has not started
 - Document date: 2026-08-27
 - Product status: core architecture go on the tested macOS 27 build; no distributable build yet
 - Source lineage decision: clean implementation, not an Ice fork
@@ -555,4 +555,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Review the complete `0.0.4` Persistent Policy Prototype evidence recorded in [`docs/TECH_SPIKE_0.0.4.md`](docs/TECH_SPIKE_0.0.4.md) before authorizing any tag. Preserve the Debug-only macOS 27 backend boundary, do not push without separate exact-ref confirmation, and begin the `0.0.5` Policy Editing Core only in a separate owner-directed task. The first minimal product interface is `0.1.0`.
+Audit the completed `0.0.5` Policy Editing Core evidence recorded in [`docs/TECH_SPIKE_0.0.5.md`](docs/TECH_SPIKE_0.0.5.md). Keep the restored policy persistently disabled, retain the Debug-only macOS 27 backend boundary, and do not begin the `0.1.0` interface in this milestone. Do not create `v0.0.5` until the owner separately confirms the final evidence, and do not push without separate exact-ref confirmation.

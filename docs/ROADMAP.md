@@ -83,6 +83,8 @@ Advance when:
 
 ## 0.0.5 — Policy editing core
 
+Status: **Complete on macOS 27.0 build `26A5416b`; tag and push remain intentionally deferred.**
+
 Advance when:
 
 - A UI-independent draft model supports bundle-level `Pinned`, `Revealable`, and `Hidden` assignments without per-status-item scope.
