@@ -6,7 +6,7 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.0.5` Policy Editing Core complete; `0.1.0` has not started
+- Current phase: `0.0.5` Policy Editing Core complete; local release closeout authorized; `0.1.0` has not started
 - Document date: 2026-08-27
 - Product status: core architecture go on the tested macOS 27 build; no distributable build yet
 - Source lineage decision: clean implementation, not an Ice fork
@@ -555,4 +555,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Audit the completed `0.0.5` Policy Editing Core evidence recorded in [`docs/TECH_SPIKE_0.0.5.md`](docs/TECH_SPIKE_0.0.5.md). Keep the restored policy persistently disabled, retain the Debug-only macOS 27 backend boundary, and do not begin the `0.1.0` interface in this milestone. Do not create `v0.0.5` until the owner separately confirms the final evidence, and do not push without separate exact-ref confirmation.
+Close the completed `0.0.5` Policy Editing Core against the evidence recorded in [`docs/TECH_SPIKE_0.0.5.md`](docs/TECH_SPIKE_0.0.5.md). The owner authorized a local annotated `v0.0.5` after a fresh release audit on 2026-08-27. Keep the restored policy persistently disabled, retain the Debug-only macOS 27 backend boundary, and do not begin the `0.1.0` interface in this milestone. Do not push without separate confirmation of the exact branch and tag refs.

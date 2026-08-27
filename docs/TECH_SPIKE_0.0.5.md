@@ -2,7 +2,7 @@
 
 > Engineering record for the UI-independent `0.0.5` core. This is not the `0.1.0` settings interface, a distributable build, or a supported public-API implementation.
 
-Status: **Complete on macOS 27.0 build `26A5416b`; tag and push remain intentionally deferred.**
+Status: **Complete on macOS 27.0 build `26A5416b`; local annotated tag authorized, push deferred.**
 
 Last updated: 2026-08-27
 
@@ -219,4 +219,4 @@ The authorized restore then logged `policy_transaction_committed=true` followed 
 
 ## Closeout boundary
 
-Implementation, installed dry-run, owner-authorized bounded real validation, final restoration, and Xcode 27 Debug/Release verification are complete. `$blenny-release` provides the history, privacy, version-alignment, and clean-tree closeout audit. It must not create `v0.0.5` without a later evidence confirmation and must not push any ref.
+Implementation, installed dry-run, owner-authorized bounded real validation, final restoration, and Xcode 27 Debug/Release verification are complete. `$blenny-release` provides the history, privacy, version-alignment, and clean-tree closeout audit. On 2026-08-27 the owner explicitly authorized creation of the local annotated `v0.0.5` after that fresh audit. No push or remote-ref change is authorized.
