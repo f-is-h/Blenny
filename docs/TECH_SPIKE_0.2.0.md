@@ -43,7 +43,14 @@ The semantic map covers Bluetooth, Clock, Control Center, Now Playing, Siri, Sou
 - `Design/MenuBar/BlennyMenuBarOpenMouthMaster.svg` preserves the detailed open-mouth vector design independently from production rendering constraints.
 - `Assets/MenuBar/BlennyMenuBarTemplate.svg` is the 18-by-18-point optical-size production asset for Blenny's own menu-bar status item. It uses direct even-odd paths and status-size details instead of a nested SVG mask whose subpixel cutouts blurred when rasterized by AppKit.
 - The build copies only the production asset into the application resources. AppKit loads it as a template image without additional button scaling, allowing the system to choose the appropriate monochrome rendering for appearance and emphasis.
-- This template asset is deliberately separate from the future color application icon. Until that color asset exists, Blenny is represented by the shared fallback inside the policy editor.
+- This template asset is deliberately separate from the color application icon.
+
+### Blenny application icon
+
+- `Assets/AppIcon/BlennyAppIconMaster.svg` is the tracked copy of the supplied v12 color vector master, and `Assets/AppIcon/BlennyAppIcon.png` is the byte-identical tracked copy of its supplied 1024-by-1024 sRGB preview render used for production packaging.
+- The script-built application does not maintain hand-edited size variants. Each Debug or Release build derives the standard 16-, 32-, 128-, 256-, 512-, and 1024-pixel representations with system tools and packages them as `BlennyAppIcon.icns`.
+- `CFBundleIconFile` declares that generated resource, so Finder, Launch Services, `NSWorkspace`, and Blenny's own public icon resolver receive the color bundle icon. The SVG master and intermediate iconset do not enter the application bundle.
+- The color application icon is bundle presentation only. It does not enter observation identity, policy persistence, drafts, diffs, reports, fingerprints, diagnostics, or the status-item rendering path.
 
 ### Presentation and accessibility
 
@@ -88,11 +95,13 @@ Installed visual review must confirm:
 - Debug tests: 115 tests in 16 suites passed.
 - Release tests: 113 tests in 15 suites passed.
 - Debug and Release application builds passed; both declare a macOS 27 minimum and SDK 27 in their Mach-O load commands and pass deep ad-hoc signature verification.
-- Final Debug executable SHA-256: `c9497fabd849b23f068ced9a95031c08be9d4a8b7f0535bc6eb2042d9145c5cc`.
-- Final Release executable SHA-256: `502702ad1d64d110187ac7e3fea4e7bba24234e5202597226588f3fbfe1b58cb`.
+- Final Debug executable SHA-256: `fce3dbc18642a07b09568362b63be6ffa57a3eca53e5a791fbeb46bf5fe5bf60`.
+- Final Release executable SHA-256: `9566c506aa3f7a314a31432dfc607c04964f0bea07587069837b25dd9ab28289`.
 - The preserved detailed vector master has SHA-256 `db83c97a9e27da5b816d5b18e29f94b9ffd6abd3e9c2f1b4150c46949ade88e9`, exactly matching the pre-optical production asset. Source, Debug-resource, Release-resource, and installed-resource copies of the 18-point production SVG share SHA-256 `53edfd091d35ec50a5a9aabc9322fa71986b9fc76465a0e77e97627ccda52d20`; AppKit successfully decodes the packaged SVG.
+- The v12 application-icon SVG master has SHA-256 `11716e2320fc2022e5c2581c1f7d92e0bafc9194c9ceb7e5d6b46789046b444b`; its 1024-pixel sRGB PNG has SHA-256 `0afc17b236b7451d7135b278dab0b1e5a94ff3cf866a38b9f19c53c4df1913b0`. Two consecutive Debug builds produced the same multi-resolution ICNS SHA-256 `5e5fdce3f203ce44fbc70561ea0a68adf221596eba56bec37325a8e96b471387`.
+- The installed Debug bundle declares `BlennyAppIcon.icns`; Finder renders the color icon at normal and enlarged icon-view sizes, and public `NSWorkspace.icon(forFile:)` returns the installed resource with the expected multi-resolution representations.
 - The Release executable links only the expected public Apple frameworks and Swift runtime. Privacy scans found no Screen Recording descriptions, live-pixel capture path, owner path, private validation identifiers, or enablement tokens.
-- The final installed icon-first Debug build populated all three horizontal lanes with 20 bundle owners and nine identifiable system items. It showed recognizable color application icons, Blenny's explicit fallback, semantic monochrome system symbols including Text Input, local horizontal scrolling, and complete selection/accessibility detail without clipping.
+- The prior full-lane installed acceptance populated all three horizontal lanes with 20 bundle owners and nine identifiable system items. It showed recognizable color application icons, the then-current Blenny fallback, semantic monochrome system symbols including Text Input, local horizontal scrolling, and complete selection/accessibility detail without clipping. After the color bundle icon was added, Finder and `NSWorkspace` acceptance verified the production icon path; the full Accessibility scan was not repeated because rebuilding the ad-hoc-signed app removed its prior trust, and this icon-only follow-up did not change system privacy settings.
 - Installed interaction acceptance exercised selection details, keyboard focus traversal, a reversible draft move, deterministic Review, Discard Draft, the assertion-blocked Resume preview, the disabled Stop state, Restore preview, manual Refresh, close, reopen, and Quit. No Apply action was used during the final acceptance pass.
 
 A post-QA recovery check detected that two disabled-policy saves had occurred during an earlier installed-interface exercise: the accepted document had gained local candidate assignments and the single backup had rotated. Both files remained disabled and mode `0600`, and no writer or assertion could be created through this path. Before closeout, the observed files were copied to ignored `LocalData/` evidence and the versioned schema-1 baseline was regenerated deterministically. The restored accepted-policy SHA-256 is `0618f1078de2655c5d4263c030459e7a1e0a320237708018957df83f8b74a004`; the restored backup SHA-256 is `938ad8a5611a0c9bb0459a77f61528ecc587457f96b160db4044bd41874c9599`; both are `0600`. The unexpected writes changed filesystem modification times, so this record does not claim timestamp preservation.

@@ -119,6 +119,7 @@ Status: **Complete on macOS 27.0 build `26A5416b`; installed acceptance passed, 
 Exit criteria met:
 
 - Every observed application-bundle candidate has an icon resolved from its owning installed application, with a deterministic generic fallback when resolution fails.
+- Blenny's installed application bundle supplies its own full-color multi-resolution icon, independently from the monochrome optical-size status-item template.
 - Known read-only Apple system-item observations use semantic system symbols keyed by stable observation identity, while unknown items use the same honest fallback.
 - Icons are presentation only: bundle identifiers remain policy identity, icon bytes do not enter policy persistence, and refresh ordering does not change icon selection.
 - The existing Visible, Revealable, and Hidden lanes become icon-first while names, policy state, bundle identity, item count, and read-only status remain available through supplementary text, tooltips, selection detail, and Accessibility labels.

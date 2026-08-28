@@ -1,0 +1,220 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Blenny app icon v12 with softened eye-back shadows and restored v8 lower-eye curves</title>
+  <desc>Deterministic layered 2.5D artwork for the Blenny macOS app icon. The system applies the final rounded-rectangle mask.</desc>
+
+  <defs>
+    <linearGradient id="water" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#82DDD5"/>
+      <stop offset="0.46" stop-color="#39B9B8"/>
+      <stop offset="1" stop-color="#127887"/>
+    </linearGradient>
+    <radialGradient id="sunGlow" cx="0.14" cy="0.08" r="0.78">
+      <stop offset="0" stop-color="#D5F4DC" stop-opacity="0.68"/>
+      <stop offset="0.42" stop-color="#83DDD1" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#2DA7AE" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="cave" cx="0.46" cy="0.36" r="0.75">
+      <stop offset="0" stop-color="#0A4245"/>
+      <stop offset="0.64" stop-color="#052E34"/>
+      <stop offset="1" stop-color="#021B25"/>
+    </radialGradient>
+    <linearGradient id="fishBase" x1="0.28" y1="0.13" x2="0.63" y2="0.95">
+      <stop offset="0" stop-color="#FF8A42"/>
+      <stop offset="0.44" stop-color="#F1662C"/>
+      <stop offset="0.76" stop-color="#E58B28"/>
+      <stop offset="1" stop-color="#9E7332"/>
+    </linearGradient>
+    <radialGradient id="headGlow" cx="0.38" cy="0.16" r="0.72">
+      <stop offset="0" stop-color="#FFB15E" stop-opacity="0.42"/>
+      <stop offset="0.55" stop-color="#FF8A43" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#C44C2E" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="headLowerShade" x1="0.5" y1="0.2" x2="0.5" y2="1">
+      <stop offset="0.54" stop-color="#5C5839" stop-opacity="0"/>
+      <stop offset="1" stop-color="#465A38" stop-opacity="0.32"/>
+    </linearGradient>
+    <radialGradient id="faceVolume" cx="0.43" cy="0.28" r="0.76">
+      <stop offset="0" stop-color="#FFB36A" stop-opacity="0.28"/>
+      <stop offset="0.48" stop-color="#F56A34" stop-opacity="0.04"/>
+      <stop offset="0.8" stop-color="#8F3F31" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#273E2E" stop-opacity="0.28"/>
+    </radialGradient>
+    <linearGradient id="cirrusBody" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF9A57"/>
+      <stop offset="0.46" stop-color="#F16B2D"/>
+      <stop offset="1" stop-color="#C54B2C"/>
+    </linearGradient>
+    <linearGradient id="muzzle" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#F7A22A" stop-opacity="0"/>
+      <stop offset="0.45" stop-color="#F4A126" stop-opacity="0.74"/>
+      <stop offset="1" stop-color="#C1872E" stop-opacity="0.56"/>
+    </linearGradient>
+    <linearGradient id="leftEye" x1="0.15" y1="0.08" x2="0.88" y2="0.92">
+      <stop offset="0" stop-color="#FFF7D9"/>
+      <stop offset="0.62" stop-color="#F5E6BE"/>
+      <stop offset="1" stop-color="#CBBF98"/>
+    </linearGradient>
+    <linearGradient id="rightEye" x1="0.12" y1="0.1" x2="0.86" y2="0.9">
+      <stop offset="0" stop-color="#FFF4D5"/>
+      <stop offset="0.64" stop-color="#F3E5BC"/>
+      <stop offset="1" stop-color="#C8BD98"/>
+    </linearGradient>
+    <radialGradient id="iris" cx="0.38" cy="0.28" r="0.8">
+      <stop offset="0" stop-color="#94602E"/>
+      <stop offset="0.58" stop-color="#5A361C"/>
+      <stop offset="1" stop-color="#261A14"/>
+    </radialGradient>
+    <radialGradient id="noseLeft" cx="0.34" cy="0.24" r="0.82">
+      <stop offset="0" stop-color="#FFB06C"/>
+      <stop offset="0.48" stop-color="#EF7A38"/>
+      <stop offset="1" stop-color="#B94D2E"/>
+    </radialGradient>
+    <radialGradient id="noseRight" cx="0.3" cy="0.2" r="0.86">
+      <stop offset="0" stop-color="#FFA35F"/>
+      <stop offset="0.5" stop-color="#E97536"/>
+      <stop offset="1" stop-color="#A9442C"/>
+    </radialGradient>
+    <linearGradient id="stone" x1="0.2" y1="0.08" x2="0.75" y2="0.92">
+      <stop offset="0" stop-color="#F0DDA2"/>
+      <stop offset="0.42" stop-color="#C7B174"/>
+      <stop offset="0.74" stop-color="#8E8559"/>
+      <stop offset="1" stop-color="#4F5940"/>
+    </linearGradient>
+    <linearGradient id="innerRim" x1="0.18" y1="0.12" x2="0.72" y2="0.9">
+      <stop offset="0" stop-color="#EBD79A"/>
+      <stop offset="0.4" stop-color="#9A8756"/>
+      <stop offset="1" stop-color="#3C452F"/>
+    </linearGradient>
+
+    <path id="headShape" d="M180 800 C156 700 176 536 274 448 C358 372 456 353 533 356 C661 350 763 398 831 489 C890 568 884 719 839 803 C774 854 686 877 526 878 C360 878 247 855 180 800Z"/>
+    <path id="innerOpening" d="M158 573 C150 390 280 218 493 190 C704 160 857 300 870 510 C884 666 820 761 706 796 C632 818 584 816 520 816 C456 816 398 818 319 796 C213 766 165 691 158 573Z"/>
+    <path id="stoneRing" fill-rule="evenodd" d="M46 531 C42 260 225 78 495 58 C759 38 966 215 979 493 C994 774 825 960 538 973 C247 985 57 826 46 531Z M158 573 C150 390 280 218 493 190 C704 160 857 300 870 510 C884 666 820 761 706 796 C632 818 584 816 520 816 C456 816 398 818 319 796 C213 766 165 691 158 573Z"/>
+
+    <clipPath id="headClip">
+      <use href="#headShape"/>
+    </clipPath>
+    <clipPath id="ringClip">
+      <use href="#stoneRing" clip-rule="evenodd"/>
+    </clipPath>
+    <filter id="ringShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="13" stdDeviation="14" flood-color="#063A42" flood-opacity="0.24"/>
+    </filter>
+    <filter id="headShadow" x="-20%" y="-25%" width="140%" height="155%">
+      <feDropShadow dx="0" dy="15" stdDeviation="18" flood-color="#001A23" flood-opacity="0.38"/>
+    </filter>
+    <filter id="eyeShadow" x="-30%" y="-25%" width="160%" height="165%">
+      <feDropShadow dx="0" dy="9" stdDeviation="10" flood-color="#592B24" flood-opacity="0.34"/>
+    </filter>
+    <filter id="softBlur" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <filter id="smallBlur" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+  </defs>
+
+  <g id="01-background">
+    <rect width="1024" height="1024" fill="url(#water)"/>
+    <rect width="1024" height="1024" fill="url(#sunGlow)"/>
+  </g>
+
+  <g id="02-cave-interior">
+    <use href="#innerOpening" fill="url(#cave)"/>
+  </g>
+
+  <g id="03-fish-head">
+    <use href="#headShape" fill="url(#fishBase)" filter="url(#headShadow)"/>
+
+    <g clip-path="url(#headClip)">
+      <path d="M159 570 C222 490 292 481 343 524 C312 600 296 705 330 855 L157 851Z" fill="#B84B36" opacity="0.22"/>
+      <path d="M854 537 C793 483 736 491 697 535 C728 620 744 718 711 860 L874 845Z" fill="#AF4934" opacity="0.2"/>
+      <path d="M205 741 C325 694 682 697 841 746 L840 885 L184 881Z" fill="url(#muzzle)"/>
+      <path d="M197 797 C322 756 389 799 522 815 C647 789 731 754 849 789 L838 886 L184 884Z" fill="#727945" opacity="0.22"/>
+      <path d="M290 424 C410 349 642 348 760 431 C653 407 387 407 290 424Z" fill="#FF9A52" opacity="0.22"/>
+      <ellipse cx="476" cy="472" rx="318" ry="270" fill="url(#headGlow)"/>
+      <rect x="145" y="410" width="745" height="485" fill="url(#headLowerShade)"/>
+      <ellipse cx="500" cy="592" rx="390" ry="330" fill="url(#faceVolume)"/>
+      <path d="M237 703 C297 746 359 765 425 771" fill="none" stroke="#FFB34F" stroke-width="26" stroke-linecap="round" opacity="0.12" filter="url(#smallBlur)"/>
+    </g>
+  </g>
+
+  <g id="04-cirri" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#873B2C" stroke-width="26" opacity="0.2">
+      <path d="M347 458 C345 418 343 383 342 352"/>
+      <path d="M342 365 C324 354 311 343 300 331"/>
+      <path d="M342 356 C343 342 345 330 348 319"/>
+      <path d="M344 364 C360 352 372 342 382 331"/>
+      <path d="M705 457 C708 418 710 384 711 353"/>
+      <path d="M711 366 C694 355 683 345 673 334"/>
+      <path d="M711 357 C713 343 716 331 719 320"/>
+      <path d="M713 365 C728 354 740 343 750 333"/>
+    </g>
+    <g stroke="url(#cirrusBody)" stroke-width="21">
+      <path d="M347 458 C345 418 343 383 342 352"/>
+      <path d="M342 365 C324 354 311 343 300 331"/>
+      <path d="M342 356 C343 342 345 330 348 319"/>
+      <path d="M344 364 C360 352 372 342 382 331"/>
+      <path d="M705 457 C708 418 710 384 711 353"/>
+      <path d="M711 366 C694 355 683 345 673 334"/>
+      <path d="M711 357 C713 343 716 331 719 320"/>
+      <path d="M713 365 C728 354 740 343 750 333"/>
+    </g>
+  </g>
+
+  <g id="05-eyes">
+    <path d="M168 577 C168 491 217 446 270 471 C318 493 328 584 299 655 C277 709 216 713 184 664 C173 646 168 614 168 577Z" fill="url(#leftEye)" filter="url(#eyeShadow)"/>
+    <path d="M856 566 C852 484 807 449 757 475 C712 500 704 592 735 657 C760 708 817 704 844 658 C855 638 859 601 856 566Z" fill="url(#rightEye)" filter="url(#eyeShadow)"/>
+    <ellipse cx="275" cy="580" rx="35" ry="55" fill="url(#iris)"/>
+    <ellipse cx="275" cy="582" rx="22" ry="38" fill="#12171A"/>
+    <ellipse cx="749" cy="581" rx="34" ry="54" fill="url(#iris)"/>
+    <ellipse cx="749" cy="583" rx="21" ry="37" fill="#12171A"/>
+    <ellipse cx="266" cy="559" rx="8" ry="11" fill="#FFF7DD" opacity="0.78"/>
+    <ellipse cx="741" cy="559" rx="7" ry="10" fill="#FFF7DD" opacity="0.72"/>
+    <path d="M214 642 C238 667 272 657 288 625" fill="none" stroke="#9E835D" stroke-width="10" stroke-linecap="round" opacity="0.22"/>
+    <path d="M811 639 C789 665 758 655 742 624" fill="none" stroke="#927B5A" stroke-width="10" stroke-linecap="round" opacity="0.2"/>
+    <path d="M171 531 C198 474 250 459 299 495 C267 483 221 489 188 548Z" fill="#DF5B2C" opacity="0.48"/>
+    <path d="M853 528 C829 476 782 460 736 495 C766 484 809 488 839 543Z" fill="#D8552C" opacity="0.45"/>
+  </g>
+
+  <g id="06-nasal-protrusions">
+    <ellipse cx="426" cy="669" rx="32" ry="13" fill="#773728" opacity="0.24" filter="url(#smallBlur)"/>
+    <ellipse cx="620" cy="668" rx="31" ry="13" fill="#713328" opacity="0.22" filter="url(#smallBlur)"/>
+    <path d="M395 658 C396 640 410 628 429 629 C447 630 458 644 454 659 C451 672 436 679 417 678 C404 677 396 670 395 658Z" fill="url(#noseLeft)"/>
+    <path d="M401 651 C409 638 423 634 437 640 C427 637 417 643 411 655Z" fill="#FF9A52" opacity="0.48"/>
+    <path d="M590 657 C591 640 605 629 623 630 C641 631 651 644 648 659 C645 672 631 679 613 678 C600 677 591 669 590 657Z" fill="url(#noseRight)"/>
+    <path d="M596 650 C605 638 619 635 633 641 C622 637 612 643 606 654Z" fill="#FF9A52" opacity="0.39"/>
+  </g>
+
+  <g id="07-turquoise-markings" fill="#48C5B6">
+    <path d="M454 407 C470 392 490 393 505 404 C507 418 493 430 475 428 C458 426 450 418 454 407Z"/>
+    <path d="M519 381 C533 372 551 375 561 387 C555 397 540 402 526 396 C516 392 513 386 519 381Z" fill="#35B7AD"/>
+    <path d="M427 452 C439 438 455 436 466 446 C469 459 460 474 445 478 C432 477 424 467 427 452Z"/>
+    <path d="M510 458 C519 446 530 445 539 454 C542 465 536 476 525 480 C515 478 508 469 510 458Z" fill="#60D2C1"/>
+    <path d="M397 494 C407 483 419 485 425 496 C425 507 416 516 405 515 C397 511 394 502 397 494Z" fill="#3CBEB1"/>
+    <path d="M574 481 C583 472 595 474 603 486 C603 497 595 504 584 502 C577 497 573 489 574 481Z"/>
+    <path d="M553 424 C561 418 571 420 577 429 C575 437 568 443 559 440 C553 436 550 429 553 424Z" fill="#2FB2A8"/>
+  </g>
+
+  <g id="08-mouth">
+    <path d="M460 746 C490 738 534 738 566 746 C556 760 474 762 460 746Z" fill="#5B271E"/>
+    <path d="M474 750 C498 755 528 755 551 750 C532 765 494 765 474 750Z" fill="#D96A39" opacity="0.72"/>
+  </g>
+
+  <g id="09-stone-ring">
+    <use href="#stoneRing" fill="url(#stone)" fill-rule="evenodd" filter="url(#ringShadow)"/>
+
+    <g clip-path="url(#ringClip)">
+      <path d="M23 319 C194 62 714 4 990 258 C814 150 285 130 61 399Z" fill="#F5DFA1" opacity="0.3"/>
+      <path d="M39 379 C103 213 211 105 354 68 C250 225 204 438 220 682 C154 637 94 560 39 379Z" fill="#B39F69" opacity="0.21"/>
+      <path d="M797 74 C933 193 993 371 980 583 C969 747 901 863 791 927 C842 706 845 395 797 74Z" fill="#756F4B" opacity="0.25"/>
+      <path d="M22 786 C204 887 356 923 520 916 C699 921 853 886 997 764 C928 933 759 1002 521 1005 C275 1001 96 939 22 786Z" fill="#4F5B40" opacity="0.31"/>
+      <path d="M155 827 C288 885 399 884 518 858 C642 886 764 860 883 793 C837 931 680 964 519 962 C343 966 203 929 155 827Z" fill="#87905C" opacity="0.27"/>
+      <path d="M73 563 C111 347 253 176 465 117 C307 239 237 395 233 617 C170 632 116 616 73 563Z" fill="#E4C989" opacity="0.17"/>
+    </g>
+
+    <use href="#innerOpening" fill="none" stroke="#102E2D" stroke-width="44" opacity="0.28" filter="url(#softBlur)"/>
+    <use href="#innerOpening" fill="none" stroke="url(#innerRim)" stroke-width="28" opacity="0.9"/>
+    <path d="M191 462 C240 289 357 216 498 202 C640 186 768 252 831 389" fill="none" stroke="#F3D996" stroke-width="10" stroke-linecap="round" opacity="0.38"/>
+    <path d="M202 716 C273 792 397 800 520 800 C643 800 769 781 823 698" fill="none" stroke="#4E5538" stroke-width="16" stroke-linecap="round" opacity="0.32"/>
+  </g>
+</svg>

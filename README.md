@@ -4,7 +4,7 @@ Blenny is a minimal, native menu bar organizer designed exclusively for macOS 27
 
 The project is currently under private development. Versions `0.0.1` through `0.0.5` established the bounded macOS 27 backend, bundle-policy persistence, deterministic editing, rollback, and restoration foundations. Version `0.1.0` completed the first minimal AppKit product interface. Version `0.2.0` completed icon-first policy presentation: installed application icons from public AppKit/Workspace APIs, semantic SF Symbols for known read-only Apple system items, and one explicit fallback for unresolved candidates. Names, policies, bundle identifiers, observation counts, and read-only state remain available as supplementary text and accessibility information. Visible means Blenny does not conceal an item; macOS still owns final placement and native overflow. This remains a local engineering milestone, not a distributable release or a general compatibility claim.
 
-Blenny's own status item uses a bundled, 18-point optical-size monochrome template SVG so AppKit can adapt it to the current menu-bar appearance without rescaling fine details. The more detailed vector design master remains separate under `Design/MenuBar/`, and both are intentionally separate from the future color application icon. Blenny never captures live menu-bar pixels and does not require Screen Recording.
+Blenny's application bundle uses the v12 color artwork from `Assets/AppIcon/`; the build deterministically derives the complete multi-resolution macOS icon resource from its 1024-pixel production PNG. The app icon remains separate from Blenny's status-item artwork: the status item uses a bundled, 18-point optical-size monochrome template SVG so AppKit can adapt it to the current menu-bar appearance without rescaling fine details, while the detailed status-item vector master remains under `Design/MenuBar/`. Blenny never captures live menu-bar pixels and does not require Screen Recording.
 
 ## Product direction
 
@@ -21,6 +21,7 @@ Blenny is a clean implementation. It does not use or link Ice or Thaw code or bi
 
 - `Sources/` — product and bounded Debug-probe targets.
 - `Tests/` — deterministic tests for identity, traversal, policy editing, the interface view model, transactions, overflow classification, and reversible state.
+- `Assets/` — tracked application-icon sources and production menu-bar artwork copied or derived into the app bundle.
 - `Research/` — historical, unsupported experiments excluded from product targets.
 - `docs/` — roadmap, repository policy, API research, and technical-spike results.
 - `LocalData/` — ignored local diagnostics, backups, binaries, screenshots, and build artifacts.

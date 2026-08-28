@@ -10,6 +10,8 @@
 	<string>Blenny</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.example.BlennyProbe</string>
+	<key>CFBundleIconFile</key>
+	<string>BlennyAppIcon.icns</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
