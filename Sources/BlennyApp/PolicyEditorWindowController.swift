@@ -1,28 +1,32 @@
 import AppKit
 import BlennyCore
+import Combine
+import SwiftUI
 
-private final class PolicyBundleButton: NSButton {
-    let bundleIdentifier: String
-
-    init(bundleIdentifier: String) {
-        self.bundleIdentifier = bundleIdentifier
-        super.init(frame: .zero)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+@MainActor
+struct ProductInterfaceActions {
+    let refresh: () -> Void
+    let requestAccess: () -> Void
+    let resumeManaging: () -> Void
+    let stopManaging: () -> Void
+    let restorePreviousPolicy: () -> Void
+    let apply: (PreparedPolicyEdit) -> Void
+    let openProjectWebsite: () -> Void
+    let openMonthlySponsor: () -> Void
+    let openOneTimeSponsor: () -> Void
+    let openKoFi: () -> Void
+    let setLaunchAtLogin: (Bool) -> Void
+    let openLoginItemsSettings: () -> Void
 }
 
-private struct ResolvedPolicyIcon {
+struct ResolvedPolicyIcon {
     let descriptor: PolicyIconDescriptor
     let displayName: String
     let image: NSImage
 }
 
 @MainActor
-private final class WorkspacePolicyIconResolver {
+final class WorkspacePolicyIconResolver {
     private let workspace: NSWorkspace
 
     init(workspace: NSWorkspace = .shared) {
@@ -84,7 +88,7 @@ private final class WorkspacePolicyIconResolver {
         let image = NSImage(
             systemSymbolName: PolicyIconDescriptor.fallbackSymbolName,
             accessibilityDescription: "Unknown item icon"
-        ) ?? NSImage(size: NSSize(width: 34, height: 34))
+        ) ?? NSImage(size: NSSize(width: 38, height: 38))
         return ResolvedPolicyIcon(
             descriptor: .fallback,
             displayName: displayName,
@@ -116,106 +120,456 @@ private final class WorkspacePolicyIconResolver {
 
     private func sizedCopy(of image: NSImage) -> NSImage {
         let copy = image.copy() as? NSImage ?? image
-        copy.size = NSSize(width: 34, height: 34)
+        copy.size = NSSize(width: 38, height: 38)
         return copy
     }
 }
 
+enum ReviewSafetyTone {
+    case neutral
+    case warning
+    case error
+}
+
+struct ProductReviewPresentation {
+    let title: String
+    let report: String
+    let safetyMessage: String
+    let safetyTone: ReviewSafetyTone
+    let prepared: PreparedPolicyEdit?
+
+    var canApply: Bool {
+        guard let prepared else { return false }
+        return prepared.newPolicy == prepared.oldPolicy
+            || (!prepared.oldPolicy.managementEnabled && !prepared.newPolicy.managementEnabled)
+    }
+}
+
+@MainActor
+final class ProductInterfaceModel: ObservableObject {
+    @Published var navigation = ProductInterfaceNavigationState()
+    @Published private(set) var model: PolicyEditorViewModel?
+    @Published private(set) var observationCount = 0
+    @Published private(set) var recoveryAvailable = false
+    @Published private(set) var accessibilityTrusted = false
+    @Published private(set) var accessibilityPromptRequested = false
+    @Published private(set) var isRefreshing = false
+    @Published private(set) var statusMessage = "Preparing the policy editor…"
+    @Published private(set) var statusIsError = false
+    @Published private(set) var reviewPresentation: ProductReviewPresentation?
+    @Published private(set) var applicationIcons: [String: ResolvedPolicyIcon] = [:]
+    @Published private(set) var systemIcons: [String: ResolvedPolicyIcon] = [:]
+    @Published private(set) var launchAtLoginState = LaunchAtLoginPresentationState(
+        availability: .disabled
+    )
+
+    private let iconResolver = WorkspacePolicyIconResolver()
+
+    var controls: ProductInterfaceControlState {
+        ProductInterfaceControlState(
+            hasModel: model != nil,
+            managementEnabled: model?.acceptedPolicy.managementEnabled,
+            recoveryAvailable: recoveryAvailable,
+            hasDraftChanges: model?.hasDraftChanges == true,
+            isRefreshing: isRefreshing,
+            accessibilityTrusted: accessibilityTrusted,
+            accessibilityPromptRequested: accessibilityPromptRequested
+        )
+    }
+
+    var managementEnabled: Bool? { model?.acceptedPolicy.managementEnabled }
+    var hasDraftChanges: Bool { model?.hasDraftChanges == true }
+    var systemItems: [SystemMenuBarItemObservation] { model?.systemItems ?? [] }
+
+    func navigate(to section: ProductInterfaceSection) {
+        var updatedNavigation = navigation
+        updatedNavigation.navigate(to: section)
+        navigation = updatedNavigation
+        reviewPresentation = nil
+    }
+
+    func setAccessibilityTrusted(
+        _ trusted: Bool,
+        hasRequestedSystemPrompt: Bool
+    ) {
+        accessibilityTrusted = trusted
+        accessibilityPromptRequested = hasRequestedSystemPrompt
+    }
+
+    func setRefreshing(_ refreshing: Bool) {
+        isRefreshing = refreshing
+        if refreshing {
+            applicationIcons.removeAll()
+            systemIcons.removeAll()
+        }
+    }
+
+    func display(
+        model: PolicyEditorViewModel,
+        observationCount: Int,
+        recoveryAvailable: Bool
+    ) {
+        self.model = model
+        self.observationCount = observationCount
+        self.recoveryAvailable = recoveryAvailable
+
+        let currentIdentifiers = Set(
+            model.candidateInventory.candidates.map(\.bundleIdentifier)
+        )
+        applicationIcons = applicationIcons.filter {
+            currentIdentifiers.contains($0.key)
+        }
+        for candidate in model.candidateInventory.candidates
+            where applicationIcons[candidate.bundleIdentifier] == nil {
+            applicationIcons[candidate.bundleIdentifier] = iconResolver.applicationIcon(
+                bundleIdentifier: candidate.bundleIdentifier
+            )
+        }
+
+        let currentSystemIdentifiers = Set(
+            model.systemItems.map(\.observationIdentifier)
+        )
+        systemIcons = systemIcons.filter {
+            currentSystemIdentifiers.contains($0.key)
+        }
+        for observation in model.systemItems
+            where systemIcons[observation.observationIdentifier] == nil {
+            systemIcons[observation.observationIdentifier] = iconResolver.systemIcon(
+                observation: observation
+            )
+        }
+
+        setStatus(
+            model.hasDraftChanges
+                ? "Draft changes are local and unapplied."
+                : "No policy changes. Newly observed apps remain effectively Visible.",
+            isError: false
+        )
+    }
+
+    func setStatus(_ message: String, isError: Bool) {
+        statusMessage = message
+        statusIsError = isError
+    }
+
+    func setLaunchAtLoginState(_ state: LaunchAtLoginPresentationState) {
+        launchAtLoginState = state
+    }
+
+    func candidates(in policy: MenuBarBundlePolicy) -> [PolicyCandidate] {
+        guard let model else { return [] }
+        var candidates = model.candidates(in: policy)
+        if policy == .visible {
+            candidates.append(contentsOf: model.implicitVisibleCandidates)
+            candidates.sort {
+                ($0.bundleIdentifier.lowercased(), $0.bundleIdentifier)
+                    < ($1.bundleIdentifier.lowercased(), $1.bundleIdentifier)
+            }
+        }
+        return candidates
+    }
+
+    func applicationIcon(for bundleIdentifier: String) -> ResolvedPolicyIcon {
+        applicationIcons[bundleIdentifier]
+            ?? iconResolver.applicationIcon(bundleIdentifier: bundleIdentifier)
+    }
+
+    func systemIcon(for observation: SystemMenuBarItemObservation) -> ResolvedPolicyIcon {
+        systemIcons[observation.observationIdentifier]
+            ?? iconResolver.systemIcon(observation: observation)
+    }
+
+    func isBlenny(_ bundleIdentifier: String) -> Bool {
+        guard let model else { return false }
+        return BundlePolicyIdentity.canonicalKey(for: bundleIdentifier)
+            == BundlePolicyIdentity.canonicalKey(for: model.blennyBundleIdentifier)
+    }
+
+    func presentReview(
+        title: String,
+        report: PolicyDryRunImpactReport,
+        prepared: PreparedPolicyEdit?
+    ) {
+        let requiresAssertion = prepared.map { edit in
+            edit.newPolicy != edit.oldPolicy
+                && (edit.oldPolicy.managementEnabled || edit.newPolicy.managementEnabled)
+        } ?? false
+        let safetyMessage: String
+        let safetyTone: ReviewSafetyTone
+        if prepared == nil {
+            safetyMessage = "Apply is unavailable because validation failed. Review every FAIL line, refresh the bounded observation, and try again."
+            safetyTone = .error
+        } else if requiresAssertion {
+            safetyMessage = "Preview only — this plan would create or restore a macOS 27 assertion. Complete the installed Debug dry-run, review the exact fingerprints and recovery plan, then obtain explicit authorization before any real write."
+            safetyTone = .warning
+        } else {
+            safetyMessage = "Ready to apply. This plan does not create a system assertion; it only saves disabled policy intent or confirms a no-op."
+            safetyTone = .neutral
+        }
+        reviewPresentation = ProductReviewPresentation(
+            title: title,
+            report: report.text,
+            safetyMessage: safetyMessage,
+            safetyTone: safetyTone,
+            prepared: prepared
+        )
+        var updatedNavigation = navigation
+        updatedNavigation.presentReview()
+        navigation = updatedNavigation
+    }
+
+    func dismissReview() {
+        reviewPresentation = nil
+        var updatedNavigation = navigation
+        updatedNavigation.dismissReview()
+        navigation = updatedNavigation
+    }
+
+    #if DEBUG
+    func installPopulatedVisualValidationFixture(accessibilityTrusted: Bool) {
+        let blenny = "xyz.fi5h.blenny"
+        let safari = "com.apple.Safari"
+        let fallback = "com.example.FallbackMenuAgentWithAnIntentionallyLongDisplayName"
+        let observations: [MenuBarPolicyOwnershipObservation] = [
+            (blenny, 10, 1),
+            (safari, 20, 1),
+            ("com.apple.mail", 30, 2),
+            ("com.apple.Notes", 40, 1),
+            ("com.apple.iCal", 50, 1),
+            ("com.apple.TextEdit", 60, 1),
+            ("com.apple.Preview", 70, 1),
+            ("com.apple.ActivityMonitor", 80, 1),
+            (fallback, 90, 3),
+        ].map { bundleIdentifier, processIdentifier, itemCount in
+            MenuBarPolicyOwnershipObservation(
+                bundleIdentifier: bundleIdentifier,
+                processIdentifier: processIdentifier,
+                menuBarItemCount: itemCount
+            )
+        }
+        let systemItems = [
+            SystemMenuBarItemObservation(
+                observationIdentifier: "com.apple.menuextra.wifi",
+                ownerBundleIdentifier: "com.apple.controlcenter",
+                displayName: "Wi-Fi",
+                observationCount: 1
+            ),
+            SystemMenuBarItemObservation(
+                observationIdentifier: "com.apple.menuextra.clock",
+                ownerBundleIdentifier: "com.apple.controlcenter",
+                displayName: "Clock",
+                observationCount: 1
+            ),
+            SystemMenuBarItemObservation(
+                observationIdentifier: "com.example.unknown-system-item",
+                ownerBundleIdentifier: "com.apple.MenuBarAgent",
+                displayName: "Unknown System Item With A Long Name",
+                observationCount: 2
+            ),
+        ]
+
+        do {
+            let acceptedPolicy = try PersistentBundlePolicyDocument(
+                managementEnabled: false,
+                policies: [
+                    .init(bundleIdentifier: blenny, policy: .visible),
+                    .init(bundleIdentifier: safari, policy: .revealable),
+                    .init(bundleIdentifier: "com.apple.Notes", policy: .visible),
+                    .init(bundleIdentifier: "com.apple.TextEdit", policy: .visible),
+                    .init(bundleIdentifier: "com.apple.Preview", policy: .visible),
+                    .init(bundleIdentifier: "com.apple.ActivityMonitor", policy: .visible),
+                    .init(bundleIdentifier: "com.apple.mail", policy: .revealable),
+                    .init(bundleIdentifier: "com.apple.iCal", policy: .hidden),
+                ]
+            )
+            let fixture = try PolicyEditorViewModel(
+                acceptedPolicy: acceptedPolicy,
+                candidateInventory: PolicyCandidateInventory(observations: observations),
+                systemItems: systemItems,
+                blennyBundleIdentifier: blenny
+            )
+            display(
+                model: fixture,
+                observationCount: observations.count,
+                recoveryAvailable: true
+            )
+            setAccessibilityTrusted(
+                accessibilityTrusted,
+                hasRequestedSystemPrompt: !accessibilityTrusted
+            )
+        } catch {
+            setStatus("Visual validation fixture failed: \(error)", isError: true)
+        }
+    }
+
+    func presentReviewForVisualValidation() {
+        reviewPresentation = ProductReviewPresentation(
+            title: "Review Draft Changes",
+            report: """
+                ACTION: edit bundle policy
+
+                DIFF
+                MOVE xyz.fi5h.Usage4Claude: Visible -> Revealable
+
+                IMPACT
+                Baseline: Usage4Claude is concealed.
+                Ordinary reveal: Usage4Claude is included.
+                Hidden bundles remain excluded.
+
+                VALIDATION
+                PASS: Blenny remains Visible.
+                PASS: Apple system items remain read only.
+                PASS: policy identity is the owning bundle identifier.
+
+                RECOVERY
+                Preserve the accepted policy until the reviewed plan commits.
+                Stop Managing restores every owned assertion.
+                """,
+            safetyMessage: "Preview only — exact installed dry-run and explicit authorization remain required before any real assertion write.",
+            safetyTone: .warning,
+            prepared: nil
+        )
+        var updatedNavigation = navigation
+        updatedNavigation.presentReview()
+        navigation = updatedNavigation
+    }
+    #endif
+}
+
 @MainActor
 final class PolicyEditorWindowController: NSWindowController {
-    typealias AssignmentHandler = (String, MenuBarBundlePolicy) -> Void
+    private static let organizePreferredContentSize = NSSize(width: 980, height: 460)
+    private static let organizeMinimumContentSize = NSSize(width: 800, height: 460)
+    private static let compactPreferredContentSize = NSSize(width: 680, height: 500)
+    private static let compactMinimumContentSize = NSSize(width: 560, height: 460)
+    #if DEBUG
+    private static let minimumSizeValidationEnvironmentKey =
+        "BLENNY_VALIDATE_MINIMUM_WINDOW_SIZE"
+    private static let darkAppearanceValidationEnvironmentKey =
+        "BLENNY_VALIDATE_DARK_APPEARANCE"
+    private static let initialSectionValidationEnvironmentKey =
+        "BLENNY_VALIDATE_INITIAL_SECTION"
+    private static let reviewValidationEnvironmentKey =
+        "BLENNY_VALIDATE_REVIEW"
+    private static let populatedValidationEnvironmentKey =
+        "BLENNY_VALIDATE_POPULATED_INTERFACE"
+    private static let untrustedValidationEnvironmentKey =
+        "BLENNY_VALIDATE_UNTRUSTED_INTERFACE"
+    private static let refreshingValidationEnvironmentKey =
+        "BLENNY_VALIDATE_REFRESHING_INTERFACE"
+    #endif
 
-    private static let preferredContentSize = NSSize(width: 900, height: 780)
-    private static let minimumContentSize = NSSize(width: 800, height: 680)
-
-    private let titleLabel = NSTextField(labelWithString: "Blenny")
-    private let subtitleLabel = NSTextField(wrappingLabelWithString: "Set bundle-level menu bar intent. Changes stay local until you review and apply them.")
-    private let managementLabel = NSTextField(labelWithString: "Management: Checking…")
-    private let observationLabel = NSTextField(labelWithString: "No menu bar observation yet.")
-    private let placementLimitLabel = NSTextField(
-        wrappingLabelWithString: "macOS controls final placement. Visible means Blenny does not conceal an item; limited space can still move it into system overflow."
-    )
-    private let permissionBox = NSBox()
-    private let permissionLabel = NSTextField(wrappingLabelWithString: "")
-    private let permissionButton = NSButton(title: "Set Up Accessibility…", target: nil, action: nil)
-    private let statusLabel = NSTextField(wrappingLabelWithString: "")
-    private let moveLabel = NSTextField(labelWithString: "Select a bundle to change its group.")
-    private let selectionDetailLabel = NSTextField(
-        wrappingLabelWithString: "Selection details appear here; icons never become policy identity."
-    )
-    private let moveControl = NSSegmentedControl(
-        labels: ["Visible", "Revealable", "Hidden"],
-        trackingMode: .selectOne,
-        target: nil,
-        action: nil
-    )
-    private let discardButton = NSButton(title: "Discard Draft", target: nil, action: nil)
-    private let reviewButton = NSButton(title: "Review Changes…", target: nil, action: nil)
-    private let resumeButton = NSButton(title: "Resume Managing…", target: nil, action: nil)
-    private let stopButton = NSButton(title: "Stop Managing…", target: nil, action: nil)
-    private let restoreButton = NSButton(title: "Restore Previous Policy…", target: nil, action: nil)
-    private let refreshButton = NSButton(title: "Refresh", target: nil, action: nil)
-    private var groupStacks: [MenuBarBundlePolicy: NSStackView] = [:]
-    private var groupScrollViews: [MenuBarBundlePolicy: NSScrollView] = [:]
-    private var model: PolicyEditorViewModel?
-    private var selectedBundleIdentifier: String?
-    private let iconResolver = WorkspacePolicyIconResolver()
-    private var applicationIcons: [String: ResolvedPolicyIcon] = [:]
-    private var isRefreshing = false
-    private var isRecoveryAvailable = false
-
-    private let onAssign: AssignmentHandler
-    private let onReview: () -> Void
-    private let onDiscard: () -> Void
-    private let onRefresh: () -> Void
-    private let onRequestAccess: () -> Void
-    private let onResumeManaging: () -> Void
-    private let onStopManaging: () -> Void
-    private let onRestorePreviousPolicy: () -> Void
+    private let interfaceModel = ProductInterfaceModel()
+    private let usesPopulatedValidationFixture: Bool
+    private var navigationCancellable: AnyCancellable?
 
     init(
-        onAssign: @escaping AssignmentHandler,
-        onReview: @escaping () -> Void,
-        onDiscard: @escaping () -> Void,
         onRefresh: @escaping () -> Void,
         onRequestAccess: @escaping () -> Void,
         onResumeManaging: @escaping () -> Void,
         onStopManaging: @escaping () -> Void,
-        onRestorePreviousPolicy: @escaping () -> Void
+        onRestorePreviousPolicy: @escaping () -> Void,
+        onApply: @escaping (PreparedPolicyEdit) -> Void,
+        onOpenProjectWebsite: @escaping () -> Void,
+        onOpenMonthlySponsor: @escaping () -> Void,
+        onOpenOneTimeSponsor: @escaping () -> Void,
+        onOpenKoFi: @escaping () -> Void,
+        onSetLaunchAtLogin: @escaping (Bool) -> Void,
+        onOpenLoginItemsSettings: @escaping () -> Void
     ) {
-        self.onAssign = onAssign
-        self.onReview = onReview
-        self.onDiscard = onDiscard
-        self.onRefresh = onRefresh
-        self.onRequestAccess = onRequestAccess
-        self.onResumeManaging = onResumeManaging
-        self.onStopManaging = onStopManaging
-        self.onRestorePreviousPolicy = onRestorePreviousPolicy
+        #if DEBUG
+        usesPopulatedValidationFixture = ProcessInfo.processInfo.environment[
+            Self.populatedValidationEnvironmentKey
+        ] == "YES"
+        if ProcessInfo.processInfo.environment[
+            Self.darkAppearanceValidationEnvironmentKey
+        ] == "YES" {
+            NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        }
+        if let rawSection = ProcessInfo.processInfo.environment[
+            Self.initialSectionValidationEnvironmentKey
+        ], let section = ProductInterfaceSection(rawValue: rawSection) {
+            interfaceModel.navigate(to: section)
+        }
+        if ProcessInfo.processInfo.environment[
+            Self.reviewValidationEnvironmentKey
+        ] == "YES" {
+            interfaceModel.presentReviewForVisualValidation()
+        } else if usesPopulatedValidationFixture {
+            interfaceModel.installPopulatedVisualValidationFixture(
+                accessibilityTrusted: ProcessInfo.processInfo.environment[
+                    Self.untrustedValidationEnvironmentKey
+                ] != "YES"
+            )
+            if ProcessInfo.processInfo.environment[
+                Self.refreshingValidationEnvironmentKey
+            ] == "YES" {
+                interfaceModel.setRefreshing(true)
+            }
+        }
+        #else
+        usesPopulatedValidationFixture = false
+        #endif
+
+        let actions = ProductInterfaceActions(
+            refresh: onRefresh,
+            requestAccess: onRequestAccess,
+            resumeManaging: onResumeManaging,
+            stopManaging: onStopManaging,
+            restorePreviousPolicy: onRestorePreviousPolicy,
+            apply: onApply,
+            openProjectWebsite: onOpenProjectWebsite,
+            openMonthlySponsor: onOpenMonthlySponsor,
+            openOneTimeSponsor: onOpenOneTimeSponsor,
+            openKoFi: onOpenKoFi,
+            setLaunchAtLogin: onSetLaunchAtLogin,
+            openLoginItemsSettings: onOpenLoginItemsSettings
+        )
+        let rootView = BlennyRootView(model: interfaceModel, actions: actions)
+        let hostingController = NSHostingController(rootView: rootView)
+        hostingController.sizingOptions = []
+
+        #if DEBUG
+        let initialContentSize = ProcessInfo.processInfo.environment[
+            Self.minimumSizeValidationEnvironmentKey
+        ] == "YES"
+            ? Self.minimumContentSize(for: interfaceModel.navigation.section)
+            : Self.preferredContentSize(for: interfaceModel.navigation.section)
+        #else
+        let initialContentSize = Self.preferredContentSize(
+            for: interfaceModel.navigation.section
+        )
+        #endif
 
         let window = NSWindow(
-            contentRect: NSRect(
-                origin: .zero,
-                size: Self.preferredContentSize
-            ),
+            contentRect: NSRect(origin: .zero, size: initialContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Blenny 0.2.0"
-        window.contentMinSize = Self.minimumContentSize
-        window.isRestorable = false
-        let contentViewController = NSViewController()
-        contentViewController.view = NSView(
-            frame: NSRect(origin: .zero, size: Self.preferredContentSize)
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "0.3.0"
+        window.title = "Blenny \(version)"
+        window.toolbarStyle = .unified
+        window.contentMinSize = Self.minimumContentSize(
+            for: interfaceModel.navigation.section
         )
-        contentViewController.preferredContentSize = Self.preferredContentSize
-        window.contentViewController = contentViewController
-        window.setContentSize(Self.preferredContentSize)
-        window.center()
+        window.isRestorable = false
         window.isReleasedWhenClosed = false
+        window.contentViewController = hostingController
+        window.setContentSize(initialContentSize)
+        window.center()
+
         super.init(window: window)
-        configureContent()
-        updateControls()
+
+        navigationCancellable = interfaceModel.$navigation
+            .map(\.section)
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] section in
+                self?.resizeWindow(for: section)
+            }
     }
 
     @available(*, unavailable)
@@ -230,54 +584,20 @@ final class PolicyEditorWindowController: NSWindowController {
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
-    private func restoreUsableWindowSizeIfNeeded() {
-        guard let window else { return }
-        window.contentMinSize = Self.minimumContentSize
-        let contentSize = window.contentLayoutRect.size
-        let needsWindowReset = contentSize.width < Self.minimumContentSize.width
-            || contentSize.height < Self.minimumContentSize.height
-
-        if needsWindowReset {
-            let visibleSize = (window.screen ?? NSScreen.main)?.visibleFrame.size
-            let targetSize = NSSize(
-                width: min(
-                    Self.preferredContentSize.width,
-                    max(Self.minimumContentSize.width, (visibleSize?.width ?? 900) - 80)
-                ),
-                height: min(
-                    Self.preferredContentSize.height,
-                    max(Self.minimumContentSize.height, (visibleSize?.height ?? 800) - 80)
-                )
-            )
-            window.setContentSize(targetSize)
-            window.center()
-        }
-    }
-
     func setAccessibilityTrusted(
         _ trusted: Bool,
         hasRequestedSystemPrompt: Bool
     ) {
-        permissionBox.isHidden = trusted
-        if trusted {
-            permissionLabel.stringValue = ""
-        } else if hasRequestedSystemPrompt {
-            permissionLabel.stringValue = "Accessibility access is still off. Blenny will not repeat the system prompt; open Device Control and Data Access, enable Blenny, then refresh."
-            permissionButton.title = "Open Settings"
-        } else {
-            permissionLabel.stringValue = "Blenny needs Accessibility only for a bounded, read-only scan of current menu bar ownership. It never scans continuously."
-            permissionButton.title = "Set Up Accessibility…"
-        }
-        updateControls()
+        guard !usesPopulatedValidationFixture else { return }
+        interfaceModel.setAccessibilityTrusted(
+            trusted,
+            hasRequestedSystemPrompt: hasRequestedSystemPrompt
+        )
     }
 
     func setRefreshing(_ refreshing: Bool) {
-        isRefreshing = refreshing
-        if refreshing {
-            applicationIcons.removeAll()
-        }
-        refreshButton.title = refreshing ? "Refreshing…" : "Refresh"
-        updateControls()
+        guard !usesPopulatedValidationFixture else { return }
+        interfaceModel.setRefreshing(refreshing)
     }
 
     func display(
@@ -285,518 +605,97 @@ final class PolicyEditorWindowController: NSWindowController {
         observationCount: Int,
         recoveryAvailable: Bool
     ) {
-        self.model = model
-        isRecoveryAvailable = recoveryAvailable
-        let currentBundleIdentifiers = Set(
-            model.candidateInventory.candidates.map(\.bundleIdentifier)
+        guard !usesPopulatedValidationFixture else { return }
+        interfaceModel.display(
+            model: model,
+            observationCount: observationCount,
+            recoveryAvailable: recoveryAvailable
         )
-        applicationIcons = applicationIcons.filter {
-            currentBundleIdentifiers.contains($0.key)
-        }
-        for candidate in model.candidateInventory.candidates
-            where applicationIcons[candidate.bundleIdentifier] == nil {
-            applicationIcons[candidate.bundleIdentifier] = iconResolver.applicationIcon(
-                bundleIdentifier: candidate.bundleIdentifier
-            )
-        }
-        if let selectedBundleIdentifier,
-           !model.candidateInventory.bundleIdentifiers.contains(selectedBundleIdentifier) {
-            self.selectedBundleIdentifier = nil
-        }
-        managementLabel.stringValue = model.acceptedPolicy.managementEnabled
-            ? "Management: On"
-            : "Management: Stopped — draft edits are safe and local"
-        managementLabel.textColor = model.acceptedPolicy.managementEnabled
-            ? .systemGreen : .secondaryLabelColor
-        observationLabel.stringValue = "Bounded read-only observation: \(observationCount) bundle owner\(observationCount == 1 ? "" : "s") and \(model.systemItems.count) identifiable macOS system item\(model.systemItems.count == 1 ? "" : "s"). Manual refresh only; no polling."
-        renderGroups()
-        setStatus(
-            model.hasDraftChanges
-                ? "Draft has unapplied changes."
-                : "No policy changes. Newly observed apps remain effectively Visible without being persisted.",
-            isError: false
-        )
-        updateControls()
     }
 
     func setStatus(_ message: String, isError: Bool) {
-        statusLabel.stringValue = message
-        statusLabel.textColor = isError ? .systemRed : .secondaryLabelColor
+        guard !usesPopulatedValidationFixture else { return }
+        interfaceModel.setStatus(message, isError: isError)
     }
 
-    private func configureContent() {
-        guard let contentView = window?.contentView else { return }
-
-        NSLayoutConstraint.activate([
-            contentView.widthAnchor.constraint(
-                greaterThanOrEqualToConstant: Self.minimumContentSize.width
-            ),
-            contentView.heightAnchor.constraint(
-                greaterThanOrEqualToConstant: Self.minimumContentSize.height
-            ),
-        ])
-
-        titleLabel.font = .systemFont(ofSize: 28, weight: .semibold)
-        subtitleLabel.font = .systemFont(ofSize: 13, weight: .regular)
-        subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.maximumNumberOfLines = 2
-        managementLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        observationLabel.font = .systemFont(ofSize: 11, weight: .regular)
-        observationLabel.textColor = .tertiaryLabelColor
-        placementLimitLabel.font = .systemFont(ofSize: 11, weight: .regular)
-        placementLimitLabel.textColor = .secondaryLabelColor
-        placementLimitLabel.maximumNumberOfLines = 2
-
-        permissionBox.boxType = .custom
-        permissionBox.cornerRadius = 8
-        permissionBox.borderWidth = 1
-        permissionBox.borderColor = .systemOrange.withAlphaComponent(0.45)
-        permissionBox.fillColor = .systemOrange.withAlphaComponent(0.08)
-        permissionLabel.maximumNumberOfLines = 3
-        permissionButton.target = self
-        permissionButton.action = #selector(requestAccess)
-        let permissionStack = NSStackView(views: [permissionLabel, permissionButton])
-        permissionStack.orientation = .vertical
-        permissionStack.alignment = .leading
-        permissionStack.spacing = 8
-        permissionStack.translatesAutoresizingMaskIntoConstraints = false
-        permissionBox.contentView?.addSubview(permissionStack)
-        if let permissionContent = permissionBox.contentView {
-            NSLayoutConstraint.activate([
-                permissionStack.leadingAnchor.constraint(equalTo: permissionContent.leadingAnchor, constant: 12),
-                permissionStack.trailingAnchor.constraint(equalTo: permissionContent.trailingAnchor, constant: -12),
-                permissionStack.topAnchor.constraint(equalTo: permissionContent.topAnchor, constant: 10),
-                permissionStack.bottomAnchor.constraint(equalTo: permissionContent.bottomAnchor, constant: -10),
-                permissionLabel.widthAnchor.constraint(equalTo: permissionStack.widthAnchor),
-            ])
-        }
-
-        let policyLanes = NSStackView(views: MenuBarBundlePolicy.allCases.map(makeLane))
-        policyLanes.orientation = .vertical
-        policyLanes.alignment = .leading
-        policyLanes.distribution = .fillEqually
-        policyLanes.spacing = 10
-
-        moveControl.target = self
-        moveControl.action = #selector(moveSelection)
-        moveControl.setAccessibilityLabel("Move selected bundle to policy group")
-        let moveRow = NSStackView(views: [moveLabel, moveControl])
-        moveRow.orientation = .horizontal
-        moveRow.alignment = .centerY
-        moveRow.spacing = 12
-        selectionDetailLabel.font = .systemFont(ofSize: 10, weight: .regular)
-        selectionDetailLabel.textColor = .secondaryLabelColor
-        selectionDetailLabel.maximumNumberOfLines = 2
-        let selectionStack = NSStackView(views: [moveRow, selectionDetailLabel])
-        selectionStack.orientation = .vertical
-        selectionStack.alignment = .leading
-        selectionStack.spacing = 4
-
-        refreshButton.target = self
-        refreshButton.action = #selector(refresh)
-        discardButton.target = self
-        discardButton.action = #selector(discardDraft)
-        reviewButton.target = self
-        reviewButton.action = #selector(reviewChanges)
-        reviewButton.keyEquivalent = "\r"
-        let draftActions = NSStackView(views: [refreshButton, NSView(), discardButton, reviewButton])
-        draftActions.orientation = .horizontal
-        draftActions.alignment = .centerY
-        draftActions.spacing = 8
-
-        let recoveryTitle = NSTextField(labelWithString: "Management recovery")
-        recoveryTitle.font = .systemFont(ofSize: 13, weight: .semibold)
-        let recoveryHelp = NSTextField(wrappingLabelWithString: "Resume, stop, and restore always open the same deterministic review used by the 0.0.5 policy core.")
-        recoveryHelp.textColor = .secondaryLabelColor
-        recoveryHelp.maximumNumberOfLines = 2
-        for (button, action) in [
-            (resumeButton, #selector(resumeManaging)),
-            (stopButton, #selector(stopManaging)),
-            (restoreButton, #selector(restorePreviousPolicy)),
-        ] {
-            button.target = self
-            button.action = action
-        }
-        let recoveryButtons = NSStackView(views: [resumeButton, stopButton, restoreButton])
-        recoveryButtons.orientation = .horizontal
-        recoveryButtons.alignment = .centerY
-        recoveryButtons.spacing = 8
-        let recoveryStack = NSStackView(views: [recoveryTitle, recoveryHelp, recoveryButtons])
-        recoveryStack.orientation = .vertical
-        recoveryStack.alignment = .leading
-        recoveryStack.spacing = 6
-
-        statusLabel.maximumNumberOfLines = 2
-        let header = NSStackView(views: [titleLabel, subtitleLabel, managementLabel, observationLabel])
-        header.orientation = .vertical
-        header.alignment = .leading
-        header.spacing = 4
-
-        let separator = NSBox()
-        separator.boxType = .separator
-        let mainStack = NSStackView(views: [
-            header,
-            permissionBox,
-            policyLanes,
-            placementLimitLabel,
-            selectionStack,
-            statusLabel,
-            draftActions,
-            separator,
-            recoveryStack,
-        ])
-        mainStack.orientation = .vertical
-        mainStack.alignment = .leading
-        mainStack.spacing = 12
-        mainStack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(mainStack)
-
-        permissionBox.translatesAutoresizingMaskIntoConstraints = false
-        policyLanes.translatesAutoresizingMaskIntoConstraints = false
-        draftActions.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            mainStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 22),
-            mainStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -22),
-            mainStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
-            mainStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -18),
-            mainStack.widthAnchor.constraint(
-                greaterThanOrEqualToConstant: Self.minimumContentSize.width - 44
-            ),
-            header.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-            permissionBox.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-            policyLanes.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-            policyLanes.heightAnchor.constraint(greaterThanOrEqualToConstant: 284),
-            placementLimitLabel.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-            selectionDetailLabel.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-            statusLabel.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-            draftActions.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-            recoveryHelp.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
-        ])
+    func setLaunchAtLoginState(_ state: LaunchAtLoginPresentationState) {
+        interfaceModel.setLaunchAtLoginState(state)
     }
 
-    private func makeLane(for policy: MenuBarBundlePolicy) -> NSView {
-        let box = NSBox()
-        box.boxType = .custom
-        box.cornerRadius = 10
-        box.borderWidth = 1
-        box.borderColor = color(for: policy).withAlphaComponent(0.45)
-        box.fillColor = color(for: policy).withAlphaComponent(0.055)
-
-        let accent = NSView()
-        accent.wantsLayer = true
-        accent.layer?.backgroundColor = color(for: policy).cgColor
-        accent.layer?.cornerRadius = 2
-
-        let heading = NSTextField(labelWithString: title(for: policy))
-        heading.font = .systemFont(ofSize: 15, weight: .semibold)
-        let detail = NSTextField(wrappingLabelWithString: detail(for: policy))
-        detail.font = .systemFont(ofSize: 11, weight: .regular)
-        detail.textColor = .secondaryLabelColor
-        detail.maximumNumberOfLines = 2
-
-        let itemStack = NSStackView()
-        itemStack.orientation = .horizontal
-        itemStack.alignment = .centerY
-        itemStack.spacing = 8
-        itemStack.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
-        itemStack.translatesAutoresizingMaskIntoConstraints = true
-        groupStacks[policy] = itemStack
-
-        let scrollView = NSScrollView()
-        scrollView.hasHorizontalScroller = true
-        scrollView.hasVerticalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = false
-        scrollView.horizontalScrollElasticity = .automatic
-        scrollView.verticalScrollElasticity = .none
-        scrollView.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        scrollView.documentView = itemStack
-        groupScrollViews[policy] = scrollView
-
-        let headerRow = NSStackView(views: [accent, heading])
-        headerRow.orientation = .horizontal
-        headerRow.alignment = .centerY
-        headerRow.spacing = 8
-        let descriptionStack = NSStackView(views: [headerRow, detail])
-        descriptionStack.orientation = .vertical
-        descriptionStack.alignment = .leading
-        descriptionStack.spacing = 6
-        descriptionStack.setContentCompressionResistancePriority(
-            .required,
-            for: .horizontal
+    func presentReview(
+        actionTitle: String,
+        report: PolicyDryRunImpactReport,
+        prepared: PreparedPolicyEdit?
+    ) {
+        interfaceModel.presentReview(
+            title: actionTitle,
+            report: report,
+            prepared: prepared
         )
-
-        let stack = NSStackView(views: [descriptionStack, scrollView])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        box.contentView?.addSubview(stack)
-
-        guard let boxContent = box.contentView else { return box }
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: boxContent.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: boxContent.trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: boxContent.topAnchor, constant: 10),
-            stack.bottomAnchor.constraint(equalTo: boxContent.bottomAnchor, constant: -10),
-            accent.widthAnchor.constraint(equalToConstant: 5),
-            accent.heightAnchor.constraint(equalToConstant: 20),
-            descriptionStack.widthAnchor.constraint(equalToConstant: 210),
-            detail.widthAnchor.constraint(equalTo: descriptionStack.widthAnchor),
-            scrollView.heightAnchor.constraint(equalToConstant: 86),
-            box.heightAnchor.constraint(equalToConstant: 110),
-        ])
-        return box
+        showEditor()
     }
 
-    private func renderGroups() {
-        guard let model else { return }
-        for policy in MenuBarBundlePolicy.allCases {
-            guard let stack = groupStacks[policy] else { continue }
-            stack.arrangedSubviews.forEach { view in
-                stack.removeArrangedSubview(view)
-                view.removeFromSuperview()
-            }
-            var candidates = model.candidates(in: policy)
-            if policy == .visible {
-                candidates.append(contentsOf: model.implicitVisibleCandidates)
-                candidates.sort {
-                    ($0.bundleIdentifier.lowercased(), $0.bundleIdentifier)
-                        < ($1.bundleIdentifier.lowercased(), $1.bundleIdentifier)
-                }
-            }
-            if candidates.isEmpty && (policy != .visible || model.systemItems.isEmpty) {
-                let empty = NSTextField(labelWithString: "No observed bundles")
-                empty.textColor = .tertiaryLabelColor
-                empty.font = .systemFont(ofSize: 11, weight: .regular)
-                stack.addArrangedSubview(empty)
-                empty.widthAnchor.constraint(equalToConstant: 150).isActive = true
-                empty.heightAnchor.constraint(equalToConstant: 48).isActive = true
-                sizeItemStrip(for: policy)
-                continue
-            }
-            for candidate in candidates {
-                let button = makeBundleButton(candidate, policy: policy)
-                stack.addArrangedSubview(button)
-                button.widthAnchor.constraint(equalToConstant: 104).isActive = true
-            }
-            if policy == .visible {
-                for systemItem in model.systemItems {
-                    let card = makeSystemItemCard(systemItem)
-                    stack.addArrangedSubview(card)
-                    card.widthAnchor.constraint(equalToConstant: 112).isActive = true
-                }
-            }
-            sizeItemStrip(for: policy)
-        }
-        updateSelectionControls()
-    }
-
-    private func sizeItemStrip(for policy: MenuBarBundlePolicy) {
-        guard let stack = groupStacks[policy],
-              let scrollView = groupScrollViews[policy] else { return }
-        let itemWidths = stack.arrangedSubviews.reduce(CGFloat.zero) { total, view in
-            total + max(view.fittingSize.width, view.frame.width)
-        }
-        let spacing = CGFloat(max(0, stack.arrangedSubviews.count - 1)) * stack.spacing
-        let horizontalInsets = stack.edgeInsets.left + stack.edgeInsets.right
-        let contentWidth = max(
-            scrollView.contentSize.width,
-            itemWidths + spacing + horizontalInsets
-        )
-        stack.frame = NSRect(
-            origin: .zero,
-            size: NSSize(width: contentWidth, height: scrollView.contentSize.height)
-        )
-    }
-
-    private func makeBundleButton(
-        _ candidate: PolicyCandidate,
-        policy: MenuBarBundlePolicy
-    ) -> NSButton {
-        let button = PolicyBundleButton(bundleIdentifier: candidate.bundleIdentifier)
-        let isBlenny = BundlePolicyIdentity.canonicalKey(for: candidate.bundleIdentifier)
-            == model.flatMap {
-                BundlePolicyIdentity.canonicalKey(for: $0.blennyBundleIdentifier)
-            }
-        let presentation = applicationIcons[candidate.bundleIdentifier]
-            ?? iconResolver.applicationIcon(bundleIdentifier: candidate.bundleIdentifier)
-        let fallbackText = presentation.descriptor.usesFallback ? " · Fallback icon" : ""
-        let editability = isBlenny ? "Required recovery control" : "Editable application"
-        let details = "Policy: \(title(for: policy)) · Bundle ID: \(candidate.bundleIdentifier) · \(candidate.menuBarItemCount) menu bar item\(candidate.menuBarItemCount == 1 ? "" : "s") · \(editability)\(fallbackText)"
-        button.title = presentation.displayName
-        button.font = .systemFont(ofSize: 10, weight: .medium)
-        button.image = presentation.image
-        button.imagePosition = .imageAbove
-        button.imageScaling = .scaleProportionallyDown
-        button.alignment = .center
-        button.cell?.lineBreakMode = .byTruncatingTail
-        button.cell?.usesSingleLineMode = true
-        button.bezelStyle = .regularSquare
-        button.setButtonType(.toggle)
-        button.focusRingType = .default
-        button.target = self
-        button.action = #selector(selectBundle(_:))
-        button.toolTip = "\(presentation.displayName)\n\(details)"
-        button.setAccessibilityLabel("\(presentation.displayName), \(details)")
-        button.state = selectedBundleIdentifier == candidate.bundleIdentifier ? .on : .off
-        button.heightAnchor.constraint(equalToConstant: 76).isActive = true
-        return button
-    }
-
-    private func makeSystemItemCard(
-        _ observation: SystemMenuBarItemObservation
-    ) -> NSView {
-        let box = NSBox()
-        box.boxType = .custom
-        box.cornerRadius = 5
-        box.borderWidth = 1
-        box.borderColor = NSColor.separatorColor
-        box.fillColor = NSColor.controlBackgroundColor.withAlphaComponent(0.55)
-
-        let presentation = iconResolver.systemIcon(observation: observation)
-        let iconView = NSImageView(image: presentation.image)
-        iconView.imageScaling = .scaleProportionallyDown
-        let name = NSTextField(labelWithString: presentation.displayName)
-        name.font = .systemFont(ofSize: 10, weight: .medium)
-        name.alignment = .center
-        name.lineBreakMode = .byTruncatingTail
-        let fallbackText = presentation.descriptor.usesFallback ? " · Fallback" : ""
-        let detail = NSTextField(labelWithString: "Read Only\(fallbackText)")
-        detail.font = .systemFont(ofSize: 8, weight: .regular)
-        detail.textColor = .secondaryLabelColor
-        detail.alignment = .center
-        let stack = NSStackView(views: [iconView, name, detail])
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 2
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        box.contentView?.addSubview(stack)
-        if let content = box.contentView {
-            NSLayoutConstraint.activate([
-                stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 6),
-                stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -6),
-                stack.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-                iconView.widthAnchor.constraint(equalToConstant: 34),
-                iconView.heightAnchor.constraint(equalToConstant: 34),
-                name.widthAnchor.constraint(equalTo: stack.widthAnchor),
-                detail.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            ])
-        }
-        let details = "Policy: Visible · Observation ID: \(observation.observationIdentifier) · Owner: \(observation.ownerBundleIdentifier) · \(observation.observationCount) observation\(observation.observationCount == 1 ? "" : "s") · macOS system item · Read Only\(fallbackText)"
-        box.toolTip = "\(presentation.displayName)\n\(details)"
-        box.setAccessibilityElement(true)
-        box.setAccessibilityRole(.staticText)
-        box.setAccessibilityLabel(
-            "\(presentation.displayName), \(details)"
-        )
-        box.heightAnchor.constraint(equalToConstant: 76).isActive = true
-        return box
-    }
-
-    private func updateControls() {
-        let hasModel = model != nil
-        refreshButton.isEnabled = !isRefreshing && model?.hasDraftChanges != true
-        reviewButton.isEnabled = hasModel && !isRefreshing
-        discardButton.isEnabled = model?.hasDraftChanges == true && !isRefreshing
-        resumeButton.isEnabled = hasModel
-            && model?.acceptedPolicy.managementEnabled == false
-            && !isRefreshing
-        stopButton.isEnabled = hasModel
-            && model?.acceptedPolicy.managementEnabled == true
-            && !isRefreshing
-        restoreButton.isEnabled = hasModel && isRecoveryAvailable && !isRefreshing
-        moveControl.isEnabled = selectedBundleIdentifier != nil && !isRefreshing
-    }
-
-    private func updateSelectionControls() {
-        guard let model, let selectedBundleIdentifier else {
-            moveLabel.stringValue = "Select a bundle to change its group."
-            selectionDetailLabel.stringValue = "Selection details appear here; icons never become policy identity."
-            moveControl.selectedSegment = -1
-            moveControl.isEnabled = false
+    private func restoreUsableWindowSizeIfNeeded() {
+        guard let window else { return }
+        let section = interfaceModel.navigation.section
+        let minimumContentSize = Self.minimumContentSize(for: section)
+        let preferredContentSize = Self.preferredContentSize(for: section)
+        window.contentMinSize = minimumContentSize
+        let contentSize = window.contentLayoutRect.size
+        guard contentSize.width < minimumContentSize.width
+                || contentSize.height < minimumContentSize.height else {
             return
         }
-        moveLabel.stringValue = "Move \(selectedBundleIdentifier) to"
-        let currentPolicy = MenuBarBundlePolicy.allCases.first { policy in
-            var candidates = model.candidates(in: policy)
-            if policy == .visible {
-                candidates.append(contentsOf: model.implicitVisibleCandidates)
-            }
-            return candidates.contains {
-                $0.bundleIdentifier == selectedBundleIdentifier
-            }
-        }
-        moveControl.selectedSegment = currentPolicy.flatMap {
-            MenuBarBundlePolicy.allCases.firstIndex(of: $0)
-        } ?? -1
-        if let candidate = model.candidateInventory.candidates.first(where: {
-            $0.bundleIdentifier == selectedBundleIdentifier
-        }) {
-            let presentation = applicationIcons[selectedBundleIdentifier]
-                ?? iconResolver.applicationIcon(bundleIdentifier: selectedBundleIdentifier)
-            let source = presentation.descriptor.usesFallback
-                ? "generic fallback icon"
-                : "installed application icon"
-            selectionDetailLabel.stringValue = "\(presentation.displayName) · \(selectedBundleIdentifier) · \(candidate.menuBarItemCount) menu bar item\(candidate.menuBarItemCount == 1 ? "" : "s") · \(currentPolicy.map(title(for:)) ?? "Unknown") · \(source)"
-        }
-        let isBlenny = BundlePolicyIdentity.canonicalKey(for: selectedBundleIdentifier)
-            == BundlePolicyIdentity.canonicalKey(for: model.blennyBundleIdentifier)
-        moveControl.setEnabled(true, forSegment: 0)
-        moveControl.setEnabled(!isBlenny, forSegment: 1)
-        moveControl.setEnabled(!isBlenny, forSegment: 2)
-        moveControl.isEnabled = !isRefreshing
-    }
 
-    private func color(for policy: MenuBarBundlePolicy) -> NSColor {
-        switch policy {
-        case .visible: .systemBlue
-        case .revealable: .systemTeal
-        case .hidden: .secondaryLabelColor
-        }
-    }
-
-    private func title(for policy: MenuBarBundlePolicy) -> String {
-        switch policy {
-        case .visible: "Visible"
-        case .revealable: "Revealable"
-        case .hidden: "Hidden"
-        }
-    }
-
-    private func detail(for policy: MenuBarBundlePolicy) -> String {
-        switch policy {
-        case .visible:
-            "Not concealed by Blenny. macOS may still move items into overflow."
-        case .revealable:
-            "Concealed at baseline and included in an ordinary reveal."
-        case .hidden:
-            "Concealed at baseline and excluded from every ordinary reveal."
-        }
-    }
-
-    @objc private func selectBundle(_ sender: PolicyBundleButton) {
-        selectedBundleIdentifier = sender.bundleIdentifier
-        renderGroups()
-    }
-
-    @objc private func moveSelection() {
-        guard let selectedBundleIdentifier,
-              MenuBarBundlePolicy.allCases.indices.contains(moveControl.selectedSegment) else {
-            return
-        }
-        onAssign(
-            selectedBundleIdentifier,
-            MenuBarBundlePolicy.allCases[moveControl.selectedSegment]
+        let visibleSize = (window.screen ?? NSScreen.main)?.visibleFrame.size
+        let targetSize = NSSize(
+            width: min(
+                preferredContentSize.width,
+                max(minimumContentSize.width, (visibleSize?.width ?? 980) - 80)
+            ),
+            height: min(
+                preferredContentSize.height,
+                max(minimumContentSize.height, (visibleSize?.height ?? 500) - 80)
+            )
         )
+        window.setContentSize(targetSize)
+        window.center()
     }
 
-    @objc private func reviewChanges() { onReview() }
-    @objc private func discardDraft() { onDiscard() }
-    @objc private func refresh() { onRefresh() }
-    @objc private func requestAccess() { onRequestAccess() }
-    @objc private func resumeManaging() { onResumeManaging() }
-    @objc private func stopManaging() { onStopManaging() }
-    @objc private func restorePreviousPolicy() { onRestorePreviousPolicy() }
+    private func resizeWindow(for section: ProductInterfaceSection) {
+        guard let window else { return }
+        let minimumContentSize = Self.minimumContentSize(for: section)
+        let preferredContentSize = Self.preferredContentSize(for: section)
+        let oldFrame = window.frame
+        let currentHeight = window.contentLayoutRect.height
+        let targetContentSize = NSSize(
+            width: preferredContentSize.width,
+            height: max(minimumContentSize.height, currentHeight)
+        )
+        var contentRect = window.contentRect(forFrameRect: oldFrame)
+        contentRect.size = targetContentSize
+        var newFrame = window.frameRect(forContentRect: contentRect)
+        newFrame.origin.x = oldFrame.origin.x
+        newFrame.origin.y = oldFrame.maxY - newFrame.height
+        window.contentMinSize = minimumContentSize
+        window.setFrame(newFrame, display: true)
+    }
+
+    private static func preferredContentSize(
+        for section: ProductInterfaceSection
+    ) -> NSSize {
+        switch section {
+        case .organize: organizePreferredContentSize
+        case .settings, .support: compactPreferredContentSize
+        }
+    }
+
+    private static func minimumContentSize(
+        for section: ProductInterfaceSection
+    ) -> NSSize {
+        switch section {
+        case .organize: organizeMinimumContentSize
+        case .settings, .support: compactMinimumContentSize
+        }
+    }
 }

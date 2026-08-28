@@ -132,14 +132,18 @@ Not included: drag-and-drop, in-lane ordering, real policy writes, system-item r
 
 ## 0.3.0 — Product interface foundation
 
-Advance when:
+Status: **Complete on macOS 27.0 build `27A5237l`; local annotated tag pending owner evidence review.**
 
-- Work begins with a product-layout discussion, not implementation. At least three materially different recommended UI directions show the complete main-window hierarchy, explain their trade-offs, and identify one recommended direction for owner selection.
-- The owner-selected direction establishes the durable main-window information architecture, visual hierarchy, typography, spacing, grouping, component states, and action placement expected to carry through the subsequent interaction milestones.
-- Visible, Revealable, and Hidden remain immediately understandable in the selected design, with icon-first recognition, clear read-only Apple system items, selection details, draft status, management status, permission state, recovery actions, and manual Refresh presented without visual competition.
-- The interface remains usable at its minimum and preferred window sizes, with long lanes, empty lanes, fallback icons, long names, supplementary details, keyboard focus, tooltips, and normal light and dark system appearances verified visually.
-- Existing click and keyboard assignment, Review, Discard Draft, Resume Managing, Stop Managing, Restore Previous Policy, close, reopen, and Quit behavior remains stable.
-- This milestone changes presentation only: it adds no drag-and-drop, within-lane ordering, policy/persistence semantics, report or fingerprint inputs, assertion path, mutable system item, polling, theme system, animation system, or unrelated preference.
+Exit criteria met:
+
+- Work began with a product-layout discussion rather than implementation. Four materially different single-window directions were compared before the owner selected Direction A, then installed review refined it to symbol-and-label navigation below the title bar, compact lanes with tightly spaced borderless icon cells, one macOS read-only marker, an anchored manual-observation footer, and explicit destination widths within the same top-left-anchored window.
+- The selected AppKit-shell and SwiftUI-content architecture establishes the durable main-window information architecture, visual hierarchy, typography, spacing, grouping, component states, and action placement expected to carry through the subsequent interaction milestones.
+- Visible, Revealable, and Hidden remain immediately understandable, with icon-first recognition, natural-aspect read-only Apple system symbols, management status, recovery actions, and manual Refresh presented without visual competition.
+- The interface remains usable at its minimum and preferred window sizes without page-level vertical scrolling in the three normal destinations. Organize retains the width needed by horizontal lanes, Settings and Support share one stable narrower width, and idle Refresh remains available to discover Accessibility granted elsewhere. The navigation band keeps one fixed title-bar inset across destinations, active refresh visibly interrupts the lanes with bounded progress, and navigation draws no persistent focus outline. Long lanes, empty lanes, fallback icons, long names, supplementary details, tooltips, and normal light and dark system appearances are verified visually.
+- Organize exposes no temporary assignment, draft, Discard, or routine Review surface before dragging exists. Management and recovery Review, Resume Managing, Stop Managing, Restore Previous Policy, close, reopen, and Quit behavior remains stable.
+- Settings replaces its explanatory Observation card with a native Open at Login switch backed directly by `SMAppService.mainApp`; system status remains the source of truth and no helper, IPC service, or mirrored preference is added.
+- Organize places the no-pointer-movement, no-menu-bar-capture, and no-polling promise directly below its physical-placement note. Support keeps a fixed top inset, separates its project-website link from the donation group, and presents Sponsor once, Sponsor monthly, and Ko-fi in that order; GitHub links carry `metadata_project=blenny` without implementing checkout, payment storage, licensing, benefits, or entitlements inside Blenny.
+- This milestone adds no drag-and-drop, within-lane ordering, policy/persistence semantics, report or fingerprint inputs, assertion path, mutable system item, polling, theme system, animation system, or unrelated preference.
 - The chosen structure is documented well enough that `0.4.0` can add dragging without another fundamental layout redesign.
 
 ## 0.4.0 — Cross-lane draft dragging
@@ -160,6 +164,7 @@ Advance when:
 - A valid reviewed application-bundle draft can complete the intended baseline and ordinary-reveal behavior through the one serial writer on the explicitly supported development build.
 - The exact diff, impact report, validation state, and recovery plan remain visible before mutation.
 - Stop Managing and Restore Previous Policy close the same product loop without broadening approved targets or admitting mutable Apple system items.
+- Ordinary launched operation does not require a separate management switch. Once the runtime can truthfully provide that behavior, the transitional stopped-management banner leaves the routine Organize surface; deliberate Stop and Restore remain safety and recovery actions rather than everyday mode controls.
 - Real validation remains bounded to explicitly approved bundles and ends in verified restoration.
 - Release promotion of the unsupported backend remains a separate, deliberate compatibility decision rather than an accidental consequence of UI integration.
 

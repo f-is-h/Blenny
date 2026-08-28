@@ -1,5 +1,6 @@
 import AppKit
 import BlennyCore
+import ServiceManagement
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -29,19 +30,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
 
     private lazy var editorWindowController = PolicyEditorWindowController(
-        onAssign: { [weak self] bundleIdentifier, policy in
-            self?.assign(bundleIdentifier: bundleIdentifier, to: policy)
-        },
-        onReview: { [weak self] in self?.reviewDraft() },
-        onDiscard: { [weak self] in self?.discardDraft() },
         onRefresh: { [weak self] in self?.refresh() },
         onRequestAccess: { [weak self] in self?.requestAccessibilityAccess() },
         onResumeManaging: { [weak self] in self?.reviewResumeManaging() },
         onStopManaging: { [weak self] in self?.reviewStopManaging() },
-        onRestorePreviousPolicy: { [weak self] in self?.reviewRestorePreviousPolicy() }
+        onRestorePreviousPolicy: { [weak self] in self?.reviewRestorePreviousPolicy() },
+        onApply: { [weak self] prepared in self?.apply(prepared) },
+        onOpenProjectWebsite: { [weak self] in self?.openProjectWebsite() },
+        onOpenMonthlySponsor: { [weak self] in self?.openMonthlySponsor() },
+        onOpenOneTimeSponsor: { [weak self] in self?.openOneTimeSponsor() },
+        onOpenKoFi: { [weak self] in self?.openKoFi() },
+        onSetLaunchAtLogin: { [weak self] enabled in self?.setLaunchAtLogin(enabled) },
+        onOpenLoginItemsSettings: { [weak self] in self?.openLoginItemsSettings() }
     )
-
-    private lazy var reviewWindowController = PolicyReviewWindowController()
 
     private lazy var statusItemController = StatusItemController(
         onOpenDiagnostics: { [weak self] in self?.showEditor() },
@@ -57,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureMainMenu()
         _ = statusItemController
         updatePermissionPresentation()
+        updateLaunchAtLoginPresentation()
 
         #if DEBUG
         if ProcessInfo.processInfo.environment[
@@ -90,6 +92,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #else
         return .terminateNow
         #endif
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        updatePermissionPresentation()
+        updateLaunchAtLoginPresentation()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -245,89 +252,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func assign(
-        bundleIdentifier: String,
-        to policy: MenuBarBundlePolicy
-    ) {
-        guard var model = editorModel else { return }
-        let result = model.assign(bundleIdentifier: bundleIdentifier, to: policy)
-        do {
-            editingCore = try makeCore(scope: model.validationScope)
-        } catch {
-            editorWindowController.setStatus(
-                "Could not update the draft validation scope: \(error.localizedDescription)",
-                isError: true
-            )
-            return
-        }
-        editorModel = model
-        statusItemController.setDraftHasChanges(model.hasDraftChanges)
-        editorWindowController.display(
-            model: model,
-            observationCount: model.candidateInventory.candidates.count,
-            recoveryAvailable: recoveryAvailable
-        )
-        if result == .rejectedBlennyMustRemainVisible {
-            editorWindowController.setStatus(
-                "Blenny is a safety entry and must remain Visible.",
-                isError: true
-            )
-        }
-    }
-
-    private func discardDraft() {
-        guard let core = editingCore else { return }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                guard let acceptedDraft = try await core.discardDraft(),
-                      var model = editorModel else { return }
-                model.discardDraft(using: acceptedDraft)
-                editingCore = try makeCore(scope: model.validationScope)
-                editorModel = model
-                statusItemController.setDraftHasChanges(model.hasDraftChanges)
-                editorWindowController.display(
-                    model: model,
-                    observationCount: model.candidateInventory.candidates.count,
-                    recoveryAvailable: recoveryAvailable
-                )
-                editorWindowController.setStatus(
-                    "Draft discarded. Accepted policy and system state were not changed.",
-                    isError: false
-                )
-            } catch {
-                editorWindowController.setStatus(
-                    "Could not discard the draft: \(error.localizedDescription)",
-                    isError: true
-                )
-            }
-        }
-    }
-
-    private func reviewDraft() {
-        guard let core = editingCore, let model = editorModel else { return }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let preview = try await core.preview(
-                    draft: model.draft,
-                    candidates: model.candidateInventory,
-                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers
-                )
-                presentReview(
-                    title: "Review Draft Changes",
-                    report: preview.0,
-                    prepared: preview.1
-                )
-            } catch {
-                editorWindowController.setStatus(
-                    "Could not prepare the draft review: \(error.localizedDescription)",
-                    isError: true
-                )
-            }
-        }
-    }
-
     private func reviewResumeManaging() {
         guard let model = editorModel else { return }
         Task { @MainActor [weak self] in
@@ -409,13 +333,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         report: PolicyDryRunImpactReport,
         prepared: PreparedPolicyEdit?
     ) {
-        reviewWindowController.present(
+        editorWindowController.presentReview(
             actionTitle: title,
             report: report,
-            prepared: prepared,
-            onApply: { [weak self] prepared in
-                self?.apply(prepared)
-            }
+            prepared: prepared
         )
     }
 
@@ -506,6 +427,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(url)
     }
 
+    private func openProjectWebsite() {
+        openExternalURL(ProductSupportLinks.projectWebsite)
+    }
+
+    private func openMonthlySponsor() {
+        openExternalURL(ProductSupportLinks.monthlySponsor)
+    }
+
+    private func openOneTimeSponsor() {
+        openExternalURL(ProductSupportLinks.oneTimeSponsor)
+    }
+
+    private func openKoFi() {
+        openExternalURL(ProductSupportLinks.koFi)
+    }
+
+    private func openExternalURL(_ rawValue: String) {
+        guard let url = URL(string: rawValue) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     private func updatePermissionPresentation() {
         let trusted = AccessibilityAuthorization.isTrusted
         let requested = UserDefaults.standard.bool(
@@ -516,6 +458,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hasRequestedSystemPrompt: requested
         )
         statusItemController.setAccessibilityTrusted(trusted)
+    }
+
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        let service = SMAppService.mainApp
+        do {
+            if enabled {
+                if service.status == .requiresApproval {
+                    SMAppService.openSystemSettingsLoginItems()
+                } else if service.status != .enabled {
+                    try service.register()
+                }
+            } else if service.status == .enabled || service.status == .requiresApproval {
+                try service.unregister()
+            }
+            updateLaunchAtLoginPresentation()
+        } catch {
+            updateLaunchAtLoginPresentation(failureMessage: error.localizedDescription)
+        }
+    }
+
+    private func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
+    }
+
+    private func updateLaunchAtLoginPresentation(failureMessage: String? = nil) {
+        let availability: LaunchAtLoginAvailability
+        switch SMAppService.mainApp.status {
+        case .notRegistered:
+            availability = .disabled
+        case .enabled:
+            availability = .enabled
+        case .requiresApproval:
+            availability = .requiresApproval
+        case .notFound:
+            availability = .notFound
+        @unknown default:
+            availability = .notFound
+        }
+        editorWindowController.setLaunchAtLoginState(
+            LaunchAtLoginPresentationState(
+                availability: availability,
+                failureMessage: failureMessage
+            )
+        )
     }
 
     private func makePersistentStore() throws -> PersistentBundlePolicyStore {

@@ -234,7 +234,10 @@ final class StatusItemController: NSObject {
         if image == nil {
             button.title = "B"
         }
-        button.toolTip = "Blenny 0.2.0"
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "0.3.0"
+        button.toolTip = "Blenny \(version)"
     }
 
     private func configureMenu() {
