@@ -97,6 +97,42 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
         try Self(managementEnabled: enabled, policies: policies)
     }
 
+    public func replacingBundleIdentifier(
+        from oldIdentifier: String,
+        with newIdentifier: String
+    ) throws -> Self {
+        guard let oldKey = BundlePolicyIdentity.canonicalKey(for: oldIdentifier) else {
+            throw PersistentBundlePolicyDocumentError.invalidBundleIdentifier(oldIdentifier)
+        }
+        guard let newKey = BundlePolicyIdentity.canonicalKey(for: newIdentifier) else {
+            throw PersistentBundlePolicyDocumentError.invalidBundleIdentifier(newIdentifier)
+        }
+        guard oldKey != newKey else { return self }
+
+        let containsOldIdentifier = policies.contains {
+            BundlePolicyIdentity.canonicalKey(for: $0.bundleIdentifier) == oldKey
+        }
+        guard containsOldIdentifier else { return self }
+        guard !policies.contains(where: {
+            BundlePolicyIdentity.canonicalKey(for: $0.bundleIdentifier) == newKey
+        }) else {
+            throw PersistentBundlePolicyDocumentError.duplicateBundleIdentifier(newIdentifier)
+        }
+
+        return try Self(
+            managementEnabled: managementEnabled,
+            policies: policies.map { entry in
+                guard BundlePolicyIdentity.canonicalKey(for: entry.bundleIdentifier) == oldKey else {
+                    return entry
+                }
+                return PersistentBundlePolicyEntry(
+                    bundleIdentifier: newIdentifier,
+                    policy: entry.policy
+                )
+            }
+        )
+    }
+
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case managementEnabled
@@ -215,6 +251,46 @@ public actor PersistentBundlePolicyStore {
             )
         }
         try write(Self.makeEncoder().encode(document), to: policyURL)
+    }
+
+    @discardableResult
+    public func migrateBundleIdentifier(
+        from oldIdentifier: String,
+        to newIdentifier: String
+    ) throws -> Bool {
+        guard BundlePolicyIdentity.canonicalKey(for: oldIdentifier) != nil else {
+            throw PersistentBundlePolicyDocumentError.invalidBundleIdentifier(oldIdentifier)
+        }
+        guard BundlePolicyIdentity.canonicalKey(for: newIdentifier) != nil else {
+            throw PersistentBundlePolicyDocumentError.invalidBundleIdentifier(newIdentifier)
+        }
+        let existingPolicy = try load()
+        let existingBackup = try loadBackup()
+        let migratedPolicy = try existingPolicy?.replacingBundleIdentifier(
+            from: oldIdentifier,
+            with: newIdentifier
+        )
+        let migratedBackupPolicy = try existingBackup?.previousPolicy.replacingBundleIdentifier(
+            from: oldIdentifier,
+            with: newIdentifier
+        )
+
+        let policyChanged = migratedPolicy != existingPolicy
+        let backupChanged = migratedBackupPolicy != existingBackup?.previousPolicy
+        guard policyChanged || backupChanged else { return false }
+
+        if backupChanged, let migratedBackupPolicy {
+            try write(
+                Self.makeEncoder().encode(
+                    PersistentBundlePolicyBackup(previousPolicy: migratedBackupPolicy)
+                ),
+                to: backupURL
+            )
+        }
+        if policyChanged, let migratedPolicy {
+            try write(Self.makeEncoder().encode(migratedPolicy), to: policyURL)
+        }
+        return true
     }
 
     @discardableResult

@@ -140,7 +140,7 @@ struct PolicyIconResolverTests {
 
     @Test("Icon resolution cannot alter persistence, draft, diff, report, or fingerprints")
     func iconResolutionIsPresentationOnly() throws {
-        let blenny = "com.example.BlennyProbe"
+        let blenny = "xyz.fi5h.blenny"
         let revealable = "com.example.Revealable"
         let hidden = "com.example.Hidden"
         let document = try PersistentBundlePolicyDocument(

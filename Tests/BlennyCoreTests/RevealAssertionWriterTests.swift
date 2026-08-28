@@ -59,11 +59,11 @@ struct RevealAssertionWriterTests {
         )
         let oldBaseline = plan(
             .baseline,
-            allowedBundleIdentifiers: ["com.example.BlennyProbe"]
+            allowedBundleIdentifiers: ["xyz.fi5h.blenny"]
         )
         let editedBaseline = plan(
             .baseline,
-            allowedBundleIdentifiers: ["com.example.BlennyProbe", "com.example.Edited"]
+            allowedBundleIdentifiers: ["xyz.fi5h.blenny", "com.example.Edited"]
         )
 
         try await writer.replace(with: oldBaseline)
@@ -84,12 +84,12 @@ struct RevealAssertionWriterTests {
         let writer = RevealAssertionWriter(factory: factory)
         let baseline = plan(
             .baseline,
-            allowedBundleIdentifiers: ["com.example.BlennyProbe"]
+            allowedBundleIdentifiers: ["xyz.fi5h.blenny"]
         )
         let revealed = plan(
             .revealed,
             allowedBundleIdentifiers: [
-                "com.example.BlennyProbe",
+                "xyz.fi5h.blenny",
                 "com.example.Revealable"
             ]
         )
@@ -240,7 +240,7 @@ struct RevealAssertionWriterTests {
 
     private func plan(
         _ presentation: RevealSessionPresentation,
-        allowedBundleIdentifiers: [String] = ["com.example.BlennyProbe"]
+        allowedBundleIdentifiers: [String] = ["xyz.fi5h.blenny"]
     ) -> RevealAllowlistPlan {
         RevealAllowlistPlan(
             presentation: presentation,

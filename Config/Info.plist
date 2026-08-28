@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>Blenny</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.example.BlennyProbe</string>
+	<string>xyz.fi5h.blenny</string>
 	<key>CFBundleIconFile</key>
 	<string>BlennyAppIcon.icns</string>
 	<key>CFBundleInfoDictionaryVersion</key>

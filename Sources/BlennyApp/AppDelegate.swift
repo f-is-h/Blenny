@@ -3,6 +3,7 @@ import BlennyCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let legacyBlennyBundleIdentifier = "com.example.BlennyProbe"
     private static let accessibilityPromptRequestedKey =
         "AccessibilitySystemPromptRequestedForMenuBarOwnership"
     private static let readOnlySystemMenuBarOwners = Set([
@@ -187,6 +188,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let blennyBundleIdentifier = try currentBundleIdentifier()
             let store = try makePersistentStore()
             persistentStore = store
+            _ = try await store.migrateBundleIdentifier(
+                from: Self.legacyBlennyBundleIdentifier,
+                to: blennyBundleIdentifier
+            )
             let accepted = try await store.load() ?? initialPolicy(
                 blennyBundleIdentifier: blennyBundleIdentifier
             )

@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Bounded real policy target validation")
 struct BoundedPolicyTargetValidationTests {
-    private let visible = "com.example.BlennyProbe"
+    private let visible = "xyz.fi5h.blenny"
     private let revealable = "xyz.fi5h.Usage4Claude"
     private let hidden = "pl.maketheweb.cleanshotx"
 

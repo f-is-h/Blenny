@@ -126,6 +126,7 @@ Exit criteria met:
 - Blenny requires neither Screen Recording nor live menu-bar pixel capture, and it does not imitate dynamic status-item content that cannot be obtained through a stable source.
 - Deterministic tests cover application-icon source selection, known system-symbol mapping, fallback behavior, duplicate observations, and refresh stability.
 - Xcode 27 Debug and Release tests and app builds pass, and installed visual review confirms recognizable icons, fallback clarity, keyboard navigation, and unchanged policy/recovery behavior.
+- The application adopts stable bundle identifier `xyz.fi5h.blenny`; accepted policy and recovery documents using the former development identifier migrate deterministically without changing assignments or management state, and collisions fail closed.
 
 Not included: drag-and-drop, in-lane ordering, real policy writes, system-item reassignment, login launch, lifecycle/display hardening, helpers, IPC, updating, profiles, themes, animation systems, or polling.
 
@@ -166,7 +167,7 @@ Advance when the supported matrix passes:
 
 Advance when:
 
-- The temporary bundle identifier is replaced by a stable public identifier.
+- The established `xyz.fi5h.blenny` public identifier remains unchanged through Developer ID signing, notarization, installation, and updates.
 - Developer ID signing and notarization succeed without embedding personal signing data in the repository.
 - Installation and LaunchServices registration behavior is reproducible.
 - A compatibility kill switch can disable the private backend on unknown macOS builds.

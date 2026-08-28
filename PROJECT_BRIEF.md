@@ -7,7 +7,7 @@
 - Project name: **Blenny**
 - Development directory: repository root
 - Current phase: `0.2.0` Icon-first Policy Presentation complete; tag and push deferred
-- Document date: 2026-08-27
+- Document date: 2026-08-28
 - Product status: the minimal AppKit interface now presents bundle policy icon-first on the tested macOS 27 build; no distributable build or real assertion-write authorization exists yet
 - Source lineage decision: clean implementation, not an Ice fork
 - License decision: pending; decide before the first public release
@@ -60,6 +60,10 @@ That behavior matches the product:
 - Friendly rather than aggressively technical.
 
 Pronunciation: `BLEN-ee`.
+
+Project website: <https://blenny.fi5h.xyz>.
+
+Stable application bundle identifier: `xyz.fi5h.blenny`. Local policy and recovery documents created by the earlier development identifier `com.example.BlennyProbe` are migrated in place through a bounded, deterministic identity replacement. The migration preserves the assigned policy and management state, updates the accepted document and its one scoped backup without rotating recovery history, is idempotent, and fails closed on an identity collision.
 
 Potential visual direction:
 
@@ -276,6 +280,7 @@ Blenny develops through small, independently reviewable product increments. A ro
 
 - `0.1.0` established the minimal text-first AppKit interface and deterministic review boundary.
 - `0.2.0` replaces text-dominant candidate presentation with installed application icons obtained through public AppKit/Workspace APIs, semantic system symbols keyed by stable observation identifiers, and an explicit shared fallback. Blenny's v12 color application artwork is packaged as the bundle icon, while its detailed menu-bar vector master remains a design source and its bundled monochrome template SVG remains a separate 18-point optical-size production asset for the app's own status item. Icon descriptors remain presentation-only and do not add drag-and-drop or system mutation.
+- The local `0.2.0` application adopts the stable `xyz.fi5h.blenny` identity associated with <https://blenny.fi5h.xyz>; only the former Blenny self-identifier is migrated, and no third-party policy identity is guessed or rewritten.
 - `0.3.0` adds cross-lane drag assignment for editable application bundles while preserving the keyboard path and draft-only mutation boundary.
 - `0.4.0` closes the reviewed end-to-end management loop on the supported development build without broadening system-item scope.
 - `0.5.0` hardens the established product loop across lifecycle and display changes.

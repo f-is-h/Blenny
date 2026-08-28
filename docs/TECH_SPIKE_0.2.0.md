@@ -4,7 +4,7 @@
 
 Status: **Complete on macOS 27.0 build `26A5416b`; local tag and push deferred.**
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 ## Starting boundary
 
@@ -52,6 +52,13 @@ The semantic map covers Bluetooth, Clock, Control Center, Now Playing, Siri, Sou
 - `CFBundleIconFile` declares that generated resource, so Finder, Launch Services, `NSWorkspace`, and Blenny's own public icon resolver receive the color bundle icon. The SVG master and intermediate iconset do not enter the application bundle.
 - The color application icon is bundle presentation only. It does not enter observation identity, policy persistence, drafts, diffs, reports, fingerprints, diagnostics, or the status-item rendering path.
 
+### Stable application identity
+
+- The application bundle identifier is `xyz.fi5h.blenny`, derived from the project website <https://blenny.fi5h.xyz>.
+- The former `com.example.BlennyProbe` identifier remains only as a bounded legacy migration input and in historical evidence that recorded the development build accurately.
+- On the first trusted policy refresh, the persistence store validates and migrates the accepted policy and its one scoped recovery backup before editor validation. Only Blenny's exact former self-identifier is replaced; every policy value, management state, and third-party bundle identity is preserved.
+- The migration validates both documents before writing, fails closed if old and new identities collide, does not rotate recovery history, preserves `0600` permissions, and is idempotent. It does not construct or write a system assertion.
+
 ### Presentation and accessibility
 
 - Make the icon the primary visual recognition element in each candidate card.
@@ -78,6 +85,7 @@ Tests cover:
 - duplicate observations remaining one bundle-level icon candidate;
 - Blenny remaining Visible and ordinary reveal continuing to exclude Hidden;
 - no draft, persistence, report, or policy fingerprint change caused solely by icon resolution.
+- deterministic, idempotent migration of accepted and backup policy identity from `com.example.BlennyProbe` to `xyz.fi5h.blenny`, including collision rejection and preserved policy state.
 
 The deterministic suite now verifies all of those presentation boundaries in `PolicyIconResolverTests`, including installed-application eligibility, known and unknown system identifiers, stable results across ordering and duplicate observations, the shared fallback, and unchanged document, managed-policy, draft, diff, report, and fingerprint values.
 
@@ -92,14 +100,15 @@ Installed visual review must confirm:
 
 - Host: macOS 27.0 build `26A5416b`, Apple silicon.
 - Toolchain: Xcode 27.0 build `27A5237l`, macOS 27.0 SDK selected explicitly through `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`.
-- Debug tests: 115 tests in 16 suites passed.
-- Release tests: 113 tests in 15 suites passed.
+- Debug tests: 117 tests in 16 suites passed.
+- Release tests: 115 tests in 15 suites passed.
 - Debug and Release application builds passed; both declare a macOS 27 minimum and SDK 27 in their Mach-O load commands and pass deep ad-hoc signature verification.
-- Final Debug executable SHA-256: `fce3dbc18642a07b09568362b63be6ffa57a3eca53e5a791fbeb46bf5fe5bf60`.
-- Final Release executable SHA-256: `9566c506aa3f7a314a31432dfc607c04964f0bea07587069837b25dd9ab28289`.
+- Final Debug executable SHA-256: `9f41a02046b3200d28fa062376a8d7720fa7f2b0469eafbce617a9ab5f55775f`.
+- Final Release executable SHA-256: `a4a14835356e8de84a5c1e03a010a14a39db20b0a87efca0804e201104f3b761`.
 - The preserved detailed vector master has SHA-256 `db83c97a9e27da5b816d5b18e29f94b9ffd6abd3e9c2f1b4150c46949ade88e9`, exactly matching the pre-optical production asset. Source, Debug-resource, Release-resource, and installed-resource copies of the 18-point production SVG share SHA-256 `53edfd091d35ec50a5a9aabc9322fa71986b9fc76465a0e77e97627ccda52d20`; AppKit successfully decodes the packaged SVG.
 - The v12 application-icon SVG master has SHA-256 `11716e2320fc2022e5c2581c1f7d92e0bafc9194c9ceb7e5d6b46789046b444b`; its 1024-pixel sRGB PNG has SHA-256 `0afc17b236b7451d7135b278dab0b1e5a94ff3cf866a38b9f19c53c4df1913b0`. Two consecutive Debug builds produced the same multi-resolution ICNS SHA-256 `5e5fdce3f203ce44fbc70561ea0a68adf221596eba56bec37325a8e96b471387`.
 - The installed Debug bundle declares `BlennyAppIcon.icns`; Finder renders the color icon at normal and enlarged icon-view sizes, and public `NSWorkspace.icon(forFile:)` returns the installed resource with the expected multi-resolution representations.
+- Debug and Release `Info.plist` files and ad-hoc designated requirements declare `xyz.fi5h.blenny`. The installed Debug app launches under that identity, and public `NSWorkspace.urlForApplication(withBundleIdentifier:)` resolves it to `/Applications/Blenny 0.2.0 Validation.app`. The known local legacy probe remains a separate historical app and is not treated as the current Blenny installation.
 - The Release executable links only the expected public Apple frameworks and Swift runtime. Privacy scans found no Screen Recording descriptions, live-pixel capture path, owner path, private validation identifiers, or enablement tokens.
 - The prior full-lane installed acceptance populated all three horizontal lanes with 20 bundle owners and nine identifiable system items. It showed recognizable color application icons, the then-current Blenny fallback, semantic monochrome system symbols including Text Input, local horizontal scrolling, and complete selection/accessibility detail without clipping. After the color bundle icon was added, Finder and `NSWorkspace` acceptance verified the production icon path; the full Accessibility scan was not repeated because rebuilding the ad-hoc-signed app removed its prior trust, and this icon-only follow-up did not change system privacy settings.
 - Installed interaction acceptance exercised selection details, keyboard focus traversal, a reversible draft move, deterministic Review, Discard Draft, the assertion-blocked Resume preview, the disabled Stop state, Restore preview, manual Refresh, close, reopen, and Quit. No Apply action was used during the final acceptance pass.
@@ -107,6 +116,8 @@ Installed visual review must confirm:
 A post-QA recovery check detected that two disabled-policy saves had occurred during an earlier installed-interface exercise: the accepted document had gained local candidate assignments and the single backup had rotated. Both files remained disabled and mode `0600`, and no writer or assertion could be created through this path. Before closeout, the observed files were copied to ignored `LocalData/` evidence and the versioned schema-1 baseline was regenerated deterministically. The restored accepted-policy SHA-256 is `0618f1078de2655c5d4263c030459e7a1e0a320237708018957df83f8b74a004`; the restored backup SHA-256 is `938ad8a5611a0c9bb0459a77f61528ecc587457f96b160db4044bd41874c9599`; both are `0600`. The unexpected writes changed filesystem modification times, so this record does not claim timestamp preservation.
 
 Management remains disabled, the validation preferred-position key remains absent, no Blenny validation process remains, and MenuBarAgent, Usage4Claude, and CleanShot X remain running. No real assertion write, retry, Screen Recording request, persisted screenshot, or menu-bar pixel capture occurred.
+
+The stable-identity installed smoke launch did not have Accessibility access, so it did not run a menu-bar refresh or migrate the live policy files. Their accepted and backup hashes therefore remained `0618f1078de2655c5d4263c030459e7a1e0a320237708018957df83f8b74a004` and `938ad8a5611a0c9bb0459a77f61528ecc587457f96b160db4044bd41874c9599`. Exact schema-1 accepted-policy and nested-backup fixtures exercise the migration in temporary directories instead; both become schema 2 with `xyz.fi5h.blenny`, retain their independent management states and assignments, remain `0600`, and are byte-stable on a second migration.
 
 ## Explicit exclusions
 

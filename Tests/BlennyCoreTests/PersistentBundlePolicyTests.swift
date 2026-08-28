@@ -5,7 +5,8 @@ import Testing
 
 @Suite("Persistent bundle policy storage")
 struct PersistentBundlePolicyTests {
-    private let blenny = "com.example.BlennyProbe"
+    private let blenny = "xyz.fi5h.blenny"
+    private let legacyBlenny = "com.example.BlennyProbe"
     private let revealable = "xyz.fi5h.Usage4Claude"
     private let hidden = "pl.maketheweb.cleanshotx"
 
@@ -23,8 +24,8 @@ struct PersistentBundlePolicyTests {
         #expect(decoded == document)
         #expect(decoded.schemaVersion == 2)
         #expect(decoded.policies.map(\.bundleIdentifier) == [
-            blenny,
             hidden,
+            blenny,
             revealable,
         ])
         let encodedText = try #require(String(data: data, encoding: .utf8))
@@ -101,6 +102,48 @@ struct PersistentBundlePolicyTests {
         }
     }
 
+    @Test("Bundle identifier replacement preserves policy and fails closed on collisions")
+    func bundleIdentifierReplacement() throws {
+        let legacy = try PersistentBundlePolicyDocument(
+            managementEnabled: true,
+            policies: [
+                .init(bundleIdentifier: legacyBlenny, policy: .visible),
+                .init(bundleIdentifier: revealable, policy: .revealable),
+                .init(bundleIdentifier: hidden, policy: .hidden),
+            ]
+        )
+
+        let migrated = try legacy.replacingBundleIdentifier(
+            from: legacyBlenny,
+            with: blenny
+        )
+        #expect(migrated.managementEnabled)
+        #expect(migrated.policies.contains {
+            $0.bundleIdentifier == blenny && $0.policy == .visible
+        })
+        #expect(!migrated.policies.contains { $0.bundleIdentifier == legacyBlenny })
+        #expect(
+            try migrated.replacingBundleIdentifier(from: legacyBlenny, with: blenny)
+                == migrated
+        )
+
+        let conflicting = try PersistentBundlePolicyDocument(
+            managementEnabled: false,
+            policies: [
+                .init(bundleIdentifier: legacyBlenny, policy: .visible),
+                .init(bundleIdentifier: blenny, policy: .visible),
+            ]
+        )
+        #expect(
+            throws: PersistentBundlePolicyDocumentError.duplicateBundleIdentifier(blenny)
+        ) {
+            _ = try conflicting.replacingBundleIdentifier(
+                from: legacyBlenny,
+                with: blenny
+            )
+        }
+    }
+
     @Test("Save, relaunch load, disable, and backup restore are atomic and scoped")
     func storeLifecycle() async throws {
         let directory = FileManager.default.temporaryDirectory
@@ -146,6 +189,83 @@ struct PersistentBundlePolicyTests {
                 .filter { $0.lastPathComponent.hasSuffix(".blenny-backup.json") }
                 .count == 1
         )
+    }
+
+    @Test("Store migration updates accepted policy and backup once without rotating recovery")
+    func storeBundleIdentifierMigration() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BlennyIdentityMigrationTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let policyURL = directory.appendingPathComponent("bundle-policies.json")
+        let backupURL = directory.appendingPathComponent(
+            "bundle-policies.previous.blenny-backup.json"
+        )
+        let store = try PersistentBundlePolicyStore(
+            policyURL: policyURL,
+            backupURL: backupURL
+        )
+        let legacyPolicyJSON = """
+        {
+          "schemaVersion": 1,
+          "managementEnabled": false,
+          "policies": [
+            {"bundleIdentifier": "\(legacyBlenny)", "policy": "pinned"},
+            {"bundleIdentifier": "\(revealable)", "policy": "revealable"},
+            {"bundleIdentifier": "\(hidden)", "policy": "hidden"}
+          ]
+        }
+        """
+        let legacyBackupJSON = """
+        {
+          "schemaVersion": 1,
+          "previousPolicy": {
+            "schemaVersion": 1,
+            "managementEnabled": true,
+            "policies": [
+              {"bundleIdentifier": "\(legacyBlenny)", "policy": "pinned"},
+              {"bundleIdentifier": "\(revealable)", "policy": "revealable"},
+              {"bundleIdentifier": "\(hidden)", "policy": "hidden"}
+            ]
+          }
+        }
+        """
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        try Data(legacyPolicyJSON.utf8).write(to: policyURL)
+        try Data(legacyBackupJSON.utf8).write(to: backupURL)
+
+        #expect(
+            try await store.migrateBundleIdentifier(from: legacyBlenny, to: blenny)
+        )
+        let migratedPolicy = try #require(try await store.load())
+        let migratedBackup = try #require(try await store.loadBackup())
+        #expect(!migratedPolicy.managementEnabled)
+        #expect(migratedBackup.previousPolicy.managementEnabled)
+        for document in [migratedPolicy, migratedBackup.previousPolicy] {
+            #expect(document.policies.contains {
+                $0.bundleIdentifier == blenny && $0.policy == .visible
+            })
+            #expect(!document.policies.contains { $0.bundleIdentifier == legacyBlenny })
+        }
+
+        let policyData = try Data(contentsOf: policyURL)
+        let backupData = try Data(contentsOf: backupURL)
+        #expect(
+            try await store.migrateBundleIdentifier(from: legacyBlenny, to: blenny) == false
+        )
+        #expect(try Data(contentsOf: policyURL) == policyData)
+        #expect(try Data(contentsOf: backupURL) == backupData)
+
+        let policyAttributes = try FileManager.default.attributesOfItem(
+            atPath: policyURL.path
+        )
+        let backupAttributes = try FileManager.default.attributesOfItem(
+            atPath: backupURL.path
+        )
+        #expect((policyAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        #expect((backupAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
     }
 
     @Test("Policy and backup paths cannot alias")

@@ -7,7 +7,7 @@ struct RevealablePolicyTests {
     private let revealable = "com.example.Revealable"
     private let hidden = "com.example.Hidden"
     private let unmanaged = "com.example.Unmanaged"
-    private let blenny = "com.example.BlennyProbe"
+    private let blenny = "xyz.fi5h.blenny"
 
     @Test("Visible is present at baseline and during reveal")
     func visibleIsAlwaysPresent() throws {

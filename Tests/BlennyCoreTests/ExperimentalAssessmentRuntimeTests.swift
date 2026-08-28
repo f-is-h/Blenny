@@ -16,7 +16,7 @@ struct ExperimentalAssessmentRuntimeTests {
             for: RevealAllowlistPlan(
                 presentation: .baseline,
                 allowedSystemItems: Array(0 ..< 9),
-                allowedBundleIdentifiers: ["com.example.BlennyProbe"]
+                allowedBundleIdentifiers: ["xyz.fi5h.blenny"]
             )
         )
         _ = candidate

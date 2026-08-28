@@ -5,7 +5,7 @@ import Testing
 
 @Suite("Policy editing draft, diff, and dry-run")
 struct PolicyEditingCoreTests {
-    private let blenny = "com.example.BlennyProbe"
+    private let blenny = "xyz.fi5h.blenny"
     private let usage = "xyz.fi5h.Usage4Claude"
     private let cleanShot = "pl.maketheweb.cleanshotx"
 

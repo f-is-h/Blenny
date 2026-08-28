@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Minimal product interface view model")
 struct PolicyEditorViewModelTests {
-    private let blenny = "com.example.BlennyProbe"
+    private let blenny = "xyz.fi5h.blenny"
     private let revealable = "com.example.Revealable"
     private let hidden = "com.example.Hidden"
     private let newCandidate = "com.example.NewCandidate"
@@ -32,8 +32,10 @@ struct PolicyEditorViewModelTests {
         let inventory = PolicyCandidateInventory(observations: snapshot.observations)
 
         #expect(snapshot.isComplete)
-        #expect(inventory.bundleIdentifiers == [blenny, revealable])
-        #expect(inventory.candidates.last?.menuBarItemCount == 2)
+        #expect(inventory.bundleIdentifiers == [revealable, blenny])
+        #expect(
+            inventory.candidates.first { $0.bundleIdentifier == revealable }?.menuBarItemCount == 2
+        )
         #expect(snapshot.systemItems.map(\.displayName) == ["Bluetooth", "Siri", "Wi-Fi"])
         #expect(snapshot.systemItems.first { $0.displayName == "Wi-Fi" }?.observationCount == 2)
         #expect(
@@ -99,24 +101,24 @@ struct PolicyEditorViewModelTests {
         #expect(!model.hasDraftChanges)
         #expect(model.implicitVisibleCandidates.map(\.bundleIdentifier) == [newCandidate])
         #expect(model.validationScope.approvedBundleIdentifiers == [
-            blenny,
             hidden,
             revealable,
+            blenny,
         ])
 
         #expect(model.assign(bundleIdentifier: newCandidate, to: .revealable) == .changed)
         #expect(model.implicitVisibleCandidates.isEmpty)
         #expect(model.validationScope.approvedBundleIdentifiers == [
-            blenny,
             hidden,
             newCandidate,
             revealable,
+            blenny,
         ])
 
         #expect(model.assign(bundleIdentifier: newCandidate, to: .visible) == .changed)
         #expect(model.candidates(in: .visible).map(\.bundleIdentifier) == [
-            blenny,
             newCandidate,
+            blenny,
         ])
         #expect(model.assign(bundleIdentifier: blenny, to: .hidden) == .rejectedBlennyMustRemainVisible)
     }
@@ -143,14 +145,14 @@ struct PolicyEditorViewModelTests {
         #expect(model.candidates(in: .revealable).map(\.bundleIdentifier) == [revealable])
         #expect(model.implicitVisibleCandidates.map(\.bundleIdentifier) == [newCandidate])
         #expect(model.validationScope.approvedBundleIdentifiers == [
-            blenny,
             hidden,
             revealable,
+            blenny,
         ])
         #expect(model.acceptedPolicyScope.approvedBundleIdentifiers == [
-            blenny,
             hidden,
             revealable,
+            blenny,
         ])
     }
 

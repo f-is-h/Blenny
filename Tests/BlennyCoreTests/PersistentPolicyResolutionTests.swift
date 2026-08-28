@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Persistent policy identity resolution")
 struct PersistentPolicyResolutionTests {
-    private let blenny = "com.example.BlennyProbe"
+    private let blenny = "xyz.fi5h.blenny"
     private let revealable = "xyz.fi5h.Usage4Claude"
     private let hidden = "pl.maketheweb.cleanshotx"
     private let unmanaged = "com.example.Unmanaged"
