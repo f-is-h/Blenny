@@ -132,7 +132,7 @@ Not included: drag-and-drop, in-lane ordering, real policy writes, system-item r
 
 ## 0.3.0 — Product interface foundation
 
-Status: **Complete on macOS 27.0 build `27A5237l`; local annotated tag pending owner evidence review.**
+Status: **Complete on macOS 27.0 build `27A5237l`; closed at local annotated tag `v0.3.0`, push pending.**
 
 Exit criteria met:
 

@@ -6,7 +6,7 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.3.0` Product Interface Foundation complete locally; annotated tag pending owner evidence review
+- Current phase: `0.3.0` Product Interface Foundation complete and closed at local annotated tag `v0.3.0`; push pending explicit confirmation
 - Document date: 2026-08-28
 - Product status: a single AppKit-hosted SwiftUI window now presents the icon-first policy editor, native Open at Login, Support, and in-window Review on the tested macOS 27 build; no distributable build or real assertion-write authorization exists yet
 - Source lineage decision: clean implementation, not an Ice fork
@@ -580,4 +580,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Close `0.3.0` locally after owner review of the installed evidence. Preserve its single-window Organize, Settings, Support, and Review hierarchy; the three horizontal lanes; read-only Apple system items; Blenny's invariant Visible policy; manual Refresh; native Open at Login; and deterministic review and recovery boundary. Keep the restored policy persistently disabled. Do not create `v0.3.0` until the owner explicitly confirms the evidence, and push no ref without a separate exact confirmation. After local closure, begin `0.4.0` with cross-lane draft dragging only; do not add within-lane ordering or change policy semantics.
+Version `0.3.0` is closed locally at annotated tag `v0.3.0` after owner review of the installed evidence. Preserve its single-window Organize, Settings, Support, and Review hierarchy; the three horizontal lanes; read-only Apple system items; Blenny's invariant Visible policy; manual Refresh; native Open at Login; and deterministic review and recovery boundary. Keep the restored policy persistently disabled, and push no ref without a separate exact confirmation. Begin `0.4.0` with cross-lane draft dragging and the owner-selected visual refinement direction; do not add within-lane ordering or change policy semantics.

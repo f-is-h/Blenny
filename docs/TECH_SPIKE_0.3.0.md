@@ -2,7 +2,7 @@
 
 > Engineering record for one independently reviewable presentation milestone.
 
-Status: **Complete locally; annotated tag pending owner evidence review.**
+Status: **Complete locally; closed at local annotated tag `v0.3.0`, push pending.**
 
 Last updated: 2026-08-28
 
@@ -247,4 +247,4 @@ Version `0.3.0` does not include:
 
 ## Exit boundary
 
-The milestone is complete only when the selected SwiftUI interface is installed and visually accepted, all preserved interaction and recovery paths pass, Debug and Release verification succeeds under Xcode 27, required documentation and `Config/Info.plist` agree on `0.3.0`, the working tree contains no raw evidence, restoration is complete, and `$blenny-release` has audited and committed the milestone. Do not push, and do not create `v0.3.0` until the owner reviews the final evidence and explicitly authorizes the tag.
+The milestone is complete because the selected SwiftUI interface was installed and visually accepted, all preserved interaction and recovery paths passed, Debug and Release verification succeeded under Xcode 27, required documentation and `Config/Info.plist` agree on `0.3.0`, the working tree contains no raw evidence, restoration is complete, and `$blenny-release` audited and committed the milestone. The owner reviewed the final evidence and explicitly authorized the local annotated tag `v0.3.0`. Push remains subject to a separate exact-ref confirmation.
