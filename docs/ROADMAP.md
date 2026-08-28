@@ -114,7 +114,7 @@ Exit criteria met:
 
 ## 0.2.0 — Icon-first policy presentation
 
-Status: **Complete on macOS 27.0 build `26A5416b`; installed acceptance passed, tag and push deferred.**
+Status: **Complete on macOS 27.0 build `26A5416b`; closed at local annotated tag `v0.2.0`, push deferred.**
 
 Exit criteria met:
 
@@ -130,7 +130,19 @@ Exit criteria met:
 
 Not included: drag-and-drop, in-lane ordering, real policy writes, system-item reassignment, login launch, lifecycle/display hardening, helpers, IPC, updating, profiles, themes, animation systems, or polling.
 
-## 0.3.0 — Cross-lane draft dragging
+## 0.3.0 — Product interface foundation
+
+Advance when:
+
+- Work begins with a product-layout discussion, not implementation. At least three materially different recommended UI directions show the complete main-window hierarchy, explain their trade-offs, and identify one recommended direction for owner selection.
+- The owner-selected direction establishes the durable main-window information architecture, visual hierarchy, typography, spacing, grouping, component states, and action placement expected to carry through the subsequent interaction milestones.
+- Visible, Revealable, and Hidden remain immediately understandable in the selected design, with icon-first recognition, clear read-only Apple system items, selection details, draft status, management status, permission state, recovery actions, and manual Refresh presented without visual competition.
+- The interface remains usable at its minimum and preferred window sizes, with long lanes, empty lanes, fallback icons, long names, supplementary details, keyboard focus, tooltips, and normal light and dark system appearances verified visually.
+- Existing click and keyboard assignment, Review, Discard Draft, Resume Managing, Stop Managing, Restore Previous Policy, close, reopen, and Quit behavior remains stable.
+- This milestone changes presentation only: it adds no drag-and-drop, within-lane ordering, policy/persistence semantics, report or fingerprint inputs, assertion path, mutable system item, polling, theme system, animation system, or unrelated preference.
+- The chosen structure is documented well enough that `0.4.0` can add dragging without another fundamental layout redesign.
+
+## 0.4.0 — Cross-lane draft dragging
 
 Advance when:
 
@@ -141,7 +153,7 @@ Advance when:
 - Drops outside a valid lane, duplicate delivery, stale candidates, and Discard Draft behave deterministically.
 - The milestone does not promise physical menu-bar ordering or within-lane priority.
 
-## 0.4.0 — Reviewed management loop
+## 0.5.0 — Reviewed management loop
 
 Advance when:
 
@@ -151,7 +163,7 @@ Advance when:
 - Real validation remains bounded to explicitly approved bundles and ends in verified restoration.
 - Release promotion of the unsupported backend remains a separate, deliberate compatibility decision rather than an accidental consequence of UI integration.
 
-## 0.5.0 — Lifecycle and display hardening
+## 0.6.0 — Lifecycle and display hardening
 
 Advance when the supported matrix passes:
 
@@ -163,7 +175,7 @@ Advance when the supported matrix passes:
 - Native overflow present and absent.
 - Clock, Notification Center, and Control Center remain functional after every mutation class.
 
-## 0.6.0 — Distribution prototype
+## 0.7.0 — Distribution prototype
 
 Advance when:
 

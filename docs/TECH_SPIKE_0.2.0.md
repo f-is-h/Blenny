@@ -2,7 +2,7 @@
 
 > Engineering record for one independently reviewable product increment.
 
-Status: **Complete on macOS 27.0 build `26A5416b`; local tag and push deferred.**
+Status: **Complete on macOS 27.0 build `26A5416b`; closed at local annotated tag `v0.2.0`, push deferred.**
 
 Last updated: 2026-08-28
 
@@ -117,7 +117,7 @@ A post-QA recovery check detected that two disabled-policy saves had occurred du
 
 Management remains disabled, the validation preferred-position key remains absent, no Blenny validation process remains, and MenuBarAgent, Usage4Claude, and CleanShot X remain running. No real assertion write, retry, Screen Recording request, persisted screenshot, or menu-bar pixel capture occurred.
 
-The stable-identity installed smoke launch did not have Accessibility access, so it did not run a menu-bar refresh or migrate the live policy files. Their accepted and backup hashes therefore remained `0618f1078de2655c5d4263c030459e7a1e0a320237708018957df83f8b74a004` and `938ad8a5611a0c9bb0459a77f61528ecc587457f96b160db4044bd41874c9599`. Exact schema-1 accepted-policy and nested-backup fixtures exercise the migration in temporary directories instead; both become schema 2 with `xyz.fi5h.blenny`, retain their independent management states and assignments, remain `0600`, and are byte-stable on a second migration.
+The first stable-identity installed smoke launch did not have Accessibility access, so it left the live schema-1 policy files unchanged. A later trusted manual refresh completed the bounded identity migration before the release audit. Final accepted and backup documents both contain the same disabled Visible/Revealable/Hidden assignments with `xyz.fi5h.blenny`; their SHA-256 values are `b896c26e0031984d8c857b7f71e0f67bdb4625c53adf49a17675b523981a3dee` and `0e880b34e925c7d808d58d3c6f915e95bbbd4bfb9001c85f948f1541d13afce3`, and both remain `0600`. Exact schema-1 accepted-policy and nested-backup fixtures independently exercise the same migration in temporary directories; both become schema 2 with `xyz.fi5h.blenny`, retain their independent management states and assignments, remain `0600`, and are byte-stable on a second migration. The migration constructs no assertion, management remains disabled, the validation preferred-position key remains absent, and no Blenny validation process remains.
 
 ## Explicit exclusions
 
@@ -135,4 +135,4 @@ Any proposal to add one of these capabilities requires an explicit roadmap decis
 
 ## Exit boundary
 
-The milestone is complete only when Xcode 27 Debug and Release tests and app builds pass, installed visual review accepts the icon and fallback behavior, tracked documentation agrees on the narrow scope, restoration remains complete, and `$blenny-release` closes the version. Do not tag or push without the required evidence and owner confirmation.
+The milestone is complete because Xcode 27 Debug and Release tests and app builds pass, installed visual review accepted the icon and fallback behavior, tracked documentation agrees on the narrow scope, restoration remains complete, and `$blenny-release` closed the version at local annotated tag `v0.2.0`. Do not push without a separate exact confirmation.

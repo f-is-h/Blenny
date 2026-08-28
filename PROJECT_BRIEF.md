@@ -6,7 +6,7 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.2.0` Icon-first Policy Presentation complete; tag and push deferred
+- Current phase: `0.2.0` Icon-first Policy Presentation complete; closed at local annotated tag `v0.2.0`, push deferred
 - Document date: 2026-08-28
 - Product status: the minimal AppKit interface now presents bundle policy icon-first on the tested macOS 27 build; no distributable build or real assertion-write authorization exists yet
 - Source lineage decision: clean implementation, not an Ice fork
@@ -281,10 +281,11 @@ Blenny develops through small, independently reviewable product increments. A ro
 - `0.1.0` established the minimal text-first AppKit interface and deterministic review boundary.
 - `0.2.0` replaces text-dominant candidate presentation with installed application icons obtained through public AppKit/Workspace APIs, semantic system symbols keyed by stable observation identifiers, and an explicit shared fallback. Blenny's v12 color application artwork is packaged as the bundle icon, while its detailed menu-bar vector master remains a design source and its bundled monochrome template SVG remains a separate 18-point optical-size production asset for the app's own status item. Icon descriptors remain presentation-only and do not add drag-and-drop or system mutation.
 - The local `0.2.0` application adopts the stable `xyz.fi5h.blenny` identity associated with <https://blenny.fi5h.xyz>; only the former Blenny self-identifier is migrated, and no third-party policy identity is guessed or rewritten.
-- `0.3.0` adds cross-lane drag assignment for editable application bundles while preserving the keyboard path and draft-only mutation boundary.
-- `0.4.0` closes the reviewed end-to-end management loop on the supported development build without broadening system-item scope.
-- `0.5.0` hardens the established product loop across lifecycle and display changes.
-- `0.6.0` prepares the distribution prototype.
+- `0.3.0` establishes the main product interface before adding another interaction model. Work begins by discussing several materially different layout directions, comparing their hierarchy and trade-offs, and obtaining owner selection before implementation. The selected native AppKit design then fixes the main window structure, visual hierarchy, spacing, typography, component states, and responsive behavior while preserving the existing non-drag assignment path and all policy boundaries.
+- `0.4.0` adds cross-lane drag assignment for editable application bundles while preserving the keyboard path and draft-only mutation boundary.
+- `0.5.0` closes the reviewed end-to-end management loop on the supported development build without broadening system-item scope.
+- `0.6.0` hardens the established product loop across lifecycle and display changes.
+- `0.7.0` prepares the distribution prototype.
 
 ### 8.3 Explicit non-goals through version 1.0
 
@@ -570,4 +571,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Keep `0.2.0` closed locally with the existing three policy lanes, read-only Apple system items, Blenny's invariant Visible policy, manual Refresh, and deterministic review and recovery boundary. Do not start `0.3.0` dragging, perform a real assertion write, create `v0.2.0`, or push any ref without the separately required evidence and explicit confirmation. Keep the restored policy persistently disabled.
+Keep `0.2.0` closed locally with the existing three policy lanes, read-only Apple system items, Blenny's invariant Visible policy, manual Refresh, and deterministic review and recovery boundary. Begin `0.3.0` with layout discussion and several recommended UI directions; do not implement a direction until the owner selects it. Keep `0.3.0` presentation-only, defer dragging to `0.4.0`, perform no real assertion write, and push no ref without a separate exact confirmation. Keep the restored policy persistently disabled.
