@@ -1,0 +1,325 @@
+import CoreTransferable
+import Foundation
+import UniformTypeIdentifiers
+
+public extension UTType {
+    static let blennyPolicyBundleDrag = UTType(
+        exportedAs: "xyz.fi5h.blenny.policy-bundle-drag"
+    )
+}
+
+public struct PolicyDragPayload: Codable, Equatable, Hashable, Sendable, Transferable {
+    public let bundleIdentifier: String
+    public let sourcePolicy: MenuBarBundlePolicy
+    public let candidateGeneration: UUID
+    public let dragToken: UUID
+
+    public init(
+        bundleIdentifier: String,
+        sourcePolicy: MenuBarBundlePolicy,
+        candidateGeneration: UUID,
+        dragToken: UUID = UUID()
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        self.sourcePolicy = sourcePolicy
+        self.candidateGeneration = candidateGeneration
+        self.dragToken = dragToken
+    }
+
+    public static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .blennyPolicyBundleDrag)
+    }
+}
+
+public enum PolicyDraftAssignmentRejection: String, Equatable, Sendable {
+    case duplicateDelivery
+    case staleCandidateGeneration
+    case staleSourcePolicy
+    case samePolicy
+    case blennyMustRemainVisible
+    case unknownCandidate
+
+    public var interfaceReason: String {
+        switch self {
+        case .duplicateDelivery:
+            "This drop was already handled."
+        case .staleCandidateGeneration:
+            "Refresh changed the available applications. Start a new drag."
+        case .staleSourcePolicy:
+            "This application moved after the drag began. Start a new drag."
+        case .samePolicy:
+            "The application is already in this group."
+        case .blennyMustRemainVisible:
+            "Blenny must remain Visible."
+        case .unknownCandidate:
+            "This application is no longer available in the current observation."
+        }
+    }
+}
+
+public enum PolicyDraftAssignmentOutcome: Equatable, Sendable {
+    case changed
+    case rejected(PolicyDraftAssignmentRejection)
+
+    public var changedDraft: Bool { self == .changed }
+}
+
+public struct PolicyDraftAssignmentCoordinator: Equatable, Sendable {
+    public private(set) var candidateGeneration: UUID
+    public private(set) var consumedDragTokens: Set<UUID>
+
+    public init(
+        candidateGeneration: UUID = UUID(),
+        consumedDragTokens: Set<UUID> = []
+    ) {
+        self.candidateGeneration = candidateGeneration
+        self.consumedDragTokens = consumedDragTokens
+    }
+
+    public mutating func replaceCandidateGeneration(with generation: UUID = UUID()) {
+        candidateGeneration = generation
+        consumedDragTokens.removeAll(keepingCapacity: true)
+    }
+
+    public func validate(
+        payload: PolicyDragPayload,
+        destination: MenuBarBundlePolicy,
+        editor: PolicyEditorViewModel
+    ) -> PolicyDraftAssignmentOutcome {
+        if consumedDragTokens.contains(payload.dragToken) {
+            return .rejected(.duplicateDelivery)
+        }
+        guard payload.candidateGeneration == candidateGeneration else {
+            return .rejected(.staleCandidateGeneration)
+        }
+        guard editor.effectivePolicy(for: payload.bundleIdentifier) != nil else {
+            return .rejected(.unknownCandidate)
+        }
+        if BundlePolicyIdentity.canonicalKey(for: payload.bundleIdentifier)
+            == BundlePolicyIdentity.canonicalKey(for: editor.blennyBundleIdentifier),
+           destination != .visible {
+            return .rejected(.blennyMustRemainVisible)
+        }
+        guard editor.effectivePolicy(for: payload.bundleIdentifier) == payload.sourcePolicy else {
+            return .rejected(.staleSourcePolicy)
+        }
+        guard payload.sourcePolicy != destination else {
+            return .rejected(.samePolicy)
+        }
+        return .changed
+    }
+
+    @discardableResult
+    public mutating func assign(
+        payload: PolicyDragPayload,
+        destination: MenuBarBundlePolicy,
+        editor: inout PolicyEditorViewModel
+    ) -> PolicyDraftAssignmentOutcome {
+        let validation = validate(
+            payload: payload,
+            destination: destination,
+            editor: editor
+        )
+        guard validation == .changed else { return validation }
+
+        let assignment = editor.assign(
+            bundleIdentifier: payload.bundleIdentifier,
+            to: destination
+        )
+        switch assignment {
+        case .changed:
+            consumedDragTokens.insert(payload.dragToken)
+            return .changed
+        case .unchanged:
+            return .rejected(.samePolicy)
+        case .rejectedBlennyMustRemainVisible:
+            return .rejected(.blennyMustRemainVisible)
+        case .unknownCandidate:
+            return .rejected(.unknownCandidate)
+        }
+    }
+
+    @discardableResult
+    public mutating func assign(
+        bundleIdentifier: String,
+        destination: MenuBarBundlePolicy,
+        editor: inout PolicyEditorViewModel,
+        commandToken: UUID = UUID()
+    ) -> PolicyDraftAssignmentOutcome {
+        guard let source = editor.effectivePolicy(for: bundleIdentifier) else {
+            return .rejected(.unknownCandidate)
+        }
+        return assign(
+            payload: PolicyDragPayload(
+                bundleIdentifier: bundleIdentifier,
+                sourcePolicy: source,
+                candidateGeneration: candidateGeneration,
+                dragToken: commandToken
+            ),
+            destination: destination,
+            editor: &editor
+        )
+    }
+}
+
+public enum PolicyBoardItemID: Equatable, Hashable, Sendable {
+    case application(String)
+    case systemItem(String)
+}
+
+public struct PolicyBoardDropTarget: Equatable, Sendable {
+    public let policy: MenuBarBundlePolicy
+    public let rejection: PolicyDraftAssignmentRejection?
+
+    public init(
+        policy: MenuBarBundlePolicy,
+        rejection: PolicyDraftAssignmentRejection?
+    ) {
+        self.policy = policy
+        self.rejection = rejection
+    }
+
+    public var isValid: Bool { rejection == nil }
+}
+
+public struct PolicyBoardSettleState: Equatable, Sendable {
+    public let bundleIdentifier: String
+    public let destination: MenuBarBundlePolicy
+    public let token: UUID
+
+    public init(
+        bundleIdentifier: String,
+        destination: MenuBarBundlePolicy,
+        token: UUID
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        self.destination = destination
+        self.token = token
+    }
+}
+
+public struct PolicyBoardInteractionState: Equatable, Sendable {
+    public private(set) var selectedItem: PolicyBoardItemID?
+    public private(set) var hoveredItem: PolicyBoardItemID?
+    public private(set) var focusedItem: PolicyBoardItemID?
+    public private(set) var draggedBundleIdentifier: String?
+    public private(set) var draggedSourcePolicy: MenuBarBundlePolicy?
+    public private(set) var dropTarget: PolicyBoardDropTarget?
+    public private(set) var settleState: PolicyBoardSettleState?
+
+    public init(
+        selectedItem: PolicyBoardItemID? = nil,
+        hoveredItem: PolicyBoardItemID? = nil,
+        focusedItem: PolicyBoardItemID? = nil,
+        draggedBundleIdentifier: String? = nil,
+        draggedSourcePolicy: MenuBarBundlePolicy? = nil,
+        dropTarget: PolicyBoardDropTarget? = nil,
+        settleState: PolicyBoardSettleState? = nil
+    ) {
+        self.selectedItem = selectedItem
+        self.hoveredItem = hoveredItem
+        self.focusedItem = focusedItem
+        self.draggedBundleIdentifier = draggedBundleIdentifier
+        self.draggedSourcePolicy = draggedSourcePolicy
+        self.dropTarget = dropTarget
+        self.settleState = settleState
+    }
+
+    public var namePresentationItem: PolicyBoardItemID? {
+        hoveredItem ?? focusedItem ?? selectedItem
+    }
+
+    public mutating func select(_ item: PolicyBoardItemID?) {
+        selectedItem = item
+    }
+
+    public mutating func setHovered(_ item: PolicyBoardItemID?, isHovered: Bool) {
+        if isHovered {
+            hoveredItem = item
+        } else if hoveredItem == item {
+            hoveredItem = nil
+        }
+    }
+
+    public mutating func setFocused(_ item: PolicyBoardItemID?, isFocused: Bool) {
+        if isFocused {
+            focusedItem = item
+        } else if focusedItem == item {
+            focusedItem = nil
+        }
+    }
+
+    public mutating func beginDrag(
+        bundleIdentifier: String,
+        sourcePolicy: MenuBarBundlePolicy
+    ) {
+        draggedBundleIdentifier = bundleIdentifier
+        draggedSourcePolicy = sourcePolicy
+        hoveredItem = nil
+        dropTarget = nil
+        settleState = nil
+    }
+
+    public mutating func target(
+        policy: MenuBarBundlePolicy,
+        validation: PolicyDraftAssignmentOutcome
+    ) {
+        let rejection: PolicyDraftAssignmentRejection?
+        switch validation {
+        case .changed:
+            rejection = nil
+        case .rejected(let reason):
+            rejection = reason
+        }
+        dropTarget = PolicyBoardDropTarget(policy: policy, rejection: rejection)
+    }
+
+    public mutating func clearTarget(policy: MenuBarBundlePolicy? = nil) {
+        guard policy == nil || dropTarget?.policy == policy else { return }
+        dropTarget = nil
+    }
+
+    public mutating func completeDrop(
+        payload: PolicyDragPayload,
+        destination: MenuBarBundlePolicy,
+        outcome: PolicyDraftAssignmentOutcome
+    ) {
+        draggedBundleIdentifier = nil
+        draggedSourcePolicy = nil
+        dropTarget = nil
+        guard outcome == .changed else {
+            settleState = nil
+            return
+        }
+        selectedItem = .application(payload.bundleIdentifier)
+        settleState = PolicyBoardSettleState(
+            bundleIdentifier: payload.bundleIdentifier,
+            destination: destination,
+            token: payload.dragToken
+        )
+    }
+
+    public mutating func finishSettling(token: UUID) {
+        guard settleState?.token == token else { return }
+        settleState = nil
+    }
+
+    public mutating func endDragWithoutDrop() {
+        draggedBundleIdentifier = nil
+        draggedSourcePolicy = nil
+        dropTarget = nil
+    }
+
+    public mutating func clearTransientPresentation() {
+        hoveredItem = nil
+        focusedItem = nil
+        draggedBundleIdentifier = nil
+        draggedSourcePolicy = nil
+        dropTarget = nil
+        settleState = nil
+    }
+
+    public mutating func clearAll() {
+        self = PolicyBoardInteractionState()
+    }
+}

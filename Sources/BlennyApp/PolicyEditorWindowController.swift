@@ -10,6 +10,8 @@ struct ProductInterfaceActions {
     let resumeManaging: () -> Void
     let stopManaging: () -> Void
     let restorePreviousPolicy: () -> Void
+    let draftDidChange: (PolicyEditorViewModel) -> Void
+    let reviewDraft: () -> Void
     let apply: (PreparedPolicyEdit) -> Void
     let openProjectWebsite: () -> Void
     let openMonthlySponsor: () -> Void
@@ -162,8 +164,10 @@ final class ProductInterfaceModel: ObservableObject {
     @Published private(set) var launchAtLoginState = LaunchAtLoginPresentationState(
         availability: .disabled
     )
+    @Published private(set) var candidateGeneration = UUID()
 
     private let iconResolver = WorkspacePolicyIconResolver()
+    private var assignmentCoordinator = PolicyDraftAssignmentCoordinator()
 
     var controls: ProductInterfaceControlState {
         ProductInterfaceControlState(
@@ -210,6 +214,8 @@ final class ProductInterfaceModel: ObservableObject {
         recoveryAvailable: Bool
     ) {
         self.model = model
+        assignmentCoordinator.replaceCandidateGeneration()
+        candidateGeneration = assignmentCoordinator.candidateGeneration
         self.observationCount = observationCount
         self.recoveryAvailable = recoveryAvailable
 
@@ -269,6 +275,19 @@ final class ProductInterfaceModel: ObservableObject {
         return candidates
     }
 
+    func candidate(bundleIdentifier: String) -> PolicyCandidate? {
+        guard let canonical = BundlePolicyIdentity.canonicalKey(for: bundleIdentifier) else {
+            return nil
+        }
+        return model?.candidateInventory.candidates.first {
+            BundlePolicyIdentity.canonicalKey(for: $0.bundleIdentifier) == canonical
+        }
+    }
+
+    func systemItem(observationIdentifier: String) -> SystemMenuBarItemObservation? {
+        systemItems.first { $0.observationIdentifier == observationIdentifier }
+    }
+
     func applicationIcon(for bundleIdentifier: String) -> ResolvedPolicyIcon {
         applicationIcons[bundleIdentifier]
             ?? iconResolver.applicationIcon(bundleIdentifier: bundleIdentifier)
@@ -283,6 +302,86 @@ final class ProductInterfaceModel: ObservableObject {
         guard let model else { return false }
         return BundlePolicyIdentity.canonicalKey(for: bundleIdentifier)
             == BundlePolicyIdentity.canonicalKey(for: model.blennyBundleIdentifier)
+    }
+
+    func dragPayload(
+        bundleIdentifier: String,
+        sourcePolicy: MenuBarBundlePolicy
+    ) -> PolicyDragPayload {
+        PolicyDragPayload(
+            bundleIdentifier: bundleIdentifier,
+            sourcePolicy: sourcePolicy,
+            candidateGeneration: candidateGeneration
+        )
+    }
+
+    func validateDrag(
+        bundleIdentifier: String,
+        sourcePolicy: MenuBarBundlePolicy,
+        destination: MenuBarBundlePolicy
+    ) -> PolicyDraftAssignmentOutcome {
+        guard let model else { return .rejected(.unknownCandidate) }
+        return assignmentCoordinator.validate(
+            payload: PolicyDragPayload(
+                bundleIdentifier: bundleIdentifier,
+                sourcePolicy: sourcePolicy,
+                candidateGeneration: candidateGeneration
+            ),
+            destination: destination,
+            editor: model
+        )
+    }
+
+    @discardableResult
+    func assign(
+        payload: PolicyDragPayload,
+        destination: MenuBarBundlePolicy
+    ) -> PolicyDraftAssignmentOutcome {
+        guard var editor = model else { return .rejected(.unknownCandidate) }
+        let outcome = assignmentCoordinator.assign(
+            payload: payload,
+            destination: destination,
+            editor: &editor
+        )
+        if outcome.changedDraft {
+            model = editor
+            setStatus("Draft changes are local and unapplied.", isError: false)
+        }
+        return outcome
+    }
+
+    @discardableResult
+    func assign(
+        bundleIdentifier: String,
+        destination: MenuBarBundlePolicy
+    ) -> PolicyDraftAssignmentOutcome {
+        guard var editor = model else { return .rejected(.unknownCandidate) }
+        let outcome = assignmentCoordinator.assign(
+            bundleIdentifier: bundleIdentifier,
+            destination: destination,
+            editor: &editor
+        )
+        if outcome.changedDraft {
+            model = editor
+            setStatus("Draft changes are local and unapplied.", isError: false)
+        }
+        return outcome
+    }
+
+    @discardableResult
+    func discardDraft() -> PolicyEditorViewModel? {
+        guard var editor = model else { return nil }
+        editor.discardDraft(
+            using: BundlePolicyDraft(acceptedPolicy: editor.acceptedPolicy)
+        )
+        assignmentCoordinator.replaceCandidateGeneration()
+        candidateGeneration = assignmentCoordinator.candidateGeneration
+        model = editor
+        setStatus(
+            "Draft discarded. Newly observed apps remain effectively Visible.",
+            isError: false
+        )
+        return editor
     }
 
     func presentReview(
@@ -330,7 +429,7 @@ final class ProductInterfaceModel: ObservableObject {
         let blenny = "xyz.fi5h.blenny"
         let safari = "com.apple.Safari"
         let fallback = "com.example.FallbackMenuAgentWithAnIntentionallyLongDisplayName"
-        let observations: [MenuBarPolicyOwnershipObservation] = [
+        var observations: [MenuBarPolicyOwnershipObservation] = [
             (blenny, 10, 1),
             (safari, 20, 1),
             ("com.apple.mail", 30, 2),
@@ -346,6 +445,18 @@ final class ProductInterfaceModel: ObservableObject {
                 processIdentifier: processIdentifier,
                 menuBarItemCount: itemCount
             )
+        }
+        if ProcessInfo.processInfo.environment["BLENNY_VALIDATE_LONG_LIST"] == "YES" {
+            observations.append(contentsOf: (1...12).map { index in
+                MenuBarPolicyOwnershipObservation(
+                    bundleIdentifier: String(
+                        format: "com.example.LongListMenuAgent%02d",
+                        index
+                    ),
+                    processIdentifier: Int32(100 + index),
+                    menuBarItemCount: index.isMultiple(of: 4) ? 2 : 1
+                )
+            })
         }
         let systemItems = [
             SystemMenuBarItemObservation(
@@ -370,7 +481,9 @@ final class ProductInterfaceModel: ObservableObject {
 
         do {
             let acceptedPolicy = try PersistentBundlePolicyDocument(
-                managementEnabled: false,
+                managementEnabled: ProcessInfo.processInfo.environment[
+                    "BLENNY_VALIDATE_MANAGEMENT_ENABLED"
+                ] == "YES",
                 policies: [
                     .init(bundleIdentifier: blenny, policy: .visible),
                     .init(bundleIdentifier: safari, policy: .revealable),
@@ -457,6 +570,10 @@ final class PolicyEditorWindowController: NSWindowController {
         "BLENNY_VALIDATE_UNTRUSTED_INTERFACE"
     private static let refreshingValidationEnvironmentKey =
         "BLENNY_VALIDATE_REFRESHING_INTERFACE"
+    private static let draftValidationEnvironmentKey =
+        "BLENNY_VALIDATE_DRAFT_INTERFACE"
+    private static let errorValidationEnvironmentKey =
+        "BLENNY_VALIDATE_ERROR_INTERFACE"
     #endif
 
     private let interfaceModel = ProductInterfaceModel()
@@ -469,6 +586,8 @@ final class PolicyEditorWindowController: NSWindowController {
         onResumeManaging: @escaping () -> Void,
         onStopManaging: @escaping () -> Void,
         onRestorePreviousPolicy: @escaping () -> Void,
+        onDraftDidChange: @escaping (PolicyEditorViewModel) -> Void,
+        onReviewDraft: @escaping () -> Void,
         onApply: @escaping (PreparedPolicyEdit) -> Void,
         onOpenProjectWebsite: @escaping () -> Void,
         onOpenMonthlySponsor: @escaping () -> Void,
@@ -506,6 +625,22 @@ final class PolicyEditorWindowController: NSWindowController {
             ] == "YES" {
                 interfaceModel.setRefreshing(true)
             }
+            if ProcessInfo.processInfo.environment[
+                Self.draftValidationEnvironmentKey
+            ] == "YES" {
+                _ = interfaceModel.assign(
+                    bundleIdentifier: "com.apple.Safari",
+                    destination: .hidden
+                )
+            }
+            if ProcessInfo.processInfo.environment[
+                Self.errorValidationEnvironmentKey
+            ] == "YES" {
+                interfaceModel.setStatus(
+                    "The last bounded observation was incomplete. No policy changed.",
+                    isError: true
+                )
+            }
         }
         #else
         usesPopulatedValidationFixture = false
@@ -517,6 +652,8 @@ final class PolicyEditorWindowController: NSWindowController {
             resumeManaging: onResumeManaging,
             stopManaging: onStopManaging,
             restorePreviousPolicy: onRestorePreviousPolicy,
+            draftDidChange: onDraftDidChange,
+            reviewDraft: onReviewDraft,
             apply: onApply,
             openProjectWebsite: onOpenProjectWebsite,
             openMonthlySponsor: onOpenMonthlySponsor,
@@ -549,7 +686,7 @@ final class PolicyEditorWindowController: NSWindowController {
         )
         let version = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "0.3.0"
+        ) as? String ?? "0.4.0"
         window.title = "Blenny \(version)"
         window.toolbarStyle = .unified
         window.contentMinSize = Self.minimumContentSize(

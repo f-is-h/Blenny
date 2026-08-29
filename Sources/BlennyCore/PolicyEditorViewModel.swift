@@ -269,6 +269,23 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
         }
     }
 
+    public func effectivePolicy(for bundleIdentifier: String) -> MenuBarBundlePolicy? {
+        guard let canonical = BundlePolicyIdentity.canonicalKey(for: bundleIdentifier),
+              candidateInventory.bundleIdentifiers.contains(where: {
+                  BundlePolicyIdentity.canonicalKey(for: $0) == canonical
+              }) else {
+            return nil
+        }
+        for policy in MenuBarBundlePolicy.allCases {
+            if values(for: policy).contains(where: {
+                BundlePolicyIdentity.canonicalKey(for: $0) == canonical
+            }) {
+                return policy
+            }
+        }
+        return .visible
+    }
+
     @discardableResult
     public mutating func assign(
         bundleIdentifier: String,

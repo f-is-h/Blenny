@@ -6,9 +6,9 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.3.0` Product Interface Foundation complete and closed at local annotated tag `v0.3.0`; push pending explicit confirmation
-- Document date: 2026-08-28
-- Product status: a single AppKit-hosted SwiftUI window now presents the icon-first policy editor, native Open at Login, Support, and in-window Review on the tested macOS 27 build; no distributable build or real assertion-write authorization exists yet
+- Current phase: `0.4.0` Core Interaction and Visual Refinement complete locally; owner evidence confirmation and the local tag remain pending
+- Document date: 2026-08-29
+- Product status: a single AppKit-hosted SwiftUI window presents the continuous icon-first Organization Board, native cross-lane Draft assignment, keyboard and VoiceOver alternatives, native Open at Login, Support, and in-window Review on the tested macOS 27 build; no distributable build or real assertion-write authorization exists yet
 - Source lineage decision: clean implementation, not an Ice fork
 - License decision: pending; decide before the first public release
 - Repository decision: one canonical repository; private through `0.0.x`, then source and binary become public together with the first `0.9.x` release candidate
@@ -282,7 +282,7 @@ Blenny develops through small, independently reviewable product increments. A ro
 - `0.2.0` replaces text-dominant candidate presentation with installed application icons obtained through public AppKit/Workspace APIs, semantic system symbols keyed by stable observation identifiers, and an explicit shared fallback. Blenny's v12 color application artwork is packaged as the bundle icon, while its detailed menu-bar vector master remains a design source and its bundled monochrome template SVG remains a separate 18-point optical-size production asset for the app's own status item. Icon descriptors remain presentation-only and do not add drag-and-drop or system mutation.
 - The local `0.2.0` application adopts the stable `xyz.fi5h.blenny` identity associated with <https://blenny.fi5h.xyz>; only the former Blenny self-identifier is migrated, and no third-party policy identity is guessed or rewritten.
 - `0.3.0` establishes the main product interface before adding another interaction model. After comparing four materially different single-window directions and reviewing the installed result, the owner selected symbol-and-label navigation in one fixed-height band below the title bar, compact horizontal lanes with tightly spaced borderless icon cells, one read-only marker for the macOS subsection, one unified missing-permission overlay, and an anchored manual-observation footer whose idle Refresh action can recheck externally granted permission. Active refresh uses the same lane-level interruption pattern with a clear bounded-progress overlay, and navigation has no persistent focus outline. Organize uses the wide retained-window presentation needed by the horizontal lanes and places its privacy/reliability promise directly below the macOS placement note. Settings and Support use one stable narrower width in that same top-left-anchored window and retain fixed top insets. Settings contains real Permission and native Open at Login controls rather than an explanatory Observation card; Service Management remains the sole login-item source of truth and adds no helper or IPC. Support separates the project website from the donation group, then presents Sponsor once, Sponsor monthly, and Ko-fi in that order; GitHub links carry `metadata_project=blenny`, while checkout, payment, and benefits remain with the external providers. The three normal destinations fit without page-level vertical scrolling. AppKit retains lifecycle, status-item, window, Workspace, Service Management, and Accessibility infrastructure; one SwiftUI hierarchy owns all visible Organize, Settings, Support, and in-window safety Review content. Organize deliberately exposes no temporary assignment or draft-creation path before dragging exists, without changing any policy boundary or core semantic. The stopped-management row remains a truthful transitional view of the disabled persisted state; the later reviewed management loop should remove it from routine use once ordinary always-on behavior exists, while retaining deliberate safety and restoration actions.
-- `0.4.0` adds cross-lane drag assignment for editable application bundles while preserving the keyboard path and draft-only mutation boundary.
+- `0.4.0` consolidates the three policy lanes into one continuous Organization Board and adds native cross-lane assignment for editable application bundles. Names are hidden at rest and appear without reflow for hover, focus, or selection; a stable selection rail, context menu, and VoiceOver actions provide the complete non-drag path. Native drag sessions use short interruptible system motion, source and destination feedback, and Reduce Motion fallbacks. Each accepted move changes only `BundlePolicyDraft`; conditional Review Changes and Discard Draft preserve the existing preview, persistence, assertion, and recovery boundaries. Blenny stays locked Visible and Apple system observations stay read-only.
 - `0.5.0` closes the reviewed end-to-end management loop on the supported development build without broadening system-item scope.
 - `0.6.0` hardens the established product loop across lifecycle and display changes.
 - `0.7.0` prepares the distribution prototype.
@@ -294,7 +294,7 @@ Blenny develops through small, independently reviewable product increments. A ro
 - Theme marketplace or extensive visual customization.
 - Multiple profiles.
 - Focus, Wi-Fi, battery, app-launch, or schedule-based rules.
-- Hover, scroll, swipe, and empty-space gesture variants.
+- Status-item hover, scroll, swipe, and empty-space gesture variants.
 - Live status-item screenshot capture by default.
 - Continuous high-frame-rate thumbnail refresh.
 - Automatic migration from Ice, Thaw, or Bartender.
@@ -580,4 +580,4 @@ Mitigation:
 
 ## 17. Immediate next action
 
-Version `0.3.0` is closed locally at annotated tag `v0.3.0` after owner review of the installed evidence. Preserve its single-window Organize, Settings, Support, and Review hierarchy; the three horizontal lanes; read-only Apple system items; Blenny's invariant Visible policy; manual Refresh; native Open at Login; and deterministic review and recovery boundary. Keep the restored policy persistently disabled, and push no ref without a separate exact confirmation. Begin `0.4.0` with cross-lane draft dragging and the owner-selected visual refinement direction; do not add within-lane ordering or change policy semantics.
+Version `0.4.0` is complete locally from the owner-confirmed `v0.3.0` baseline. The approved Organization Board, native cross-lane assignment, keyboard and VoiceOver alternatives, conditional Draft controls, adaptive appearances, stable routes, and restored system state passed Xcode 27 deterministic and installed acceptance. Keep management persistently disabled, perform no real assertion write, and preserve all policy, Review, Apply, persistence, report, fingerprint, recovery, and system-item semantics. Present the ignored local evidence for owner confirmation before creating `v0.4.0`; do not push.

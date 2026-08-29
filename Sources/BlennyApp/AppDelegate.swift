@@ -35,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onResumeManaging: { [weak self] in self?.reviewResumeManaging() },
         onStopManaging: { [weak self] in self?.reviewStopManaging() },
         onRestorePreviousPolicy: { [weak self] in self?.reviewRestorePreviousPolicy() },
+        onDraftDidChange: { [weak self] model in self?.draftDidChange(model) },
+        onReviewDraft: { [weak self] in self?.reviewDraftChanges() },
         onApply: { [weak self] prepared in self?.apply(prepared) },
         onOpenProjectWebsite: { [weak self] in self?.openProjectWebsite() },
         onOpenMonthlySponsor: { [weak self] in self?.openMonthlySponsor() },
@@ -271,6 +273,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             } catch {
                 showPreviewError("Resume Managing", error: error)
+            }
+        }
+    }
+
+    private func draftDidChange(_ model: PolicyEditorViewModel) {
+        editorModel = model
+        statusItemController.setDraftHasChanges(model.hasDraftChanges)
+    }
+
+    private func reviewDraftChanges() {
+        guard let model = editorModel, model.hasDraftChanges else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let core = try makeCore(scope: model.validationScope)
+                let preview = try await core.preview(
+                    draft: model.draft,
+                    candidates: model.candidateInventory,
+                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers
+                )
+                guard editorModel?.draft == model.draft else {
+                    editorWindowController.setStatus(
+                        "The draft changed while Review was preparing. Review the current draft again.",
+                        isError: false
+                    )
+                    return
+                }
+                editingCore = core
+                presentReview(
+                    title: "Review Draft Changes",
+                    report: preview.0,
+                    prepared: preview.1
+                )
+            } catch {
+                showPreviewError("Draft Changes", error: error)
             }
         }
     }

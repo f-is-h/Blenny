@@ -128,7 +128,7 @@ Exit criteria met:
 - Xcode 27 Debug and Release tests and app builds pass, and installed visual review confirms recognizable icons, fallback clarity, keyboard navigation, and unchanged policy/recovery behavior.
 - The application adopts stable bundle identifier `xyz.fi5h.blenny`; accepted policy and recovery documents using the former development identifier migrate deterministically without changing assignments or management state, and collisions fail closed.
 
-Not included: drag-and-drop, in-lane ordering, real policy writes, system-item reassignment, login launch, lifecycle/display hardening, helpers, IPC, updating, profiles, themes, animation systems, or polling.
+Not included: in-lane ordering, real policy writes, system-item reassignment, login launch, lifecycle/display hardening, helpers, IPC, updating, profiles, themes, decorative animation systems, or polling.
 
 ## 0.3.0 — Product interface foundation
 
@@ -148,14 +148,18 @@ Exit criteria met:
 
 ## 0.4.0 — Cross-lane draft dragging
 
-Advance when:
+Status: **Complete locally on macOS 27.0 build `27A5237l`; owner evidence confirmation and the local annotated tag remain pending.**
 
-- Editable application-bundle icons can be dragged between Visible, Revealable, and Hidden as one draft assignment per drop.
-- Dragging mutates only `BundlePolicyDraft`; persistence and assertion creation remain behind the existing deterministic Review and Apply boundary.
-- Blenny remains Visible, Apple system items remain read-only and non-draggable, and ordinary reveal never includes Hidden.
-- Standard keyboard assignment remains a complete alternative to dragging.
-- Drops outside a valid lane, duplicate delivery, stale candidates, and Discard Draft behave deterministically.
-- The milestone does not promise physical menu-bar ordering or within-lane priority.
+Implemented exit criteria:
+
+- Visible, Revealable, and Hidden are three fixed rows inside one continuous, restrained Organization Board with a single outer surface, internal separators, semantic rails, and single-row horizontal scrolling.
+- Editable application-bundle icons use the native macOS drag session and `Transferable` payload. One accepted cross-lane drop produces at most one local assignment, with deterministic duplicate-token, same-lane, stale-generation, stale-source, unknown-candidate, outside-target, route-change, and discard handling.
+- Dragging mutates only `BundlePolicyDraft`; persistence and assertion creation remain behind the existing deterministic in-window Review and Apply boundary. An asynchronous Review is rejected if its source Draft changes before preview completes.
+- Names are absent at rest and appear in a non-reflowing floating label for hover, keyboard focus, or selection. One stable selection rail, complete Help, Bundle ID, count, policy, fallback and read-only detail, and unconditional Accessibility labels provide the full identity path.
+- Selection, the `Move to…` menu, context menus, and VoiceOver actions use the same assignment coordinator as drop. Blenny remains locked Visible; Apple system observations remain read-only and non-draggable; ordinary reveal never includes Hidden.
+- Drag source ghosting, full-row valid and invalid target treatment, matched-geometry relocation, and settle feedback use short interruptible native SwiftUI motion. Reduce Motion removes travel and scale in favor of short opacity transitions; Reduce Transparency and Increase Contrast use adaptive opaque and strengthened system surfaces.
+- Review Changes and Discard Draft reserve stable footer geometry but become visible and accessible only after local intent differs from the accepted policy. Returning every assignment to its accepted policy removes the Draft controls again.
+- The milestone does not promise physical menu-bar ordering or within-lane priority and adds no real assertion write, mutable system item, polling, Screen Recording, helper, IPC, theme system, or payment feature.
 
 ## 0.5.0 — Reviewed management loop
 
