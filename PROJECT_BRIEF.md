@@ -544,6 +544,8 @@ Possible sustainability model:
 - Optional payment for convenient signed builds or support, depending on the final license.
 - No aggressive donation prompts inside the core interaction.
 
+Blenny's in-app GitHub Sponsors links use the cross-project transaction-attribution schema in a fixed order after `frequency`: `metadata_project=blenny`, `metadata_source=app`, and `metadata_placement=about`. They omit `metadata_lang` because the URLs are application literals rather than localized document or website links. The frequency selects only the initial one-time or recurring view; GitHub retains the metadata if the sponsor changes frequency or tier.
+
 Stars, downloads, and donations should be treated as outcomes of trust and reliability, not primary product requirements.
 
 ## 15. Principal risks

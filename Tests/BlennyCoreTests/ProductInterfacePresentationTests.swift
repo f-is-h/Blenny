@@ -142,13 +142,17 @@ struct ProductInterfacePresentationTests {
         )
     }
 
-    @Test("Support links preserve frequency and Blenny project attribution")
+    @Test("Support links preserve ordered app and About attribution metadata")
     func supportLinks() {
         #expect(ProductSupportLinks.projectWebsite == "https://blenny.fi5h.xyz")
-        #expect(ProductSupportLinks.monthlySponsor.contains("frequency=recurring"))
-        #expect(ProductSupportLinks.oneTimeSponsor.contains("frequency=one-time"))
-        #expect(ProductSupportLinks.monthlySponsor.contains("metadata_project=blenny"))
-        #expect(ProductSupportLinks.oneTimeSponsor.contains("metadata_project=blenny"))
+        #expect(
+            ProductSupportLinks.monthlySponsor
+                == "https://github.com/sponsors/f-is-h?frequency=recurring&metadata_project=blenny&metadata_source=app&metadata_placement=about"
+        )
+        #expect(
+            ProductSupportLinks.oneTimeSponsor
+                == "https://github.com/sponsors/f-is-h?frequency=one-time&metadata_project=blenny&metadata_source=app&metadata_placement=about"
+        )
         #expect(ProductSupportLinks.koFi == "https://ko-fi.com/1atte")
     }
 }

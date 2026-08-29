@@ -7,9 +7,9 @@ public enum ProductInterfaceSection: String, CaseIterable, Sendable {
 public enum ProductSupportLinks {
     public static let projectWebsite = "https://blenny.fi5h.xyz"
     public static let monthlySponsor =
-        "https://github.com/sponsors/f-is-h?frequency=recurring&metadata_project=blenny"
+        "https://github.com/sponsors/f-is-h?frequency=recurring&metadata_project=blenny&metadata_source=app&metadata_placement=about"
     public static let oneTimeSponsor =
-        "https://github.com/sponsors/f-is-h?frequency=one-time&metadata_project=blenny"
+        "https://github.com/sponsors/f-is-h?frequency=one-time&metadata_project=blenny&metadata_source=app&metadata_placement=about"
     public static let koFi = "https://ko-fi.com/1atte"
 }
 
