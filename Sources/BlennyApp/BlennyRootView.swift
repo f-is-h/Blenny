@@ -91,7 +91,7 @@ struct BlennyRootView: View {
         }
         .frame(
             minWidth: model.navigation.section == .organize ? 800 : 560,
-            minHeight: 460
+            minHeight: 410
         )
         .onChange(of: model.navigation.section) {
             boardInteraction.clearTransientPresentation()
@@ -117,10 +117,11 @@ private func debugAccessibilityFlag(_ key: String) -> Bool {
 
 private enum BlennyDesign {
     static let navigationHeight: CGFloat = 54
-    static let boardRadius: CGFloat = 14
-    static let laneHeight: CGFloat = 72
-    static let iconFrame: CGFloat = 36
-    static let itemFrame = CGSize(width: 54, height: 58)
+    static let boardRadius: CGFloat = 10
+    static let laneHeight: CGFloat = 60
+    static let iconFrame: CGFloat = 34
+    static let itemFrame = CGSize(width: 48, height: 50)
+    static let itemChromeFrame = CGSize(width: 40, height: 40)
 
     static let coral = Color(nsColor: NSColor(
         name: NSColor.Name("BlennyCoral")
@@ -135,60 +136,128 @@ private enum BlennyDesign {
 private struct ProductNavigationBar: View {
     let selection: ProductInterfaceSection
     let onSelect: (ProductInterfaceSection) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
-        GlassEffectContainer(spacing: 6) {
-            HStack(spacing: 4) {
-                ForEach(ProductInterfaceSection.allCases, id: \.self) { section in
-                    Button(action: { onSelect(section) }) {
-                        Label(section.title, systemImage: section.symbolName)
-                            .font(.system(size: 12, weight: .medium))
-                            .frame(width: 112, height: 28)
-                            .contentShape(RoundedRectangle(cornerRadius: 8))
-                            .background(
-                                selection == section
-                                    ? Color.accentColor.opacity(
-                                        effectiveContrast == .increased ? 0.25 : 0.16
-                                    )
-                                    : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 8)
-                            )
+        HStack(spacing: navigationItemSpacing) {
+            ForEach(ProductInterfaceSection.allCases, id: \.self) { section in
+                Button {
+                    withAnimation(navigationAnimation) {
+                        onSelect(section)
                     }
-                    .buttonStyle(.plain)
-                    .focusEffectDisabled()
-                    .foregroundStyle(
-                        selection == section ? Color.accentColor : Color.primary
-                    )
-                    .accessibilityValue(
-                        selection == section ? "Selected" : "Not selected"
-                    )
-                    .accessibilityAddTraits(selection == section ? .isSelected : [])
+                } label: {
+                    navigationLabel(section)
                 }
-            }
-            .padding(5)
-            .background(
-                effectiveReduceTransparency
-                    ? Color(nsColor: .controlBackgroundColor)
-                    : Color.clear,
-                in: Capsule()
-            )
-            .glassEffect(
-                effectiveReduceTransparency ? .identity : .regular.interactive(),
-                in: Capsule()
-            )
-            .overlay {
-                if effectiveContrast == .increased {
-                    Capsule().stroke(Color.primary.opacity(0.55), lineWidth: 1)
-                }
+                .buttonStyle(.plain)
+                .focusEffectDisabled()
+                .foregroundStyle(
+                    selection == section ? Color.primary : Color.secondary
+                )
+                .accessibilityValue(
+                    selection == section ? "Selected" : "Not selected"
+                )
+                .accessibilityAddTraits(selection == section ? .isSelected : [])
             }
         }
+        .padding(navigationTrackPadding)
+        .background { navigationTrack }
         .frame(maxWidth: .infinity)
         .frame(height: BlennyDesign.navigationHeight)
         .background(.bar)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Blenny section")
+    }
+
+    private var navigationTrack: some View {
+        ZStack(alignment: .leading) {
+            Capsule()
+                .fill(
+                    effectiveReduceTransparency
+                        ? Color(nsColor: .controlBackgroundColor)
+                        : Color.primary.opacity(0.045)
+                )
+
+            selectionLens
+                .offset(x: selectionLensOffset)
+                .animation(navigationAnimation, value: selection)
+        }
+        .overlay {
+            Capsule().stroke(
+                Color(nsColor: .separatorColor).opacity(
+                    effectiveContrast == .increased ? 0.9 : 0.45
+                ),
+                lineWidth: effectiveContrast == .increased ? 1.25 : 0.5
+            )
+        }
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var selectionLens: some View {
+        if effectiveReduceTransparency {
+            Capsule()
+                .fill(Color.accentColor.opacity(
+                    effectiveContrast == .increased ? 0.16 : 0.08
+                ))
+                .overlay {
+                    if effectiveContrast == .increased {
+                        Capsule().stroke(Color.accentColor, lineWidth: 1.25)
+                    }
+                }
+                .frame(width: navigationItemWidth, height: navigationItemHeight)
+        } else {
+            GlassEffectContainer(spacing: 0) {
+                Color.clear
+                    .frame(width: navigationItemWidth, height: navigationItemHeight)
+                    .glassEffect(
+                        .regular
+                            .tint(Color.accentColor.opacity(
+                                effectiveContrast == .increased ? 0.16 : 0.09
+                            )),
+                        in: Capsule()
+                    )
+            }
+            .frame(width: navigationItemWidth, height: navigationItemHeight)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func navigationLabel(
+        _ section: ProductInterfaceSection
+    ) -> some View {
+        Label(section.title, systemImage: section.symbolName)
+            .font(
+                .system(
+                    .callout,
+                    design: .default,
+                    weight: selection == section ? .medium : .regular
+                )
+            )
+            .frame(width: navigationItemWidth, height: navigationItemHeight)
+            .contentShape(Capsule())
+    }
+
+    private var selectionLensOffset: CGFloat {
+        let index = ProductInterfaceSection.allCases.firstIndex(of: selection) ?? 0
+        return navigationTrackPadding
+            + CGFloat(index) * (navigationItemWidth + navigationItemSpacing)
+    }
+
+    private var navigationItemWidth: CGFloat { 112 }
+    private var navigationItemHeight: CGFloat { 28 }
+    private var navigationItemSpacing: CGFloat { 4 }
+    private var navigationTrackPadding: CGFloat { 5 }
+
+    private var navigationAnimation: Animation {
+        effectiveReduceMotion
+            ? .easeOut(duration: 0.08)
+            : .spring(duration: 0.30, bounce: 0.06)
+    }
+
+    private var effectiveReduceMotion: Bool {
+        reduceMotion || debugAccessibilityFlag("BLENNY_VALIDATE_REDUCE_MOTION")
     }
 
     private var effectiveReduceTransparency: Bool {
@@ -213,7 +282,6 @@ private struct OrganizeView: View {
         VStack(spacing: 0) {
             VStack(spacing: 6) {
                 managementStrip
-                if model.statusIsError { statusMessage }
                 OrganizationBoard(
                     model: model,
                     actions: actions,
@@ -224,13 +292,17 @@ private struct OrganizeView: View {
                     interaction: $interaction,
                     onMove: performMove
                 )
-                Label(
-                    "Policy intent only — macOS owns physical placement · Manual observation, no polling",
-                    systemImage: "menubar.rectangle"
-                )
-                .font(.system(size: 10.5))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                if model.statusIsError {
+                    statusMessage
+                } else {
+                    Label(
+                        "Policy intent only — macOS owns physical placement · Manual observation, no polling",
+                        systemImage: "menubar.rectangle"
+                    )
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
+                }
             }
             .padding(.horizontal, 18)
             .padding(.top, 9)
@@ -250,12 +322,12 @@ private struct OrganizeView: View {
     private var managementStrip: some View {
         HStack(spacing: 10) {
             Image(systemName: managementSymbol)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(managementColor)
             Text(managementTitle)
-                .font(.system(size: 11.5, weight: .semibold))
+                .font(.system(.subheadline, weight: .medium))
             Text(managementDetail)
-                .font(.system(size: 10.5))
+                .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: 10)
@@ -274,11 +346,6 @@ private struct OrganizeView: View {
         .padding(.horizontal, 10)
         .frame(height: 31)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.46))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor))
-                .frame(height: 1)
-        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Management and recovery")
     }
@@ -386,7 +453,13 @@ private struct OrganizationBoard: View {
             VStack(spacing: 0) {
                 ForEach(Array(MenuBarBundlePolicy.allCases.enumerated()), id: \.element) {
                     index, policy in
-                    if index > 0 { Divider() }
+                    if index > 0 {
+                        Rectangle()
+                            .fill(Color(nsColor: .separatorColor).opacity(0.34))
+                            .frame(height: 0.5)
+                            .padding(.horizontal, 12)
+                            .accessibilityHidden(true)
+                    }
                     PolicyLaneRow(
                         policy: policy,
                         model: model,
@@ -426,15 +499,47 @@ private struct OrganizationBoard: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: BlennyDesign.boardRadius))
         .overlay {
-            RoundedRectangle(cornerRadius: BlennyDesign.boardRadius)
-                .stroke(
-                    Color(nsColor: .separatorColor),
-                    lineWidth: effectiveContrast == .increased ? 2 : 1
-                )
+            if effectiveContrast == .increased {
+                RoundedRectangle(cornerRadius: BlennyDesign.boardRadius)
+                    .stroke(Color.primary.opacity(0.7), lineWidth: 1.5)
+            }
         }
         .dropPreviewsFormation(.none)
+        .onDragSessionUpdated(updateDragSession)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Organization Board")
+    }
+
+    private func updateDragSession(_ session: DragSession) {
+        let identities = session.draggedItemIDs(for: PolicyDragPayload.ID.self)
+        guard identities.count == 1, let identity = identities.first else {
+            if case .ended = session.phase {
+                interaction.endDragWithoutDrop()
+            }
+            return
+        }
+
+        let animation: Animation = effectiveReduceMotion
+            ? .easeOut(duration: 0.08)
+            : .smooth(duration: 0.14, extraBounce: 0)
+        withAnimation(animation) {
+            switch session.phase {
+            case .initial, .active:
+                if interaction.draggedBundleIdentifier != identity.bundleIdentifier
+                    || interaction.draggedSourcePolicy != identity.sourcePolicy {
+                    interaction.beginDrag(
+                        bundleIdentifier: identity.bundleIdentifier,
+                        sourcePolicy: identity.sourcePolicy
+                    )
+                }
+            case .ended, .dataTransferCompleted:
+                if interaction.settleState == nil {
+                    interaction.endDragWithoutDrop()
+                }
+            @unknown default:
+                interaction.endDragWithoutDrop()
+            }
+        }
     }
 
     private var boardIsObscured: Bool {
@@ -442,8 +547,11 @@ private struct OrganizationBoard: View {
     }
 
     private var boardSurface: Color {
-        Color(nsColor: .controlBackgroundColor).opacity(
-            effectiveReduceTransparency ? 1 : 0.58
+        if effectiveReduceTransparency {
+            return Color(nsColor: .controlBackgroundColor)
+        }
+        return Color.primary.opacity(
+            effectiveContrast == .increased ? 0.06 : 0.022
         )
     }
 
@@ -476,8 +584,8 @@ private struct OrganizationBoard: View {
 
     private var permissionMessage: String {
         model.accessibilityPromptRequested
-            ? "Enable Blenny in Device Control and Data Access, then choose Refresh."
-            : "Blenny performs one bounded, read-only scan only when you choose Refresh."
+            ? "Enable Blenny in Device Control and Data Access, then return for one automatic refresh."
+            : "Choose Set Up once. After authorization, Blenny runs one bounded refresh automatically."
     }
 
     private var permissionButtonTitle: String {
@@ -512,14 +620,14 @@ private struct BoardInterruptionPanel: View {
         VStack(spacing: 8) {
             if let symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: 21, weight: .semibold))
+                    .font(.system(size: 21, weight: .regular))
                     .foregroundStyle(.orange)
             } else {
                 ProgressView().controlSize(.small)
             }
-            Text(title).font(.system(size: 13, weight: .semibold))
+            Text(title).font(.system(.body, weight: .medium))
             Text(message)
-                .font(.system(size: 10.5))
+                .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 410)
@@ -558,30 +666,26 @@ private struct PolicyLaneRow: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Rectangle()
-                .fill(policy.interfaceColor)
-                .frame(width: isValidTarget ? 4 : 3)
-                .animation(
-                    reduceMotion
-                        ? .easeOut(duration: 0.08)
-                        : .smooth(duration: 0.14, extraBounce: 0),
-                    value: isValidTarget
-                )
-                .accessibilityHidden(true)
-
             laneHeader
                 .frame(width: 154, alignment: .leading)
-                .padding(.horizontal, 10)
-
-            Divider().padding(.vertical, 9)
+                .padding(.leading, 12)
+                .padding(.trailing, 14)
 
             ScrollView(.horizontal) {
-                LazyHStack(spacing: 4) {
+                LazyHStack(spacing: 2) {
                     let candidates = model.candidates(in: policy)
-                    if candidates.isEmpty && (policy != .visible || model.systemItems.isEmpty) {
+                    if candidates.isEmpty
+                        && landingPreview == nil
+                        && (policy != .visible || model.systemItems.isEmpty) {
                         emptyState
                     } else {
-                        ForEach(candidates, id: \.bundleIdentifier) { candidate in
+                        ForEach(
+                            Array(candidates.enumerated()),
+                            id: \.element.bundleIdentifier
+                        ) { index, candidate in
+                            if landingPreview?.index == index {
+                                landingPreviewView
+                            }
                             ApplicationBoardItem(
                                 candidate: candidate,
                                 policy: policy,
@@ -594,23 +698,27 @@ private struct PolicyLaneRow: View {
                             )
                         }
 
+                        if landingPreview?.index == candidates.endIndex {
+                            landingPreviewView
+                        }
+
                         if policy == .visible, !model.systemItems.isEmpty {
                             Rectangle()
                                 .fill(Color(nsColor: .separatorColor))
-                                .frame(width: 1, height: 40)
-                                .padding(.horizontal, 4)
+                                .frame(width: 1, height: 34)
+                                .padding(.horizontal, 3)
                                 .accessibilityHidden(true)
 
                             VStack(spacing: 2) {
                                 Image(systemName: "apple.logo")
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.system(size: 13, weight: .regular))
                                 Text("macOS")
-                                    .font(.system(size: 9.5, weight: .semibold))
+                                    .font(.caption)
                                 Text("Read only")
-                                    .font(.system(size: 8.5))
+                                    .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
-                            .frame(width: 58)
+                            .frame(width: 54)
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel("macOS system items, read only")
 
@@ -625,51 +733,38 @@ private struct PolicyLaneRow: View {
                         }
                     }
                 }
-                .padding(.horizontal, 7)
+                .padding(.horizontal, 5)
                 .frame(height: BlennyDesign.laneHeight)
             }
             .scrollIndicators(.automatic)
+            .scrollEdgeEffectHidden(true, for: .all)
         }
         .frame(height: BlennyDesign.laneHeight)
+        .contentShape(Rectangle())
         .background(targetBackground)
         .overlay {
-            if activeTarget != nil {
+            if activeTarget != nil, contrast == .increased {
                 Rectangle()
                     .stroke(
                         isValidTarget ? Color.accentColor : Color.red,
-                        lineWidth: contrast == .increased ? 2 : 1.5
+                        lineWidth: 2
                     )
                     .padding(1)
                     .allowsHitTesting(false)
             }
         }
-        .dropDestination(for: PolicyDragPayload.self, isEnabled: true) { items, _ in
-            guard items.count == 1, let payload = items.first else {
-                model.setStatus("Only one application can be moved at a time.", isError: false)
+        .dropDestination(for: PolicyDragPayload.self) { payloads, session in
+            guard payloads.count == 1, let payload = payloads.first else {
+                model.setStatus(
+                    "Only one application can be moved at a time.",
+                    isError: false
+                )
                 return
             }
             onDrop(payload, policy)
         }
-        .dropConfiguration { _ in
-            DropConfiguration(operation: currentValidation == .changed ? .move : .forbidden)
-        }
-        .onDropSessionUpdated { session in
-            let animation: Animation = reduceMotion
-                ? .easeOut(duration: 0.08)
-                : .smooth(duration: 0.15, extraBounce: 0)
-            switch session.phase {
-            case .entering, .active:
-                withAnimation(animation) {
-                    interaction.target(policy: policy, validation: currentValidation)
-                }
-            case .exiting, .ended, .dataTransferCompleted:
-                withAnimation(animation) {
-                    interaction.clearTarget(policy: policy)
-                }
-            @unknown default:
-                interaction.clearTarget(policy: policy)
-            }
-        }
+        .dropConfiguration(dropConfiguration)
+        .onDropSessionUpdated(updateDropSession)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(policy.interfaceTitle), \(applicationCount) applications")
         .accessibilityHint(policy.interfaceDetail)
@@ -678,21 +773,23 @@ private struct PolicyLaneRow: View {
     private var laneHeader: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
+                Circle()
+                    .fill(policy.interfaceColor)
+                    .frame(width: 5, height: 5)
+                    .accessibilityHidden(true)
                 Text(policy.interfaceTitle)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.body)
                 Text("\(applicationCount)")
-                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1.5)
-                    .background(.quaternary, in: Capsule())
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
             }
             if let target = activeTarget {
                 targetHeader(target)
                     .transition(.opacity)
             } else {
                 Text(policy.interfaceShortDetail)
-                    .font(.system(size: 9.5))
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -701,7 +798,7 @@ private struct PolicyLaneRow: View {
 
     private var emptyState: some View {
         Label("Drop an app here or use Move to…", systemImage: "tray")
-            .font(.system(size: 10.5))
+            .font(.footnote)
             .foregroundStyle(.tertiary)
             .frame(width: 225, height: 50)
             .accessibilityLabel("No observed applications in \(policy.interfaceTitle)")
@@ -718,35 +815,122 @@ private struct PolicyLaneRow: View {
 
     private var isValidTarget: Bool { activeTarget?.isValid == true }
 
+    private struct LandingPreview {
+        let index: Int
+        let presentation: ResolvedPolicyIcon
+    }
+
+    private var landingPreview: LandingPreview? {
+        guard isValidTarget,
+              let bundleIdentifier = interaction.draggedBundleIdentifier,
+              interaction.draggedSourcePolicy != policy,
+              model.candidate(bundleIdentifier: bundleIdentifier) != nil else {
+            return nil
+        }
+        let candidates = model.candidates(in: policy)
+        return LandingPreview(
+            index: PolicyBoardLandingProjection.automaticIndex(
+                for: bundleIdentifier,
+                among: candidates.map(\.bundleIdentifier)
+            ),
+            presentation: model.applicationIcon(for: bundleIdentifier)
+        )
+    }
+
+    @ViewBuilder
+    private var landingPreviewView: some View {
+        if let preview = landingPreview {
+            PolicyLaneLandingPreview(
+                presentation: preview.presentation,
+                reduceMotion: reduceMotion,
+                contrast: contrast
+            )
+        }
+    }
+
     private var targetBackground: Color {
         guard activeTarget != nil else { return .clear }
         return isValidTarget
-            ? Color.accentColor.opacity(0.075)
-            : Color.red.opacity(0.055)
+            ? Color.accentColor.opacity(0.055)
+            : Color.red.opacity(0.035)
     }
 
-    private var currentValidation: PolicyDraftAssignmentOutcome {
-        guard let bundleIdentifier = interaction.draggedBundleIdentifier,
-              let sourcePolicy = interaction.draggedSourcePolicy else {
-            return .rejected(.unknownCandidate)
+    private func localIdentity(in session: DropSession) -> PolicyDragPayload.ID? {
+        guard session.itemsCount == 1, let localSession = session.localSession else {
+            return nil
+        }
+        let identities = localSession.draggedItemIDs(for: PolicyDragPayload.ID.self)
+        guard identities.count == 1 else { return nil }
+        return identities[0]
+    }
+
+    private func validation(
+        for identity: PolicyDragPayload.ID
+    ) -> PolicyDraftAssignmentOutcome {
+        guard identity.candidateGeneration == model.candidateGeneration else {
+            return .rejected(.staleCandidateGeneration)
         }
         return model.validateDrag(
-            bundleIdentifier: bundleIdentifier,
-            sourcePolicy: sourcePolicy,
+            bundleIdentifier: identity.bundleIdentifier,
+            sourcePolicy: identity.sourcePolicy,
             destination: policy
         )
+    }
+
+    private func dropConfiguration(_ session: DropSession) -> DropConfiguration {
+        guard session.suggestedOperations.contains(.move),
+              let identity = localIdentity(in: session),
+              validation(for: identity) == .changed else {
+            return DropConfiguration(operation: .forbidden)
+        }
+        var configuration = DropConfiguration(operation: .move)
+        configuration.acceptedItemCount = 1
+        return configuration
+    }
+
+    private func updateDropSession(_ session: DropSession) {
+        let animation: Animation = reduceMotion
+            ? .easeOut(duration: 0.08)
+            : .smooth(duration: 0.15, extraBounce: 0)
+        withAnimation(animation) {
+            switch session.phase {
+            case .entering, .active:
+                guard let identity = localIdentity(in: session) else {
+                    interaction.clearTarget(policy: policy)
+                    return
+                }
+                if interaction.draggedBundleIdentifier != identity.bundleIdentifier
+                    || interaction.draggedSourcePolicy != identity.sourcePolicy {
+                    interaction.beginDrag(
+                        bundleIdentifier: identity.bundleIdentifier,
+                        sourcePolicy: identity.sourcePolicy
+                    )
+                }
+                interaction.target(
+                    policy: policy,
+                    validation: validation(for: identity)
+                )
+            case .exiting, .ended, .dataTransferCompleted:
+                interaction.clearTarget(policy: policy)
+            @unknown default:
+                interaction.clearTarget(policy: policy)
+            }
+        }
     }
 
     @ViewBuilder
     private func targetHeader(_ target: PolicyBoardDropTarget) -> some View {
         if let rejection = target.rejection {
             Label(compactReason(for: rejection), systemImage: "nosign")
-                .font(.system(size: 9.5, weight: .medium))
+                .font(.system(.footnote, weight: .medium))
                 .foregroundStyle(.red)
                 .help(rejection.interfaceReason)
         } else {
-            Label("Release to move here", systemImage: "arrow.down.to.line.compact")
-                .font(.system(size: 9.5, weight: .medium))
+            Label(
+                "Release into \(policy.interfaceTitle)",
+                systemImage: "arrow.down.to.line.compact"
+            )
+                .font(.system(.footnote, weight: .medium))
                 .foregroundStyle(Color.accentColor)
         }
     }
@@ -757,7 +941,7 @@ private struct PolicyLaneRow: View {
         switch rejection {
         case .duplicateDelivery: "Drop already handled"
         case .staleCandidateGeneration, .staleSourcePolicy: "Start a new drag"
-        case .samePolicy: "Already in this group"
+        case .samePolicy: "No change"
         case .blennyMustRemainVisible: "Blenny stays Visible"
         case .unknownCandidate: "No longer available"
         }
@@ -771,6 +955,47 @@ private struct PolicyLaneRow: View {
         onDrop(
             model.dragPayload(bundleIdentifier: bundleIdentifier, sourcePolicy: source),
             destination
+        )
+    }
+}
+
+private struct PolicyLaneLandingPreview: View {
+    let presentation: ResolvedPolicyIcon
+    let reduceMotion: Bool
+    let contrast: ColorSchemeContrast
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 9)
+                .fill(Color.accentColor.opacity(0.075))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9)
+                        .stroke(
+                            Color.accentColor.opacity(contrast == .increased ? 0.9 : 0.5),
+                            style: StrokeStyle(
+                                lineWidth: contrast == .increased ? 2 : 1,
+                                dash: [3, 2]
+                            )
+                        )
+                }
+            Image(nsImage: presentation.image)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: BlennyDesign.iconFrame, height: BlennyDesign.iconFrame)
+                .opacity(contrast == .increased ? 0.48 : 0.32)
+        }
+        .frame(
+            width: BlennyDesign.itemChromeFrame.width,
+            height: BlennyDesign.itemChromeFrame.height
+        )
+        .frame(width: BlennyDesign.itemFrame.width, height: BlennyDesign.itemFrame.height)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .transition(
+            reduceMotion
+                ? .opacity
+                : .scale(scale: 0.94).combined(with: .opacity)
         )
     }
 }
@@ -794,42 +1019,16 @@ private struct ApplicationBoardItem: View {
         let presentation = model.applicationIcon(for: candidate.bundleIdentifier)
         let blenny = model.isBlenny(candidate.bundleIdentifier)
 
-        Group {
-            if blenny {
-                baseButton(presentation: presentation, blenny: true)
-            } else {
-                baseButton(presentation: presentation, blenny: false)
-                    .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 12))
-                    .draggable(
-                        model.dragPayload(
-                            bundleIdentifier: candidate.bundleIdentifier,
-                            sourcePolicy: policy
-                        )
-                    ) {
-                        DragPreview(presentation: presentation, policy: policy)
-                    }
-                    .dragConfiguration(Self.dragConfiguration)
-                    .onDragSessionUpdated { session in
-                        switch session.phase {
-                        case .initial, .active:
-                            withAnimation(interactionAnimation) {
-                                interaction.beginDrag(
-                                    bundleIdentifier: candidate.bundleIdentifier,
-                                    sourcePolicy: policy
-                                )
-                            }
-                        case .ended, .dataTransferCompleted:
-                            withAnimation(interactionAnimation) {
-                                if interaction.settleState == nil {
-                                    interaction.endDragWithoutDrop()
-                                }
-                            }
-                        @unknown default:
-                            break
-                        }
-                    }
-            }
-        }
+        itemSurface(
+            presentation: presentation,
+            blenny: blenny,
+            dragPayload: blenny
+                ? nil
+                : model.dragPayload(
+                    bundleIdentifier: candidate.bundleIdentifier,
+                    sourcePolicy: policy
+                )
+        )
         .contextMenu {
             if !blenny {
                 MoveToCommands(
@@ -855,67 +1054,128 @@ private struct ApplicationBoardItem: View {
         .zIndex(showsName ? 20 : isSelected ? 10 : 0)
     }
 
-    private func baseButton(
+    private func itemSurface(
         presentation: ResolvedPolicyIcon,
-        blenny: Bool
+        blenny: Bool,
+        dragPayload: PolicyDragPayload?
     ) -> some View {
-        Button {
-            withAnimation(interactionAnimation) {
-                interaction.select(itemID)
+        let inputSurface = AnyView(
+            itemArtwork(
+                presentation: presentation,
+                blenny: blenny,
+                dragPayload: dragPayload
+            )
+            .onTapGesture(perform: select)
+            .focusable()
+            .focusEffectDisabled()
+            .focused($isFocused)
+            .onKeyPress(keys: [.return, .space], action: handleSelectionKey)
+        )
+        let visualSurface = AnyView(
+            inputSurface
+            .opacity(isDragSource ? 0.28 : 1)
+            .scaleEffect(isDragSource && !effectiveReduceMotion ? 0.96 : 1)
+            .animation(interactionAnimation, value: isDragSource)
+            .onChange(of: isFocused) {
+                withAnimation(.easeOut(duration: 0.10)) {
+                    interaction.setFocused(itemID, isFocused: isFocused)
+                }
             }
-        } label: {
-            policyIcon(presentation: presentation)
-                .frame(width: BlennyDesign.itemFrame.width, height: BlennyDesign.itemFrame.height)
-                .contentShape(RoundedRectangle(cornerRadius: 11))
-                .background(itemBackground, in: RoundedRectangle(cornerRadius: 11))
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.10)) {
+                    interaction.setHovered(itemID, isHovered: hovering)
+                }
+            }
+        )
+        return AnyView(
+            visualSurface
+                .help(tooltip(for: presentation, blenny: blenny))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    accessibilityLabel(for: presentation, blenny: blenny)
+                )
+                .accessibilityHint(
+                    blenny
+                        ? "Select for details. Blenny must remain Visible."
+                        : "Select for details. Drag between groups or use a Move to action."
+                )
+                .accessibilityValue(isSelected ? "Selected" : "Not selected")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityAction(.default) {
+                    select()
+                }
+        )
+    }
+
+    private func itemArtwork(
+        presentation: ResolvedPolicyIcon,
+        blenny: Bool,
+        dragPayload: PolicyDragPayload?
+    ) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 9)
+                .fill(itemBackground)
+                .frame(
+                    width: BlennyDesign.itemChromeFrame.width,
+                    height: BlennyDesign.itemChromeFrame.height
+                )
                 .overlay {
-                    RoundedRectangle(cornerRadius: 11)
+                    RoundedRectangle(cornerRadius: 9)
                         .stroke(itemOutline, lineWidth: itemOutlineWidth)
                 }
-                .overlay(alignment: .topTrailing) {
-                    if blenny {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 7.5, weight: .bold))
-                            .foregroundStyle(BlennyDesign.coral)
-                            .padding(4)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .overlay(alignment: .bottom) {
-                    if showsName {
-                        FloatingItemName(name: presentation.displayName)
-                            .offset(y: 5)
-                            .transition(.opacity)
-                    }
-                }
+            draggableIcon(
+                presentation: presentation,
+                payload: dragPayload
+            )
         }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .focused($isFocused)
-        .opacity(isDragSource ? 0.28 : 1)
-        .scaleEffect(isDragSource && !effectiveReduceMotion ? 0.96 : 1)
-        .animation(interactionAnimation, value: isDragSource)
-        .onChange(of: isFocused) {
-            withAnimation(.easeOut(duration: 0.10)) {
-                interaction.setFocused(itemID, isFocused: isFocused)
+        .frame(width: BlennyDesign.itemFrame.width, height: BlennyDesign.itemFrame.height)
+        .contentShape(RoundedRectangle(cornerRadius: 9))
+        .overlay(alignment: .topTrailing) {
+            if blenny {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundStyle(BlennyDesign.coral)
+                    .padding(3)
+                    .accessibilityHidden(true)
             }
         }
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.10)) {
-                interaction.setHovered(itemID, isHovered: hovering)
+        .overlay(alignment: .bottom) {
+            if showsName {
+                FloatingItemName(name: presentation.displayName)
+                    .offset(y: 5)
+                    .transition(.opacity)
             }
         }
-        .help(tooltip(for: presentation, blenny: blenny))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel(for: presentation, blenny: blenny))
-        .accessibilityHint(
-            blenny
-                ? "Select for details. Blenny must remain Visible."
-                : "Select for details. Drag between groups or use a Move to action."
-        )
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func draggableIcon(
+        presentation: ResolvedPolicyIcon,
+        payload: PolicyDragPayload?
+    ) -> some View {
+        if let payload {
+            policyIcon(presentation: presentation)
+                .contentShape(
+                    .dragPreview,
+                    RoundedRectangle(cornerRadius: 8)
+                )
+                .draggable(item: payload)
+                .dragConfiguration(DragConfiguration(allowMove: true))
+        } else {
+            policyIcon(presentation: presentation)
+        }
+    }
+
+    private func select() {
+        withAnimation(interactionAnimation) {
+            interaction.select(itemID)
+        }
+    }
+
+    private func handleSelectionKey(_ keyPress: KeyPress) -> KeyPress.Result {
+        select()
+        return .handled
     }
 
     @ViewBuilder
@@ -943,7 +1203,7 @@ private struct ApplicationBoardItem: View {
     }
 
     private var itemBackground: Color {
-        if isSelected { return Color.accentColor.opacity(0.14) }
+        if isSelected { return Color.accentColor.opacity(0.07) }
         if isFocused || interaction.hoveredItem == itemID {
             return Color.primary.opacity(0.055)
         }
@@ -954,14 +1214,14 @@ private struct ApplicationBoardItem: View {
         if interaction.settleState?.bundleIdentifier == candidate.bundleIdentifier {
             return BlennyDesign.coral
         }
-        if isSelected { return Color.accentColor }
         if isFocused { return Color.primary.opacity(0.72) }
+        if contrast == .increased && isSelected { return Color.accentColor }
         return .clear
     }
 
     private var itemOutlineWidth: CGFloat {
         if contrast == .increased && (isSelected || isFocused) { return 2 }
-        return (isSelected || isFocused
+        return (isFocused
             || interaction.settleState?.bundleIdentifier == candidate.bundleIdentifier) ? 1.5 : 0
     }
 
@@ -997,61 +1257,6 @@ private struct ApplicationBoardItem: View {
         return "\(presentation.displayName), Policy: \(policy.interfaceTitle), Bundle ID: \(candidate.bundleIdentifier), \(count) menu bar \(itemWord), \(editability), \(iconSource)"
     }
 
-    private static let dragConfiguration = DragConfiguration(
-        operationsWithinApp: .init(
-            allowCopy: false,
-            allowMove: true,
-            allowDelete: false
-        ),
-        operationsOutsideApp: .init(
-            allowCopy: false,
-            allowMove: false,
-            allowDelete: false
-        )
-    )
-}
-
-private struct DragPreview: View {
-    let presentation: ResolvedPolicyIcon
-    let policy: MenuBarBundlePolicy
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(nsImage: presentation.image)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(width: 36, height: 36)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(presentation.displayName)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .lineLimit(1)
-                Text("Move from \(policy.interfaceTitle)")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
-        .frame(maxWidth: 220)
-        .background(
-            effectiveReduceTransparency
-                ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
-                : AnyShapeStyle(.regularMaterial),
-            in: RoundedRectangle(cornerRadius: 12)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
-    }
-
-    private var effectiveReduceTransparency: Bool {
-        reduceTransparency
-            || debugAccessibilityFlag("BLENNY_VALIDATE_REDUCE_TRANSPARENCY")
-    }
 }
 
 private struct FloatingItemName: View {
@@ -1091,6 +1296,29 @@ private struct FloatingItemName: View {
     }
 }
 
+private struct NaturalAspectSystemIcon: View {
+    let presentation: ResolvedPolicyIcon
+    let pointSize: CGFloat
+    let frame: CGSize
+
+    var body: some View {
+        Group {
+            if let symbolName = presentation.descriptor.symbolName {
+                Image(systemName: symbolName)
+                    .font(.system(size: pointSize, weight: .regular))
+                    .symbolRenderingMode(.monochrome)
+            } else {
+                Image(nsImage: presentation.image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+            }
+        }
+        .frame(width: frame.width, height: frame.height)
+        .foregroundStyle(.primary)
+    }
+}
+
 private struct SystemBoardItem: View {
     let observation: SystemMenuBarItemObservation
     @ObservedObject var model: ProductInterfaceModel
@@ -1105,66 +1333,108 @@ private struct SystemBoardItem: View {
 
     var body: some View {
         let presentation = model.systemIcon(for: observation)
-        Button {
-            withAnimation(interactionAnimation) {
-                interaction.select(itemID)
-            }
-        } label: {
-            Image(nsImage: presentation.image)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(maxWidth: 31, maxHeight: 27)
-                .frame(width: BlennyDesign.itemFrame.width, height: BlennyDesign.itemFrame.height)
-                .contentShape(RoundedRectangle(cornerRadius: 11))
-                .background(itemBackground, in: RoundedRectangle(cornerRadius: 11))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 11)
-                        .stroke(itemOutline, lineWidth: itemOutlineWidth)
-                }
-                .overlay(alignment: .topTrailing) {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 7.5, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .padding(4)
-                        .accessibilityHidden(true)
-                }
-                .overlay(alignment: .bottom) {
-                    if showsName {
-                        FloatingItemName(name: presentation.displayName)
-                            .offset(y: 5)
-                            .transition(.opacity)
+        systemItemSurface(presentation: presentation)
+            .zIndex(showsName ? 20 : isSelected ? 10 : 0)
+    }
+
+    private func systemItemSurface(
+        presentation: ResolvedPolicyIcon
+    ) -> some View {
+        let inputSurface = AnyView(
+            systemArtwork(presentation: presentation)
+                .onTapGesture(perform: select)
+                .focusable()
+                .focusEffectDisabled()
+                .focused($isFocused)
+                .onKeyPress(
+                    keys: [.return, .space],
+                    action: handleSelectionKey
+                )
+        )
+        let hoverSurface = AnyView(
+            inputSurface
+                .onChange(of: isFocused) {
+                    withAnimation(.easeOut(duration: 0.10)) {
+                        interaction.setFocused(itemID, isFocused: isFocused)
                     }
                 }
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.10)) {
+                        interaction.setHovered(itemID, isHovered: hovering)
+                    }
+                }
+        )
+        return AnyView(
+            hoverSurface
+                .help(tooltip(for: presentation))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(accessibilityLabel(for: presentation))
+                .accessibilityHint(
+                    "Select for details. This macOS item is read only."
+                )
+                .accessibilityValue(isSelected ? "Selected" : "Not selected")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityAction(.default) {
+                    select()
+                }
+        )
+    }
+
+    private func systemArtwork(
+        presentation: ResolvedPolicyIcon
+    ) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 9)
+                .fill(itemBackground)
+                .frame(
+                    width: BlennyDesign.itemChromeFrame.width,
+                    height: BlennyDesign.itemChromeFrame.height
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9)
+                        .stroke(itemOutline, lineWidth: itemOutlineWidth)
+                }
+            NaturalAspectSystemIcon(
+                presentation: presentation,
+                pointSize: 21,
+                frame: CGSize(width: 29, height: 25)
+            )
         }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .focused($isFocused)
-        .onChange(of: isFocused) {
-            withAnimation(.easeOut(duration: 0.10)) {
-                interaction.setFocused(itemID, isFocused: isFocused)
+        .frame(width: BlennyDesign.itemFrame.width, height: BlennyDesign.itemFrame.height)
+        .contentShape(RoundedRectangle(cornerRadius: 9))
+        .overlay(alignment: .topTrailing) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 7.5, weight: .bold))
+                .foregroundStyle(.secondary)
+                .padding(3)
+                .accessibilityHidden(true)
+        }
+        .overlay(alignment: .bottom) {
+            if showsName {
+                FloatingItemName(name: presentation.displayName)
+                    .offset(y: 5)
+                    .transition(.opacity)
             }
         }
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.10)) {
-                interaction.setHovered(itemID, isHovered: hovering)
-            }
+    }
+
+    private func select() {
+        withAnimation(interactionAnimation) {
+            interaction.select(itemID)
         }
-        .help(tooltip(for: presentation))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel(for: presentation))
-        .accessibilityHint("Select for details. This macOS item is read only.")
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .zIndex(showsName ? 20 : isSelected ? 10 : 0)
+    }
+
+    private func handleSelectionKey(_ keyPress: KeyPress) -> KeyPress.Result {
+        select()
+        return .handled
     }
 
     private var isSelected: Bool { interaction.selectedItem == itemID }
     private var showsName: Bool { interaction.namePresentationItem == itemID }
 
     private var itemBackground: Color {
-        if isSelected { return Color.accentColor.opacity(0.14) }
+        if isSelected { return Color.accentColor.opacity(0.07) }
         if isFocused || interaction.hoveredItem == itemID {
             return Color.primary.opacity(0.055)
         }
@@ -1172,14 +1442,14 @@ private struct SystemBoardItem: View {
     }
 
     private var itemOutline: Color {
-        if isSelected { return Color.accentColor }
         if isFocused { return Color.primary.opacity(0.72) }
+        if contrast == .increased && isSelected { return Color.accentColor }
         return .clear
     }
 
     private var itemOutlineWidth: CGFloat {
         if contrast == .increased && (isSelected || isFocused) { return 2 }
-        return (isSelected || isFocused) ? 1.5 : 0
+        return isFocused ? 1.5 : 0
     }
 
     private var interactionAnimation: Animation {
@@ -1227,7 +1497,6 @@ private struct SelectionDetailRail: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 42)
-        .overlay(alignment: .top) { Divider() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Selection details")
     }
@@ -1245,7 +1514,7 @@ private struct SelectionDetailRail: View {
                     .frame(width: 24, height: 24)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(presentation.displayName)
-                        .font(.system(size: 11.5, weight: .semibold))
+                        .font(.system(.subheadline, weight: .medium))
                         .lineLimit(1)
                     Text(applicationDetail(candidate, policy: policy, presentation: presentation))
                         .font(.system(size: 9.5))
@@ -1264,13 +1533,14 @@ private struct SelectionDetailRail: View {
         case .systemItem(let observationIdentifier):
             if let observation = model.systemItem(observationIdentifier: observationIdentifier) {
                 let presentation = model.systemIcon(for: observation)
-                Image(nsImage: presentation.image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 22, height: 22)
+                NaturalAspectSystemIcon(
+                    presentation: presentation,
+                    pointSize: 17,
+                    frame: CGSize(width: 22, height: 22)
+                )
                 VStack(alignment: .leading, spacing: 1) {
                     Text(presentation.displayName)
-                        .font(.system(size: 11.5, weight: .semibold))
+                        .font(.system(.subheadline, weight: .medium))
                     Text("\(observation.ownerBundleIdentifier) · \(observation.observationCount) observed · macOS group")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.secondary)
@@ -1422,7 +1692,7 @@ private struct ObservationAndDraftFooter: View {
 
     private var refreshHelp: String {
         if !model.accessibilityTrusted {
-            return "Recheck Accessibility and run the bounded observation if permission is now granted."
+            return "Grant Accessibility, then return to Blenny for one automatic refresh."
         }
         if model.hasDraftChanges {
             return "Refresh is unavailable while a local draft is present."
@@ -1516,10 +1786,10 @@ private struct SettingsView: View {
 
     private var permissionDescription: String {
         if model.accessibilityTrusted {
-            return "Used only for a bounded, read-only observation when you choose Refresh."
+            return "Used for one bounded observation after authorization, then only when you choose Refresh."
         }
         if model.accessibilityPromptRequested {
-            return "Enable Blenny in Device Control and Data Access. The system prompt will not repeat."
+            return "Enable Blenny, then return for one bounded automatic refresh. The prompt will not repeat."
         }
         return "Permission is requested only after you explicitly choose Set Up."
     }
@@ -1548,9 +1818,9 @@ private struct SupportView: View {
                     .accessibilityLabel("Blenny application icon")
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Blenny")
-                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .font(.system(.title2, design: .rounded, weight: .medium))
                     Text("Version \(applicationVersion) · A quiet home for menu bar icons.")
-                        .font(.system(size: 11))
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Button(action: actions.openProjectWebsite) {
                         Label("Open Project Website", systemImage: "arrow.up.right.square")
@@ -1563,7 +1833,7 @@ private struct SupportView: View {
             ProductPageSection(title: "Support Blenny", systemImage: "heart") {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("The complete default interface is part of Blenny. If the project is useful to you, you can support its continued development.")
-                        .font(.system(size: 11))
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
@@ -1600,9 +1870,9 @@ private struct ProductPageHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 26, weight: .semibold))
+                .font(.largeTitle)
             Text(subtitle)
-                .font(.system(size: 12))
+                .font(.callout)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1627,7 +1897,7 @@ private struct ProductPageSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(.callout, weight: .medium))
                 .foregroundStyle(.secondary)
             Divider()
             content
@@ -1657,9 +1927,9 @@ private struct SettingsGridRow<Title: View, Detail: View, Control: View>: View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 title
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(.callout, weight: .medium))
                 detail
-                    .font(.system(size: 10.5))
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1686,9 +1956,9 @@ private struct PolicyReviewView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(presentation.title)
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(.title2, weight: .medium))
                     Text("Review the exact diff, impact, validation, and recovery plan.")
-                        .font(.system(size: 10.5))
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)

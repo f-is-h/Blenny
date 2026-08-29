@@ -1,6 +1,7 @@
 import AppKit
 import BlennyCore
 import Combine
+import QuartzCore
 import SwiftUI
 
 @MainActor
@@ -551,10 +552,10 @@ final class ProductInterfaceModel: ObservableObject {
 
 @MainActor
 final class PolicyEditorWindowController: NSWindowController {
-    private static let organizePreferredContentSize = NSSize(width: 980, height: 460)
-    private static let organizeMinimumContentSize = NSSize(width: 800, height: 460)
-    private static let compactPreferredContentSize = NSSize(width: 680, height: 500)
-    private static let compactMinimumContentSize = NSSize(width: 560, height: 460)
+    private static let organizePreferredContentSize = NSSize(width: 980, height: 410)
+    private static let organizeMinimumContentSize = NSSize(width: 800, height: 410)
+    private static let compactPreferredContentSize = NSSize(width: 680, height: 410)
+    private static let compactMinimumContentSize = NSSize(width: 560, height: 410)
     #if DEBUG
     private static let minimumSizeValidationEnvironmentKey =
         "BLENNY_VALIDATE_MINIMUM_WINDOW_SIZE"
@@ -804,10 +805,9 @@ final class PolicyEditorWindowController: NSWindowController {
         let minimumContentSize = Self.minimumContentSize(for: section)
         let preferredContentSize = Self.preferredContentSize(for: section)
         let oldFrame = window.frame
-        let currentHeight = window.contentLayoutRect.height
         let targetContentSize = NSSize(
             width: preferredContentSize.width,
-            height: max(minimumContentSize.height, currentHeight)
+            height: preferredContentSize.height
         )
         var contentRect = window.contentRect(forFrameRect: oldFrame)
         contentRect.size = targetContentSize
@@ -815,7 +815,33 @@ final class PolicyEditorWindowController: NSWindowController {
         newFrame.origin.x = oldFrame.origin.x
         newFrame.origin.y = oldFrame.maxY - newFrame.height
         window.contentMinSize = minimumContentSize
-        window.setFrame(newFrame, display: true)
+        if effectiveReduceMotion {
+            window.setFrame(newFrame, display: true)
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.30
+                context.timingFunction = CAMediaTimingFunction(
+                    controlPoints: 0.25,
+                    0.10,
+                    0.25,
+                    1.00
+                )
+                window.animator().setFrame(newFrame, display: true)
+            }
+        }
+    }
+
+    private var effectiveReduceMotion: Bool {
+        let systemPrefersReducedMotion = NSWorkspace.shared
+            .accessibilityDisplayShouldReduceMotion
+        #if DEBUG
+        let debugPrefersReducedMotion = ProcessInfo.processInfo.environment[
+            "BLENNY_VALIDATE_REDUCE_MOTION"
+        ] == "YES"
+        return systemPrefersReducedMotion || debugPrefersReducedMotion
+        #else
+        return systemPrefersReducedMotion
+        #endif
     }
 
     private static func preferredContentSize(

@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let inventory = AccessibilityInventory()
     private var isRefreshing = false
+    private var lastKnownAccessibilityTrust: Bool?
     private var persistentStore: PersistentBundlePolicyStore?
     private var interfaceStore: PolicyInterfaceStore?
     private var editingCore: PolicyEditingCore?
@@ -97,8 +98,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        let previouslyTrusted = lastKnownAccessibilityTrust
         updatePermissionPresentation()
         updateLaunchAtLoginPresentation()
+        let shouldRefreshAfterGrant = AccessibilityPermissionRefreshPolicy.shouldRefresh(
+            previouslyTrusted: previouslyTrusted,
+            isTrusted: lastKnownAccessibilityTrust == true,
+            isRefreshing: isRefreshing,
+            hasDraftChanges: editorModel?.hasDraftChanges == true
+        )
+        if shouldRefreshAfterGrant {
+            refresh()
+        } else if previouslyTrusted == false,
+                  lastKnownAccessibilityTrust == true,
+                  editorModel?.hasDraftChanges == true {
+            editorWindowController.setStatus(
+                "Accessibility is granted. Review or discard the local Draft before refreshing.",
+                isError: false
+            )
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -156,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updatePermissionPresentation()
         guard AccessibilityAuthorization.isTrusted else {
             editorWindowController.setStatus(
-                "Enable Accessibility, then choose Refresh. No menu bar scan has run.",
+                "Enable Accessibility, then return to Blenny. One bounded refresh will run automatically.",
                 isError: false
             )
             return
@@ -443,13 +461,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defaults.set(true, forKey: Self.accessibilityPromptRequestedKey)
             _ = AccessibilityAuthorization.requestSystemPrompt()
             editorWindowController.setStatus(
-                "The one-time system prompt was requested. Enable Blenny, then return and choose Refresh.",
+                "The one-time system prompt was requested. Enable Blenny, then return for one automatic refresh.",
                 isError: false
             )
         case .openSystemSettings:
             openAccessibilitySettings()
             editorWindowController.setStatus(
-                "The system prompt will not be repeated. Enable Blenny in Device Control and Data Access, then choose Refresh.",
+                "The system prompt will not be repeated. Enable Blenny, then return for one automatic refresh.",
                 isError: false
             )
         }
@@ -487,6 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updatePermissionPresentation() {
         let trusted = AccessibilityAuthorization.isTrusted
+        lastKnownAccessibilityTrust = trusted
         let requested = UserDefaults.standard.bool(
             forKey: Self.accessibilityPromptRequestedKey
         )

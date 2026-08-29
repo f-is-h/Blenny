@@ -2,7 +2,7 @@
 
 > Engineering and design contract for one independently reviewable interaction milestone.
 
-Status: **Complete locally on macOS 27.0 build `27A5237l`; owner evidence confirmation and the local annotated tag remain pending.**
+Status: **Complete on macOS 27.0 build `27A5237l`; release-audited and closed at local annotated tag `v0.4.0`, push deferred.**
 
 Last updated: 2026-08-29
 
@@ -19,11 +19,11 @@ The owner approved Direction A, **Peek Rail**, after comparing three complete vi
 - Keep one retained product window with `Organize`, `Settings`, and `Support` top-level navigation below the title bar.
 - Keep the three horizontal `Visible`, `Revealable`, and `Hidden` regions as the product's visual and functional center.
 - Treat a policy assignment as application-bundle intent, never status-item order.
-- Keep each lane a single horizontally scrolling row. Do not wrap, reorder within a lane, display an insertion position, or suggest physical menu-bar order.
+- Keep each lane a single horizontally scrolling row. Do not wrap, reorder within a lane, display a pointer-selected insertion position, or suggest physical menu-bar order. A valid cross-lane target may preview the destination produced by the existing automatic stable ordering; that preview is not movable and carries no order semantics.
 - Dragging changes only the local `BundlePolicyDraft`. One accepted cross-lane drop produces at most one assignment.
 - Do not persist a draft, create an assertion, or mutate menu-bar system state during drag, drop, keyboard movement, discard, or visual acceptance.
 - Blenny remains locked in `Visible`. Apple system items remain read-only, non-draggable, and outside the bundle draft.
-- Keep manual Refresh, the missing-permission interruption, bounded refreshing interruption, Open at Login, management and recovery Review, close, reopen, Quit, and restoration behavior stable.
+- Keep manual Refresh, the missing-permission interruption, bounded refreshing interruption, Open at Login, management and recovery Review, close, reopen, Quit, and restoration behavior stable. A false-to-true Accessibility transition may trigger one bounded refresh when Blenny becomes active; this is an onboarding completion event, not recurring automatic observation.
 - Keep management status truthful. A stopped persisted state may be visually quieter but cannot be hidden or described as active.
 - Do not add Screen Recording, menu-bar pixel capture, polling, automatic reconciliation, helper or IPC processes, lifecycle expansion, global shortcuts, profiles, themes, paid appearance, or decorative animation infrastructure.
 
@@ -33,9 +33,9 @@ The interface should feel like a native macOS utility whose one memorable elemen
 
 Direction A deliberately removes the three independent rounded cards from `0.3.0`. The replacement is one continuous board with:
 
-- one adaptive outer surface and outline;
+- one quiet adaptive outer surface, with a dedicated outline only under Increase Contrast;
 - two internal separators;
-- one narrow semantic rail for each policy;
+- one compact semantic marker for each policy;
 - stable row heights and fixed lane headers;
 - borderless icon positions with no persistent name row;
 - one trailing, separated macOS read-only group in `Visible`.
@@ -72,11 +72,12 @@ These are implementation constants, not a switchable theme system.
 - Base spacing rhythm: 4, 6, 8, 12, 16, 20, and 24 points.
 - Page edge: 20 points preferred, 16 points minimum.
 - Navigation band: one fixed 54-point band in every route.
-- Organization Board corner radius: 14 points.
-- Board outline: 1 point normally, 2 points under Increase Contrast.
-- Lane semantic rail: 3 points normally, 4 points while a valid destination is active.
-- Icon image frame: 34 to 38 points without coercing natural-aspect Apple symbols into square artwork.
-- Icon interaction frame: at least 52 by 52 points, with stable geometry in every state.
+- Organization Board corner radius: 10 points, applied once to the complete board rather than to individual lanes.
+- Board outline: none in standard contrast; 1.5 points under Increase Contrast.
+- Lane semantic marker: one 5-point adaptive policy dot; valid-destination emphasis belongs to the lane wash and landing ghost rather than a heavier side rail.
+- Lane height: 60 points, with quiet half-point internal separators and no duplicate external rules from the adjacent management or selection surfaces.
+- Icon image frame: 34 points for applications, with smaller natural-aspect Apple symbols rather than square artwork.
+- Icon interaction frame: 48 by 50 points, with stable geometry in every state. Visible hover, focus, selection, and settle chrome is limited to a centered 40-point square so the reliable interaction target does not read as oversized padding. Application artwork is never recolored; persistent selection uses a restrained accent wash, adding a tight accent outline only under Increase Contrast.
 - Transient label width: system-font measured, clamped to 52 through 180 points, with one truncated line and full detail in Help and selection detail.
 - Control radius: native system value where available; otherwise one fixed 8-point radius.
 
@@ -84,8 +85,8 @@ These are implementation constants, not a switchable theme system.
 
 The retained AppKit window preserves its existing top-left anchor when changing route or preferred size.
 
-- Organize preferred content size remains approximately 980 by 460 points; minimum remains 800 by 460 points.
-- Settings and Support remain approximately 680 by 500 points; minimum remains 560 by 460 points.
+- Organize preferred content size is approximately 980 by 410 points; minimum is 800 by 410 points. Route changes restore the destination's preferred height while preserving the window's top-left anchor, preventing compact Board density from leaving a blank lower band. The error message reuses the fixed policy-note row instead of inserting vertical content, so failures do not shift or clip the Board.
+- Settings and Support remain approximately 680 by 410 points; minimum is 560 by 410 points.
 - Settings and Support always share the same width.
 - Normal routes have no page-level vertical scroll view. Review retains bounded scrolling for deterministic report content.
 - Switching routes clears transient hover, drag, drop-target, and settle presentation state. It preserves the local draft until explicit Discard or successful existing Apply behavior changes it.
@@ -147,10 +148,11 @@ Help always exposes the complete name, bundle ID or observation ID, count, polic
 - Default: full-color application icon or semantic Apple symbol, no name, no border, stable interaction frame.
 - Hover: quiet background wash and the coordinated floating label.
 - Keyboard focus: native focus affordance plus the same floating-label contract.
-- Selected: a clear but restrained selection ring and complete selection detail.
-- Drag source: the original frame remains as a low-opacity ghost; the system drag preview carries the icon and one compact name label.
-- Valid destination: the entire lane receives a pale semantic wash, stronger semantic rail, outline, and a short `Move to …` label.
-- Invalid destination: system forbidden operation plus a symbol-and-label explanation. No shake, flashing, or color-only state.
+- Selected: a restrained accent wash and complete selection detail, with a tight accent outline under Increase Contrast.
+- Drag source: the original frame remains as a low-opacity ghost; the system drag preview carries only the application icon with its transparent artwork bounds and no Blenny background, label, border, corner treatment, or shadow.
+- Valid destination: the lane receives a pale semantic wash, a short `Move to …` label, and a lightweight ghost at the resolved automatic landing position. The ghost cannot be positioned horizontally and does not imply lane ordering.
+- Same-lane destination: neutral no-op with no custom error outline or warning copy. The system refuses the unchanged drop and the source returns naturally.
+- Other invalid destination: system forbidden operation plus a restrained symbol-and-label explanation. No full-row warning outline in standard contrast, shake, flashing, or color-only state.
 - Settling: the source ghost resolves toward the destination when both endpoints are onscreen, followed by one short destination confirmation ring.
 - Locked Blenny: a small coral lock marker in `Visible`; it remains selectable but has no drag source and no move action.
 - Read-only system item: selectable for detail, never draggable, and has no move action.
@@ -202,6 +204,7 @@ The system owns pointer tracking, drag preview movement, operation cursor, cance
 - Floating name: 100 to 120 milliseconds, opacity with at most 2 points of vertical travel.
 - Source ghost: `.smooth(duration: 0.14)`.
 - Destination enter and exit: `.smooth(duration: 0.14...0.16)`.
+- Automatic landing ghost: the same destination transition, using scale and opacity without pointer-relative insertion movement.
 - Successful onscreen cross-lane settle: `.smooth(duration: 0.22...0.24, extraBounce: 0)`.
 - Completion ring: approximately 160 milliseconds, ease-out opacity.
 - Invalid state: approximately 100 milliseconds, outline and opacity only.
@@ -249,6 +252,7 @@ After the first changed assignment:
 
 - The stopped-management presentation remains honest and is visually reduced to one compact status strip with the existing recovery action path.
 - Missing Accessibility replaces board interaction with one unified authorization interruption. It does not obscure the route navigation or duplicate prompts.
+- When Accessibility changes from not trusted to trusted and Blenny becomes active, one event-driven bounded refresh runs automatically. A launch with existing authorization, repeated activation, an active refresh, or a local Draft cannot trigger this path. Later observation remains manual; no timer, polling, retry loop, or reconciliation is added.
 - Active manual Refresh dims and disables the board, clears drag and target presentation, and presents one centered bounded progress group.
 - Refresh completion does not silently apply, discard, or reinterpret an existing draft.
 - Errors occupy a stable message region, use system red with a symbol and recovery action where available, and never shift lane geometry.
@@ -276,7 +280,8 @@ The approved contract is implemented without a dependency or a custom dragging e
 
 - `PolicyDragPayload` is a local `Codable`, `Transferable` bundle assignment using one exported Blenny UTI, source policy, candidate-generation UUID, and unique delivery token.
 - `PolicyDraftAssignmentCoordinator` owns validation and idempotency. It consumes a token only after `PolicyEditorViewModel.assign` changes the Draft; same-lane and forbidden attempts do not consume a current drag.
-- `PolicyBoardInteractionState` owns selection, hover, focus, drag source, destination, and settle presentation independently from accepted policy and persistence.
+- `PolicyBoardInteractionState` owns selection, hover, focus, drag source, destination, and settle presentation independently from accepted policy and persistence. Same-lane validation deliberately produces no custom target presentation.
+- `PolicyBoardLandingProjection` computes a presentation-only ghost index from the existing stable bundle-identifier order. It does not mutate, persist, or expose within-lane order.
 - `OrganizationBoard` uses native `draggable`, `DragConfiguration`, `dropDestination`, `dropConfiguration`, drag/drop session callbacks, `.smooth(..., extraBounce: 0)`, and enhancement-only `matchedGeometryEffect`.
 - `Move to…`, context-menu commands, and Accessibility custom actions call the same coordinator. There is no parallel keyboard or VoiceOver mutation path.
 - `AppDelegate` receives only the updated local editor model. Review creates the existing deterministic preview with an expanded validation scope and rejects the result if the source Draft changed while asynchronous preparation was in flight.
@@ -295,10 +300,11 @@ Core and presentation tests must cover at least:
 - discard restoring the accepted draft and Blenny invariant;
 - Review Changes using the existing deterministic preview boundary without persistence or assertion creation;
 - names hidden at rest and exposed for hover, focus, selection detail, Help, and Accessibility projection;
-- target-state and completion-state reducers, including route change, refresh, discard, and interrupted animation cleanup;
+- target-state, neutral same-lane handling, automatic landing projection, and completion-state reducers, including route change, refresh, discard, and interrupted animation cleanup;
 - stable candidate ordering, single-row lanes, empty lanes, fallback items, long names, multiple counts, and read-only macOS grouping;
 - Light, Dark, Increase Contrast, Reduce Transparency, and Reduce Motion presentation projection;
-- unchanged permission, manual Refresh, Open at Login, management, recovery, navigation, close, reopen, Quit, and restoration state.
+- unchanged permission, manual Refresh, Open at Login, management, recovery, navigation, close, reopen, Quit, and restoration state;
+- one permission-transition refresh, with deterministic rejection for initial trusted state, repeated activation, active refresh, and local Draft;
 
 Installed visual and interaction review must exercise:
 
@@ -311,7 +317,7 @@ Installed visual and interaction review must exercise:
 - complete keyboard and VoiceOver cross-lane assignment;
 - Light, Dark, Increase Contrast, Reduce Transparency, and Reduce Motion;
 - stable navigation padding, compact route widths, Organize width, and top-left window position;
-- no real assertion write, mutable Apple system action, menu-bar pixel capture, Screen Recording request, polling, or automatic refresh.
+- no real assertion write, mutable Apple system action, menu-bar pixel capture, Screen Recording request, polling, or recurring automatic refresh.
 
 Use Xcode 27 and the macOS 27 SDK explicitly for Debug and Release tests and application builds. Install the Debug app for final acceptance. Store screenshots, logs, test artifacts, and state copies only under ignored `LocalData/`. Preserve and compare the accepted policy, scoped recovery backup, management state, Accessibility state, and login-item state before and after installed validation.
 
@@ -331,14 +337,14 @@ Use Xcode 27 and the macOS 27 SDK explicitly for Debug and Release tests and app
 
 The completed implementation was verified on 2026-08-29 with `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`, Xcode 27.0 build `27A5237l`, and the macOS 27.0 SDK:
 
-- Debug: 134 tests in 18 suites passed.
-- Release: 132 tests in 17 suites passed. Debug-only assessment and visual-fixture surfaces were absent, as intended.
+- Debug: 137 tests in 18 suites passed.
+- Release: 135 tests in 17 suites passed. Debug-only assessment and visual-fixture surfaces were absent, as intended.
 - Debug and Release application bundles built successfully as ad-hoc-signed arm64 Mach-O applications with bundle identifier `xyz.fi5h.blenny`, short version `0.4.0`, and minimum system version `27.0`.
-- The installed Debug validation binary at `/Applications/Blenny 0.4.0 Validation.app` matched the final Debug build at SHA-256 `d2e4d0235e5791a4710d999a022afba530738b725e88a3efacbcd68129749373`. The final Release binary SHA-256 was `0df2b99103bd1d459a199c900da4d5da941ddef133ddab667ea492ebae39395e`.
+- The installed Debug validation binary at `/Applications/Blenny 0.4.0 Validation.app` matched the final Debug build at SHA-256 `d4e19625be108009a80120d2c95b489810180463f52a863549a31839da2485f5`. The final Release binary SHA-256 was `7dd0ca1d04c41e44aeab39b75fcf3994b24e75ca18adc96ed8bd0177b2314376`.
 - The Release executable contained none of the `BLENNY_VALIDATE_*` visual-fixture environment keys. The Debug executable retained the fixtures used for bounded presentation review.
-- Ignored application-window evidence under `LocalData/0.4.0-ui-acceptance/` covers Organize default, hover with a long name, selection, valid and invalid drag targets, settled Draft, minimum-size long list, missing Accessibility, active Refresh, stopped and active management presentation, error, Review, Settings, Support, Dark, Increase Contrast, Reduce Transparency, and Reduce Motion. No real menu-bar pixels were captured or persisted.
-- Static Debug fixtures exercised source, target, invalid, and settle frames without synthesizing pointer movement or Command-drag. Native transport, payload idempotency, stale-session rejection, keyboard equivalence, and interaction-state cleanup were verified deterministically. Final subjective pointer-motion confirmation remains part of the owner's evidence review before tagging.
-- The installed non-fixture app performed only its bounded read-only observation path and failed closed on timeout. No real assertion write, Apple system-item mutation, policy persistence, automatic refresh, polling, or reconciliation occurred.
+- Ignored application-window evidence under `LocalData/0.4.0-ui-acceptance/` covers Organize default, hover with a long name, selection, valid and invalid drag targets, settled Draft, minimum-size long list, missing Accessibility, active Refresh, stopped and active management presentation, error, Review, Settings, Support, Dark, Increase Contrast, Reduce Transparency, Reduce Motion, and the final compact-density and natural-aspect system-icon refinement (`organize-selection-system-icons-compact-height.png`). No real menu-bar pixels were captured or persisted.
+- Static Debug fixtures exercised source, target, invalid, and settle frames without synthesizing pointer movement or Command-drag. Native transport, payload idempotency, stale-session rejection, keyboard equivalence, and interaction-state cleanup were verified deterministically. The owner then confirmed real pointer dragging and release across lanes, destination feedback at the automatic stable landing position, neutral same-lane handling, and the final interaction feel in the installed Debug app.
+- The installed non-fixture app performed only its bounded read-only observation path and failed closed on timeout. No real assertion write, Apple system-item mutation, policy persistence, recurring automatic refresh, polling, or reconciliation occurred.
 - The accepted policy file remained mode `0600`, schema 2, with `managementEnabled` false. Its SHA-256 was `b896c26e0031984d8c857b7f71e0f67bdb4625c53adf49a17675b523981a3dee`; the scoped recovery backup remained present at SHA-256 `0e880b34e925c7d808d58d3c6f915e95bbbd4bfb9001c85f948f1541d13afce3`.
 - Open at Login remained unregistered and was not toggled. All validation instances were terminated, and no Blenny process or active assertion remained after review.
 
@@ -346,16 +352,16 @@ The completed implementation was verified on 2026-08-29 with `DEVELOPER_DIR=/App
 
 Version `0.4.0` does not include:
 
-- within-lane ordering, insertion-position UI, or physical menu-bar ordering;
+- within-lane ordering, pointer-selected insertion-position UI, or physical menu-bar ordering; the non-interactive automatic landing ghost is destination feedback only;
 - policy, persistence, diff, report, recovery, fingerprint, assertion, reveal-session, or management semantic changes;
 - a real assertion write or backend promotion;
 - mutable Apple system items;
 - Screen Recording or live menu-bar pixel capture;
-- polling, automatic refresh, reconciliation, or unbounded retry;
+- polling, recurring automatic refresh, reconciliation, or unbounded retry; the one false-to-true permission-transition refresh is the only event-driven exception;
 - lifecycle, multi-display, login-startup capability, or recovery expansion;
 - helper, IPC, updater, global shortcut, profiles, themes, automatic rules, or decorative animation systems;
 - paid themes, purchase, subscription, entitlement, licensing, or payment processing.
 
 ## Exit boundary
 
-The milestone is complete only when the approved interface and motion contract are implemented, deterministic and installed acceptance passes under Xcode 27, required documentation and `Config/Info.plist` agree on `0.4.0`, the working tree contains no raw evidence, local system state is fully restored, and `$blenny-release` has audited and committed the milestone. Do not push. Do not create `v0.4.0` until the owner reviews the final evidence and explicitly authorizes the tag.
+The milestone is complete because the approved interface and motion contract are implemented, deterministic and installed acceptance passed under Xcode 27, required documentation and `Config/Info.plist` agree on `0.4.0`, the working tree contains no raw evidence, local system state is fully restored, the owner confirmed the final installed interaction, and `$blenny-release` audited and committed the milestone. The local annotated `v0.4.0` closes the version. Do not push.

@@ -32,5 +32,18 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Blenny Policy Bundle Drag</string>
+			<key>UTTypeIdentifier</key>
+			<string>xyz.fi5h.blenny.policy-bundle-drag</string>
+		</dict>
+	</array>
 </dict>
 </plist>

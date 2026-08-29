@@ -4,11 +4,35 @@ import UniformTypeIdentifiers
 
 public extension UTType {
     static let blennyPolicyBundleDrag = UTType(
-        exportedAs: "xyz.fi5h.blenny.policy-bundle-drag"
+        exportedAs: "xyz.fi5h.blenny.policy-bundle-drag",
+        conformingTo: .data
     )
 }
 
-public struct PolicyDragPayload: Codable, Equatable, Hashable, Sendable, Transferable {
+public struct PolicyDragPayload:
+    Codable,
+    Equatable,
+    Hashable,
+    Identifiable,
+    Sendable,
+    Transferable
+{
+    public struct ID: Codable, Equatable, Hashable, Sendable {
+        public let bundleIdentifier: String
+        public let sourcePolicy: MenuBarBundlePolicy
+        public let candidateGeneration: UUID
+
+        public init(
+            bundleIdentifier: String,
+            sourcePolicy: MenuBarBundlePolicy,
+            candidateGeneration: UUID
+        ) {
+            self.bundleIdentifier = bundleIdentifier
+            self.sourcePolicy = sourcePolicy
+            self.candidateGeneration = candidateGeneration
+        }
+    }
+
     public let bundleIdentifier: String
     public let sourcePolicy: MenuBarBundlePolicy
     public let candidateGeneration: UUID
@@ -28,6 +52,15 @@ public struct PolicyDragPayload: Codable, Equatable, Hashable, Sendable, Transfe
 
     public static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .blennyPolicyBundleDrag)
+            .visibility(.ownProcess)
+    }
+
+    public var id: ID {
+        ID(
+            bundleIdentifier: bundleIdentifier,
+            sourcePolicy: sourcePolicy,
+            candidateGeneration: candidateGeneration
+        )
     }
 }
 
@@ -182,6 +215,25 @@ public struct PolicyBoardDropTarget: Equatable, Sendable {
     public var isValid: Bool { rejection == nil }
 }
 
+public enum PolicyBoardLandingProjection {
+    /// Returns the visual landing index produced by Blenny's existing stable
+    /// bundle-identifier ordering. This is destination feedback only; it does
+    /// not introduce user-controlled ordering within a policy lane.
+    public static func automaticIndex(
+        for bundleIdentifier: String,
+        among existingBundleIdentifiers: [String]
+    ) -> Int {
+        let draggedKey = sortKey(bundleIdentifier)
+        return existingBundleIdentifiers.firstIndex {
+            draggedKey < sortKey($0)
+        } ?? existingBundleIdentifiers.endIndex
+    }
+
+    private static func sortKey(_ bundleIdentifier: String) -> (String, String) {
+        (bundleIdentifier.lowercased(), bundleIdentifier)
+    }
+}
+
 public struct PolicyBoardSettleState: Equatable, Sendable {
     public let bundleIdentifier: String
     public let destination: MenuBarBundlePolicy
@@ -268,6 +320,11 @@ public struct PolicyBoardInteractionState: Equatable, Sendable {
         switch validation {
         case .changed:
             rejection = nil
+        case .rejected(.samePolicy):
+            // Returning over the source lane is an ordinary no-op, not an
+            // error that warrants destination styling or warning copy.
+            dropTarget = nil
+            return
         case .rejected(let reason):
             rejection = reason
         }

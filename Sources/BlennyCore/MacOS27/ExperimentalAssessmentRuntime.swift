@@ -234,7 +234,7 @@ private final class ActivationCompletion: @unchecked Sendable {
 
     func install(_ continuation: CheckedContinuation<Void, Error>) {
         let terminalResult = lock.withLock { () -> Result<Void, Error>? in
-            if let terminalResult { return terminalResult }
+            if let terminalResult = self.terminalResult { return terminalResult }
             self.continuation = continuation
             return nil
         }

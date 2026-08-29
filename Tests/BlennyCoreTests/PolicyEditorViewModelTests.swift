@@ -178,6 +178,50 @@ struct PolicyEditorViewModelTests {
         )
     }
 
+    @Test("Accessibility grant refreshes once only on a safe trust transition")
+    func accessibilityGrantRefreshPolicy() {
+        #expect(
+            AccessibilityPermissionRefreshPolicy.shouldRefresh(
+                previouslyTrusted: false,
+                isTrusted: true,
+                isRefreshing: false,
+                hasDraftChanges: false
+            )
+        )
+        #expect(
+            !AccessibilityPermissionRefreshPolicy.shouldRefresh(
+                previouslyTrusted: nil,
+                isTrusted: true,
+                isRefreshing: false,
+                hasDraftChanges: false
+            )
+        )
+        #expect(
+            !AccessibilityPermissionRefreshPolicy.shouldRefresh(
+                previouslyTrusted: true,
+                isTrusted: true,
+                isRefreshing: false,
+                hasDraftChanges: false
+            )
+        )
+        #expect(
+            !AccessibilityPermissionRefreshPolicy.shouldRefresh(
+                previouslyTrusted: false,
+                isTrusted: true,
+                isRefreshing: true,
+                hasDraftChanges: false
+            )
+        )
+        #expect(
+            !AccessibilityPermissionRefreshPolicy.shouldRefresh(
+                previouslyTrusted: false,
+                isTrusted: true,
+                isRefreshing: false,
+                hasDraftChanges: true
+            )
+        )
+    }
+
     private func policy() throws -> PersistentBundlePolicyDocument {
         try PersistentBundlePolicyDocument(
             managementEnabled: false,

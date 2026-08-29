@@ -1,5 +1,7 @@
+import CoreTransferable
 import Foundation
 import Testing
+import UniformTypeIdentifiers
 @testable import BlennyCore
 
 @Suite("Policy board interaction")
@@ -238,11 +240,46 @@ struct PolicyBoardInteractionTests {
             policy: .visible,
             validation: .rejected(.samePolicy)
         )
+        #expect(state.dropTarget == nil)
         state.clearTransientPresentation()
         #expect(state.selectedItem == app)
         #expect(state.draggedBundleIdentifier == nil)
         #expect(state.draggedSourcePolicy == nil)
         #expect(state.dropTarget == nil)
+    }
+
+    @Test("Automatic landing feedback follows stable order without adding lane ordering")
+    func automaticLandingProjection() {
+        let existing = [
+            "com.example.Bravo",
+            "com.example.Delta",
+            "com.example.Zulu",
+        ]
+
+        #expect(
+            PolicyBoardLandingProjection.automaticIndex(
+                for: "com.example.Alpha",
+                among: existing
+            ) == 0
+        )
+        #expect(
+            PolicyBoardLandingProjection.automaticIndex(
+                for: "com.example.Charlie",
+                among: existing
+            ) == 1
+        )
+        #expect(
+            PolicyBoardLandingProjection.automaticIndex(
+                for: "com.example.Echo",
+                among: existing
+            ) == 2
+        )
+        #expect(
+            PolicyBoardLandingProjection.automaticIndex(
+                for: "com.example.Zzz",
+                among: existing
+            ) == existing.endIndex
+        )
     }
 
     @Test("The native drag payload preserves its identity through transfer encoding")
@@ -268,6 +305,46 @@ struct PolicyBoardInteractionTests {
                 from: Data("{\"bundleIdentifier\":42}".utf8)
             )
         }
+    }
+
+    @Test("The native item provider delivers the transferable drag payload")
+    func itemProviderTransferRoundTrip() async throws {
+        let payload = PolicyDragPayload(
+            bundleIdentifier: revealable,
+            sourcePolicy: .revealable,
+            candidateGeneration: UUID(
+                uuidString: "00000000-0000-0000-0000-000000000032"
+            )!,
+            dragToken: UUID(
+                uuidString: "00000000-0000-0000-0000-000000000033"
+            )!
+        )
+        let provider = NSItemProvider()
+        provider.register(payload)
+
+        #expect(payload.id.bundleIdentifier == payload.bundleIdentifier)
+        #expect(payload.id.sourcePolicy == payload.sourcePolicy)
+        #expect(payload.id.candidateGeneration == payload.candidateGeneration)
+
+        #expect(
+            provider.hasItemConformingToTypeIdentifier(
+                UTType.blennyPolicyBundleDrag.identifier
+            )
+        )
+        #expect(
+            provider.registeredTypeIdentifiers.contains(
+                UTType.blennyPolicyBundleDrag.identifier
+            )
+        )
+
+        let decoded: PolicyDragPayload = try await withCheckedThrowingContinuation {
+            continuation in
+            _ = provider.loadTransferable(type: PolicyDragPayload.self) {
+                continuation.resume(with: $0)
+            }
+        }
+
+        #expect(decoded == payload)
     }
 
     private func payload(

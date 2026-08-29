@@ -16,6 +16,20 @@ public enum AccessibilityOnboardingPolicy {
     }
 }
 
+public enum AccessibilityPermissionRefreshPolicy {
+    public static func shouldRefresh(
+        previouslyTrusted: Bool?,
+        isTrusted: Bool,
+        isRefreshing: Bool,
+        hasDraftChanges: Bool
+    ) -> Bool {
+        previouslyTrusted == false
+            && isTrusted
+            && !isRefreshing
+            && !hasDraftChanges
+    }
+}
+
 public enum MenuBarOwnershipSnapshotIssue: Error, Equatable, Sendable {
     case accessibilityNotGranted
     case elementLimitReached
