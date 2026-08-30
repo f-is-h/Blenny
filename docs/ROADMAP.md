@@ -169,18 +169,18 @@ Status: **Complete on the exact Debug development boundary for macOS 27.0 build 
 Implemented exit criteria:
 
 - A valid reviewed application-bundle draft can complete the intended baseline and ordinary-reveal behavior through the one serial writer on the explicitly supported development build.
-- The exact diff, impact report, validation state, and recovery plan remain visible before mutation.
+- Exact diff, impact, validation, and recovery preparation remain mandatory before mutation. Ordinary users invoke Apply, Resume, Stop, and Restore directly; the full report is available only in Debug dry-run evidence.
 - Stop Managing and Restore Previous Policy close the same product loop without broadening approved targets or admitting mutable Apple system items.
 - Ordinary launched operation does not require a separate management switch. Once the runtime can truthfully provide that behavior, the transitional stopped-management banner leaves the routine Organize surface; deliberate Stop and Restore remain safety and recovery actions rather than everyday mode controls.
 - Real validation remains bounded to explicitly approved bundles and ends in verified restoration.
 - Release promotion of the unsupported backend remains a separate, deliberate compatibility decision rather than an accidental consequence of UI integration.
 
-## 0.5.1 — Review usability and resilient Apply
+### Included direct-control and usability follow-ups
 
-Status: **Implementation and release checks audited; final compact-spacing visual acceptance and local tag pending. `v0.5.0` remains unchanged.**
+The owner accepted the current fish/arrow presentation and folded these fixes into `0.5.0`, authorizing replacement of only the unpublished local version tag after final checks. Existing commits and every other tag remain unchanged.
 
 - Remove the ordinary Review page. Apply, Resume, Stop and Restore prepare and validate plans internally; recovery stays durable and bounded action diagnostics remain process-local. Keep full reports in Debug dry-run evidence.
-- Connect the normal Blenny status item to ordinary reveal: a smaller double-chevron left of the artwork/editor control as two compact 22-point native status items, with right-click safety access. Keep Blenny's arrow available independently of native presence and bind its native action directly to the same toggle as the menu; remove coordinate-based click splitting. Native-control integration and the reported missing Bartender candidate are explicitly deferred to 0.6.0; no repair of either is included in this patch. No polling or positioning writes.
+- Connect the normal Blenny status item to ordinary reveal: a smaller double-chevron left of the artwork/editor control as two compact 22-point native status items, with right-click safety access. Keep Blenny's arrow available independently of native presence and bind its native action directly to the same toggle as the menu; remove coordinate-based click splitting. Native-control integration and the reported missing Bartender candidate are explicitly deferred to 0.6.0; no repair of either is claimed complete in this version. No polling or positioning writes.
 - Audit ordinary-path wiring for native observation, timeout gating, failed reveal, read-only Refresh, and connection/termination cleanup; do not silently promote separate Debug experiments.
 - Gate in-flight actions against duplicate clicks and Draft/Refresh/reveal overlap. Preserve unapplied assignments when stopping; do not silently replace a dirty Draft during Resume or Restore.
 - Make a valid Draft Apply start management on the supported Debug build instead of silently persisting stopped intent.
@@ -191,7 +191,7 @@ Status: **Implementation and release checks audited; final compact-spacing visua
 
 ## 0.6.0 — Native integration, discovery, and lifecycle hardening
 
-Owner-confirmed scope after 0.5.1:
+Owner-confirmed scope after 0.5.0:
 
 - Investigate reliable native overflow expand/collapse integration while retaining a usable Blenny control. Observing native state is not interception or ownership of Apple's button; do not promise a complete takeover.
 - Diagnose missing application candidates after manual Refresh, including the reported Bartender item. Distinguish discovery, ownership attribution, and presentation failures before changing behavior; do not infer that all newly launched apps are unsupported.
