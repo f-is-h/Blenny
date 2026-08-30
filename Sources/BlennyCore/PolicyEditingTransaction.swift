@@ -10,10 +10,22 @@ public protocol PersistentBundlePolicyStoring: Sendable {
 extension PersistentBundlePolicyStore: PersistentBundlePolicyStoring {}
 
 public protocol PolicyAssertionWriting: Sendable {
+    func applyBaselineReplacement(with plan: RevealAllowlistPlan) async throws
     func applySessionTransition(with plan: RevealAllowlistPlan) async throws
+    func verifyActivePlan(_ expected: RevealAllowlistPlan) async throws -> Bool
     func restoreAndStop() async
     func connectionInvalidated() async
     func activePlanSnapshot() async -> RevealAllowlistPlan?
+}
+
+public extension PolicyAssertionWriting {
+    func applyBaselineReplacement(with plan: RevealAllowlistPlan) async throws {
+        try await applySessionTransition(with: plan)
+    }
+
+    func verifyActivePlan(_ expected: RevealAllowlistPlan) async throws -> Bool {
+        await activePlanSnapshot() == expected
+    }
 }
 
 extension RevealAssertionWriter: PolicyAssertionWriting {}
@@ -22,6 +34,7 @@ public enum PolicyEditingTransactionStage: String, Equatable, Sendable {
     case staleAcceptedPolicy
     case writerCreation
     case activation
+    case verification
     case persistence
     case rollback
 }
@@ -152,27 +165,12 @@ public actor PolicyEditingTransactionCoordinator {
             )
         }
 
-        do {
-            try await writer.applySessionTransition(with: newBaseline)
-            guard await writer.activePlanSnapshot() == newBaseline else {
-                await writer.restoreAndStop()
-                throw PolicyEditingTransactionFailure(
-                    stage: .activation,
-                    systemState: .unrestricted,
-                    detail: "writer disconnected before the accepted policy could be persisted"
-                )
-            }
-        } catch {
-            await writer.restoreAndStop()
-            if let failure = error as? PolicyEditingTransactionFailure {
-                throw failure
-            }
-            throw PolicyEditingTransactionFailure(
-                stage: .activation,
-                systemState: .unrestricted,
-                detail: "new baseline activation failed and all owned assertions were restored: \(error)"
-            )
-        }
+        try await activateAndVerify(
+            writer: writer,
+            newBaseline: newBaseline,
+            oldBaseline: oldBaseline,
+            oldManagementEnabled: prepared.oldPolicy.managementEnabled
+        )
 
         do {
             try await persist(prepared)
@@ -180,8 +178,8 @@ public actor PolicyEditingTransactionCoordinator {
         } catch {
             if prepared.oldPolicy.managementEnabled {
                 do {
-                    try await writer.applySessionTransition(with: oldBaseline)
-                    guard await writer.activePlanSnapshot() == oldBaseline else {
+                    try await writer.applyBaselineReplacement(with: oldBaseline)
+                    guard try await writer.verifyActivePlan(oldBaseline) else {
                         await writer.restoreAndStop()
                         throw PolicyEditingTransactionFailure(
                             stage: .rollback,
@@ -214,6 +212,114 @@ public actor PolicyEditingTransactionCoordinator {
         }
     }
 
+    private func activateAndVerify(
+        writer: any PolicyAssertionWriting,
+        newBaseline: RevealAllowlistPlan,
+        oldBaseline: RevealAllowlistPlan,
+        oldManagementEnabled: Bool
+    ) async throws {
+        let expectedPrevious: RevealAllowlistPlan? = oldManagementEnabled ? oldBaseline : nil
+        var attempt = 0
+        while attempt < 2 {
+            attempt += 1
+            do {
+                try await writer.applyBaselineReplacement(with: newBaseline)
+            } catch {
+                let observed = await writer.activePlanSnapshot()
+                let previousStateProven = observed == expectedPrevious
+                if attempt == 1, previousStateProven {
+                    continue
+                }
+                if previousStateProven {
+                    if !oldManagementEnabled {
+                        await writer.restoreAndStop()
+                    }
+                    throw PolicyEditingTransactionFailure(
+                        stage: .activation,
+                        systemState: oldManagementEnabled
+                            ? .previousPolicyActive : .unrestricted,
+                        detail: "new baseline activation failed after \(attempt) attempt(s): \(error)"
+                    )
+                }
+                try await restorePreviousBaselineAfterFailure(
+                    writer: writer,
+                    oldBaseline: oldBaseline,
+                    oldManagementEnabled: oldManagementEnabled,
+                    originalStage: .activation,
+                    detail: "new baseline activation failed after \(attempt) attempt(s): \(error)"
+                )
+            }
+
+            do {
+                guard try await writer.verifyActivePlan(newBaseline) else {
+                    try await restorePreviousBaselineAfterFailure(
+                        writer: writer,
+                        oldBaseline: oldBaseline,
+                        oldManagementEnabled: oldManagementEnabled,
+                        originalStage: .verification,
+                        detail: "new baseline activation could not be verified"
+                    )
+                }
+                return
+            } catch let failure as PolicyEditingTransactionFailure {
+                throw failure
+            } catch {
+                try await restorePreviousBaselineAfterFailure(
+                    writer: writer,
+                    oldBaseline: oldBaseline,
+                    oldManagementEnabled: oldManagementEnabled,
+                    originalStage: .verification,
+                    detail: "new baseline verification failed: \(error)"
+                )
+            }
+        }
+    }
+
+    private func restorePreviousBaselineAfterFailure(
+        writer: any PolicyAssertionWriting,
+        oldBaseline: RevealAllowlistPlan,
+        oldManagementEnabled: Bool,
+        originalStage: PolicyEditingTransactionStage,
+        detail: String
+    ) async throws -> Never {
+        guard oldManagementEnabled else {
+            await writer.restoreAndStop()
+            throw PolicyEditingTransactionFailure(
+                stage: originalStage,
+                systemState: .unrestricted,
+                detail: "\(detail); all owned assertions were restored"
+            )
+        }
+        do {
+            try await writer.applyBaselineReplacement(with: oldBaseline)
+            guard try await writer.verifyActivePlan(oldBaseline) else {
+                throw PolicyEditingTransactionFailure(
+                    stage: .rollback,
+                    systemState: .unrestricted,
+                    detail: "\(detail); the previous baseline could not be verified"
+                )
+            }
+            throw PolicyEditingTransactionFailure(
+                stage: originalStage,
+                systemState: .previousPolicyActive,
+                detail: "\(detail); the previous baseline was restored"
+            )
+        } catch let failure as PolicyEditingTransactionFailure {
+            if failure.systemState == .previousPolicyActive {
+                throw failure
+            }
+            await writer.restoreAndStop()
+            throw failure
+        } catch {
+            await writer.restoreAndStop()
+            throw PolicyEditingTransactionFailure(
+                stage: .rollback,
+                systemState: .unrestricted,
+                detail: "\(detail); previous-baseline rollback failed: \(error)"
+            )
+        }
+    }
+
     private func persist(_ prepared: PreparedPolicyEdit) async throws {
         switch prepared.persistenceMode {
         case .saveAcceptedPolicy:
@@ -236,6 +342,7 @@ public actor PolicyEditingCore {
     private let transaction: PolicyEditingTransactionCoordinator
     private let blennyBundleIdentifier: String
     private let scope: PolicyValidationScope
+    private var consumedReviewIdentifiers = Set<UUID>()
 
     public init(
         store: any PersistentBundlePolicyStoring,
@@ -263,7 +370,9 @@ public actor PolicyEditingCore {
     public func preview(
         draft: BundlePolicyDraft,
         candidates: PolicyCandidateInventory,
-        observedRunningBundleIdentifiers: Set<String>
+        observedRunningBundleIdentifiers: Set<String>,
+        candidateGeneration: UUID = PolicyReviewBinding.unversionedCandidateGeneration,
+        runtimeContractFingerprint: String = "deterministic-core"
     ) async throws -> (PolicyDryRunImpactReport, PreparedPolicyEdit?) {
         guard let accepted = try await store.load() else { return try missingPolicy() }
         return try PolicyDryRunner.prepare(
@@ -273,13 +382,18 @@ public actor PolicyEditingCore {
             candidates: candidates,
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
             scope: scope,
-            blennyBundleIdentifier: blennyBundleIdentifier
+            blennyBundleIdentifier: blennyBundleIdentifier,
+            candidateGeneration: candidateGeneration,
+            runtimeContractFingerprint: runtimeContractFingerprint,
+            recoveryBackupFingerprint: try await backupFingerprint()
         )
     }
 
     public func previewResumeManaging(
         candidates: PolicyCandidateInventory,
-        observedRunningBundleIdentifiers: Set<String>
+        observedRunningBundleIdentifiers: Set<String>,
+        candidateGeneration: UUID = PolicyReviewBinding.unversionedCandidateGeneration,
+        runtimeContractFingerprint: String = "deterministic-core"
     ) async throws -> (PolicyDryRunImpactReport, PreparedPolicyEdit?) {
         guard let accepted = try await store.load() else { return try missingPolicy() }
         return try PolicyDryRunner.prepare(
@@ -289,13 +403,18 @@ public actor PolicyEditingCore {
             candidates: candidates,
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
             scope: scope,
-            blennyBundleIdentifier: blennyBundleIdentifier
+            blennyBundleIdentifier: blennyBundleIdentifier,
+            candidateGeneration: candidateGeneration,
+            runtimeContractFingerprint: runtimeContractFingerprint,
+            recoveryBackupFingerprint: try await backupFingerprint()
         )
     }
 
     public func previewStopManaging(
         candidates: PolicyCandidateInventory,
-        observedRunningBundleIdentifiers: Set<String>
+        observedRunningBundleIdentifiers: Set<String>,
+        candidateGeneration: UUID = PolicyReviewBinding.unversionedCandidateGeneration,
+        runtimeContractFingerprint: String = "deterministic-core"
     ) async throws -> (PolicyDryRunImpactReport, PreparedPolicyEdit?) {
         guard let accepted = try await store.load() else { return try missingPolicy() }
         return try PolicyDryRunner.prepare(
@@ -305,13 +424,18 @@ public actor PolicyEditingCore {
             candidates: candidates,
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
             scope: scope,
-            blennyBundleIdentifier: blennyBundleIdentifier
+            blennyBundleIdentifier: blennyBundleIdentifier,
+            candidateGeneration: candidateGeneration,
+            runtimeContractFingerprint: runtimeContractFingerprint,
+            recoveryBackupFingerprint: try await backupFingerprint()
         )
     }
 
     public func previewRestorePreviousPolicy(
         candidates: PolicyCandidateInventory,
-        observedRunningBundleIdentifiers: Set<String>
+        observedRunningBundleIdentifiers: Set<String>,
+        candidateGeneration: UUID = PolicyReviewBinding.unversionedCandidateGeneration,
+        runtimeContractFingerprint: String = "deterministic-core"
     ) async throws -> (PolicyDryRunImpactReport, PreparedPolicyEdit?) {
         guard let accepted = try await store.load() else { return try missingPolicy() }
         guard let backup = try await store.loadBackup() else {
@@ -325,14 +449,61 @@ public actor PolicyEditingCore {
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
             scope: scope,
             blennyBundleIdentifier: blennyBundleIdentifier,
-            persistenceMode: .restorePreviousPolicy
+            persistenceMode: .restorePreviousPolicy,
+            candidateGeneration: candidateGeneration,
+            runtimeContractFingerprint: runtimeContractFingerprint,
+            recoveryBackupFingerprint: backup.backupFingerprint
         )
+    }
+
+    public func commit(
+        _ prepared: PreparedPolicyEdit,
+        currentDraft: BundlePolicyDraft,
+        candidates: PolicyCandidateInventory,
+        observedRunningBundleIdentifiers: Set<String>,
+        candidateGeneration: UUID,
+        runtimeContractFingerprint: String
+    ) async throws -> PolicyEditingTransactionResult {
+        guard !consumedReviewIdentifiers.contains(prepared.reviewIdentifier) else {
+            throw PolicyEditingCoreError.reviewAlreadyConsumed
+        }
+        guard let accepted = try await store.load() else { return try missingPolicy() }
+        let currentBackupFingerprint = try await backupFingerprint()
+        let currentBinding = PolicyReviewBinding.make(
+            acceptedPolicy: accepted,
+            draft: currentDraft,
+            candidateGeneration: candidateGeneration,
+            candidates: candidates,
+            scope: scope,
+            observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+            runtimeContractFingerprint: runtimeContractFingerprint,
+            recoveryBackupFingerprint: currentBackupFingerprint,
+            baselinePlan: prepared.report.newBaselinePlan,
+            ordinaryRevealPlan: prepared.report.newRevealPlan
+        )
+        guard currentBinding == prepared.reviewBinding else {
+            throw PolicyEditingCoreError.staleReviewedPlan
+        }
+        consumedReviewIdentifiers.insert(prepared.reviewIdentifier)
+        return try await transaction.commit(prepared)
     }
 
     public func commit(
         _ prepared: PreparedPolicyEdit
     ) async throws -> PolicyEditingTransactionResult {
-        try await transaction.commit(prepared)
+        guard prepared.reviewBinding.candidateGeneration
+            == PolicyReviewBinding.unversionedCandidateGeneration else {
+            throw PolicyEditingCoreError.currentReviewBindingRequired
+        }
+        guard !consumedReviewIdentifiers.contains(prepared.reviewIdentifier) else {
+            throw PolicyEditingCoreError.reviewAlreadyConsumed
+        }
+        consumedReviewIdentifiers.insert(prepared.reviewIdentifier)
+        return try await transaction.commit(prepared)
+    }
+
+    private func backupFingerprint() async throws -> String? {
+        try await store.loadBackup()?.backupFingerprint
     }
 
     private func missingPolicy<T>() throws -> T {
@@ -343,4 +514,13 @@ public actor PolicyEditingCore {
 public enum PolicyEditingCoreError: Error, Equatable, Sendable {
     case acceptedPolicyMissing
     case previousPolicyBackupMissing
+    case currentReviewBindingRequired
+    case staleReviewedPlan
+    case reviewAlreadyConsumed
+}
+
+public extension PersistentBundlePolicyBackup {
+    var backupFingerprint: String {
+        "schema=\(schemaVersion)|policy=\(previousPolicy.policyFingerprint)"
+    }
 }

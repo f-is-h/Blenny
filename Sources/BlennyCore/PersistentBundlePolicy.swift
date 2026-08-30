@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum BundlePolicyIdentity {
@@ -201,11 +202,37 @@ public struct PersistentBundlePolicyBackup: Codable, Equatable, Sendable {
 public enum PersistentBundlePolicyStoreError: Error, Equatable, Sendable {
     case policyAndBackupPathsMustDiffer
     case unsupportedBackupSchemaVersion(Int)
+    case interruptedTransactionCorrupt
+    case interruptedTransactionStateMismatch
+}
+
+struct PersistentBundlePolicyTransactionMarker: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    let schemaVersion: Int
+    let oldPolicyData: Data
+    let newPolicyHash: String
+    let oldBackupData: Data?
+    let newBackupData: Data
+
+    init(
+        oldPolicyData: Data,
+        newPolicyHash: String,
+        oldBackupData: Data?,
+        newBackupData: Data
+    ) {
+        schemaVersion = Self.currentSchemaVersion
+        self.oldPolicyData = oldPolicyData
+        self.newPolicyHash = newPolicyHash
+        self.oldBackupData = oldBackupData
+        self.newBackupData = newBackupData
+    }
 }
 
 public actor PersistentBundlePolicyStore {
     public let policyURL: URL
     public let backupURL: URL
+    let transactionURL: URL
 
     public init(policyURL: URL, backupURL: URL) throws {
         guard policyURL.standardizedFileURL != backupURL.standardizedFileURL else {
@@ -213,6 +240,14 @@ public actor PersistentBundlePolicyStore {
         }
         self.policyURL = policyURL
         self.backupURL = backupURL
+        self.transactionURL = policyURL.deletingLastPathComponent().appendingPathComponent(
+            ".\(policyURL.lastPathComponent).transaction"
+        )
+        try Self.recoverInterruptedCommit(
+            policyURL: policyURL,
+            backupURL: backupURL,
+            transactionURL: transactionURL
+        )
     }
 
     public func load() throws -> PersistentBundlePolicyDocument? {
@@ -242,15 +277,49 @@ public actor PersistentBundlePolicyStore {
     }
 
     public func save(_ document: PersistentBundlePolicyDocument) throws {
-        if let existing = try load(), existing != document {
-            try write(
-                Self.makeEncoder().encode(
-                    PersistentBundlePolicyBackup(previousPolicy: existing)
-                ),
-                to: backupURL
-            )
+        guard let existing = try load() else {
+            try write(Self.makeEncoder().encode(document), to: policyURL)
+            return
         }
-        try write(Self.makeEncoder().encode(document), to: policyURL)
+        guard existing != document else { return }
+
+        let oldPolicyData = try Data(contentsOf: policyURL)
+        let newPolicyData = try Self.makeEncoder().encode(document)
+        let newBackupData = try Self.makeEncoder().encode(
+            PersistentBundlePolicyBackup(previousPolicy: existing)
+        )
+        let oldBackupData = FileManager.default.fileExists(atPath: backupURL.path)
+            ? try Data(contentsOf: backupURL) : nil
+        let marker = PersistentBundlePolicyTransactionMarker(
+            oldPolicyData: oldPolicyData,
+            newPolicyHash: Self.hash(newPolicyData),
+            oldBackupData: oldBackupData,
+            newBackupData: newBackupData
+        )
+        try write(Self.makeEncoder().encode(marker), to: transactionURL)
+
+        do {
+            try write(newBackupData, to: backupURL)
+            try write(newPolicyData, to: policyURL)
+            guard try load() == document,
+                  try loadBackup()?.previousPolicy == existing,
+                  try Self.permissions(of: policyURL) == 0o600,
+                  try Self.permissions(of: backupURL) == 0o600 else {
+                throw PersistentBundlePolicyStoreError.interruptedTransactionCorrupt
+            }
+            try removeTransactionMarker()
+        } catch {
+            try Self.recoverInterruptedCommit(
+                policyURL: policyURL,
+                backupURL: backupURL,
+                transactionURL: transactionURL
+            )
+            if try load() == document,
+               try loadBackup()?.previousPolicy == existing {
+                return
+            }
+            throw error
+        }
     }
 
     @discardableResult
@@ -319,6 +388,73 @@ public actor PersistentBundlePolicyStore {
             [.posixPermissions: 0o600],
             ofItemAtPath: url.path
         )
+    }
+
+    private func removeTransactionMarker() throws {
+        guard FileManager.default.fileExists(atPath: transactionURL.path) else { return }
+        try FileManager.default.removeItem(at: transactionURL)
+    }
+
+    private static func recoverInterruptedCommit(
+        policyURL: URL,
+        backupURL: URL,
+        transactionURL: URL
+    ) throws {
+        guard FileManager.default.fileExists(atPath: transactionURL.path) else { return }
+        let marker = try makeDecoder().decode(
+            PersistentBundlePolicyTransactionMarker.self,
+            from: Data(contentsOf: transactionURL)
+        )
+        guard marker.schemaVersion
+            == PersistentBundlePolicyTransactionMarker.currentSchemaVersion,
+              hash(marker.oldPolicyData) != marker.newPolicyHash else {
+            throw PersistentBundlePolicyStoreError.interruptedTransactionCorrupt
+        }
+
+        let policyData = FileManager.default.fileExists(atPath: policyURL.path)
+            ? try Data(contentsOf: policyURL) : nil
+        switch policyData.map(hash) {
+        case marker.newPolicyHash:
+            try writeRecovered(marker.newBackupData, to: backupURL)
+        case hash(marker.oldPolicyData):
+            try restorePreviousBackup(marker.oldBackupData, at: backupURL)
+        case nil:
+            try writeRecovered(marker.oldPolicyData, to: policyURL)
+            try restorePreviousBackup(marker.oldBackupData, at: backupURL)
+        default:
+            throw PersistentBundlePolicyStoreError.interruptedTransactionStateMismatch
+        }
+        try FileManager.default.removeItem(at: transactionURL)
+    }
+
+    private static func restorePreviousBackup(_ data: Data?, at url: URL) throws {
+        if let data {
+            try writeRecovered(data, to: url)
+        } else if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private static func writeRecovered(_ data: Data, to url: URL) throws {
+        let directory = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        try data.write(to: url, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: url.path
+        )
+    }
+
+    static func hash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func permissions(of url: URL) throws -> Int {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes[.posixPermissions] as? NSNumber)?.intValue ?? -1
     }
 
     private static func makeEncoder() -> JSONEncoder {

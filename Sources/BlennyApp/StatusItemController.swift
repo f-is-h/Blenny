@@ -19,6 +19,7 @@ final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let permissionItem = NSMenuItem(title: "Accessibility: Checking…", action: nil, keyEquivalent: "")
     private let managementStateItem = NSMenuItem(title: "Management: Checking…", action: nil, keyEquivalent: "")
+    private let ordinaryRevealItem = NSMenuItem(title: "Reveal Revealable Items", action: #selector(toggleOrdinaryReveal), keyEquivalent: "")
     private let refreshItem = NSMenuItem(title: "Refresh Menu Bar Items", action: #selector(refresh), keyEquivalent: "r")
     private let resumeManagingItem = NSMenuItem(title: "Resume Managing…", action: #selector(resumeManaging), keyEquivalent: "")
     private let stopManagingItem = NSMenuItem(title: "Stop Managing and Restore…", action: #selector(stopManaging), keyEquivalent: "")
@@ -28,6 +29,7 @@ final class StatusItemController: NSObject {
     private let onOpenDiagnostics: () -> Void
     private let onRefresh: () -> Void
     private let onRequestAccess: () -> Void
+    private let onToggleOrdinaryReveal: () -> Void
     private let onResumeManaging: () -> Void
     private let onStopManaging: () -> Void
     private let onRestorePreviousPolicy: () -> Void
@@ -61,6 +63,7 @@ final class StatusItemController: NSObject {
         onOpenDiagnostics: @escaping () -> Void,
         onRefresh: @escaping () -> Void,
         onRequestAccess: @escaping () -> Void,
+        onToggleOrdinaryReveal: @escaping () -> Void,
         onResumeManaging: @escaping () -> Void,
         onStopManaging: @escaping () -> Void,
         onRestorePreviousPolicy: @escaping () -> Void,
@@ -69,6 +72,7 @@ final class StatusItemController: NSObject {
         self.onOpenDiagnostics = onOpenDiagnostics
         self.onRefresh = onRefresh
         self.onRequestAccess = onRequestAccess
+        self.onToggleOrdinaryReveal = onToggleOrdinaryReveal
         self.onResumeManaging = onResumeManaging
         self.onStopManaging = onStopManaging
         self.onRestorePreviousPolicy = onRestorePreviousPolicy
@@ -125,10 +129,36 @@ final class StatusItemController: NSObject {
         refreshItem.isEnabled = !hasChanges
     }
 
-    func setManagementEnabled(_ enabled: Bool, recoveryAvailable: Bool) {
-        managementStateItem.title = enabled ? "Management: On" : "Management: Stopped"
-        resumeManagingItem.isEnabled = !enabled
-        stopManagingItem.isEnabled = enabled
+    func setManagementState(
+        _ state: ManagementLoopState,
+        persistedManagementEnabled: Bool,
+        recoveryAvailable: Bool
+    ) {
+        switch state {
+        case .active, .baselineVerified, .ordinaryRevealSession:
+            managementStateItem.title = "Management: On"
+        case .stopped:
+            managementStateItem.title = "Management: Stopped"
+        case .unsupportedRuntimeContract:
+            managementStateItem.title = "Management: Unsupported"
+        case .failClosedUnrestricted, .connectionInvalidated:
+            managementStateItem.title = "Management: Restored"
+        default:
+            managementStateItem.title = "Management: Preparing"
+        }
+        switch state {
+        case .active:
+            ordinaryRevealItem.title = "Reveal Revealable Items"
+            ordinaryRevealItem.isEnabled = true
+        case .ordinaryRevealSession:
+            ordinaryRevealItem.title = "Conceal Revealable Items"
+            ordinaryRevealItem.isEnabled = true
+        default:
+            ordinaryRevealItem.title = "Reveal Revealable Items"
+            ordinaryRevealItem.isEnabled = false
+        }
+        resumeManagingItem.isEnabled = !persistedManagementEnabled
+        stopManagingItem.isEnabled = persistedManagementEnabled
         restorePreviousPolicyItem.isEnabled = recoveryAvailable
     }
 
@@ -236,7 +266,7 @@ final class StatusItemController: NSObject {
         }
         let version = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "0.3.0"
+        ) as? String ?? "0.5.0"
         button.toolTip = "Blenny \(version)"
     }
 
@@ -249,6 +279,7 @@ final class StatusItemController: NSObject {
             openItem,
             refreshItem,
             requestItem,
+            ordinaryRevealItem,
             resumeManagingItem,
             stopManagingItem,
             restorePreviousPolicyItem,
@@ -258,6 +289,7 @@ final class StatusItemController: NSObject {
         }
         managementStateItem.isEnabled = false
         stopManagingItem.isEnabled = false
+        ordinaryRevealItem.isEnabled = false
         resumeManagingItem.isEnabled = false
         restorePreviousPolicyItem.isEnabled = false
         permissionItem.isEnabled = false
@@ -266,6 +298,7 @@ final class StatusItemController: NSObject {
         menu.addItem(refreshItem)
         menu.addItem(.separator())
         menu.addItem(managementStateItem)
+        menu.addItem(ordinaryRevealItem)
         menu.addItem(resumeManagingItem)
         menu.addItem(stopManagingItem)
         menu.addItem(restorePreviousPolicyItem)
@@ -413,6 +446,10 @@ final class StatusItemController: NSObject {
 
     @objc private func requestAccess() {
         onRequestAccess()
+    }
+
+    @objc private func toggleOrdinaryReveal() {
+        onToggleOrdinaryReveal()
     }
 
     @objc private func resumeManaging() {

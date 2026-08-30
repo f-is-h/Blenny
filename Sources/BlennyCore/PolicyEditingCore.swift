@@ -1,6 +1,20 @@
 import CryptoKit
 import Foundation
 
+private enum PolicyFingerprint {
+    static func sha256(_ lines: [String]) -> String {
+        SHA256.hash(data: Data(lines.joined(separator: "\n").utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+
+private extension Array where Element == String {
+    func sortedByBundleIdentifier() -> [String] {
+        sorted { ($0.lowercased(), $0) < ($1.lowercased(), $1) }
+    }
+}
+
 public struct BundlePolicyDraft: Equatable, Sendable {
     public let visible: [String]
     public let revealable: [String]
@@ -51,6 +65,14 @@ public struct BundlePolicyDraft: Equatable, Sendable {
             hidden.append(bundleIdentifier)
         }
         return Self(visible: visible, revealable: revealable, hidden: hidden)
+    }
+
+    public var fingerprint: String {
+        PolicyFingerprint.sha256([
+            "visible=\(visible.sortedByBundleIdentifier().joined(separator: ","))",
+            "revealable=\(revealable.sortedByBundleIdentifier().joined(separator: ","))",
+            "hidden=\(hidden.sortedByBundleIdentifier().joined(separator: ","))",
+        ])
     }
 }
 
@@ -151,6 +173,14 @@ public struct PolicyCandidateInventory: Equatable, Sendable {
         candidates.map(\.bundleIdentifier)
     }
 
+    public var fingerprint: String {
+        PolicyFingerprint.sha256(
+            candidates.map {
+                "candidate=\($0.bundleIdentifier)|pids=\($0.processIdentifiers.map(String.init).joined(separator: ","))|items=\($0.menuBarItemCount)"
+            } + issues.map { "issue=\($0.description)" }
+        )
+    }
+
     fileprivate var candidatesByCanonicalIdentifier: [String: PolicyCandidate] {
         Dictionary(uniqueKeysWithValues: candidates.compactMap { candidate in
             BundlePolicyIdentity.canonicalKey(for: candidate.bundleIdentifier).map {
@@ -168,6 +198,12 @@ public struct PolicyValidationScope: Equatable, Sendable {
             $0.lowercased() < $1.lowercased()
         }
     }
+
+    public var fingerprint: String {
+        PolicyFingerprint.sha256(
+            approvedBundleIdentifiers.map { "approved=\($0.lowercased())" }
+        )
+    }
 }
 
 public enum PolicyEditIssue: Error, Equatable, Hashable, Sendable {
@@ -180,6 +216,7 @@ public enum PolicyEditIssue: Error, Equatable, Hashable, Sendable {
     case missingCurrentOwnership(String)
     case missingApprovedBundle(String)
     case unapprovedBundle(String)
+    case mutableAppleSystemBundle(String)
     case missingVisibleBlenny(String)
 }
 
@@ -204,6 +241,8 @@ extension PolicyEditIssue: CustomStringConvertible {
             return "approved bundle \(bundleIdentifier) is missing from the draft"
         case let .unapprovedBundle(bundleIdentifier):
             return "draft bundle \(bundleIdentifier) is outside the approved validation scope"
+        case let .mutableAppleSystemBundle(bundleIdentifier):
+            return "Apple system bundle \(bundleIdentifier) is read-only and cannot be managed"
         case let .missingVisibleBlenny(bundleIdentifier):
             return "Blenny bundle \(bundleIdentifier) must remain visible"
         }
@@ -295,6 +334,10 @@ public enum PolicyDraftValidator {
         for canonical in occurrences.keys.sorted() where approved[canonical] == nil {
             let spelling = occurrences[canonical]?.map(\.spelling).sorted().first ?? canonical
             issues.append(.unapprovedBundle(spelling))
+        }
+        for canonical in occurrences.keys.sorted() where canonical.hasPrefix("com.apple.") {
+            let spelling = occurrences[canonical]?.map(\.spelling).sorted().first ?? canonical
+            issues.append(.mutableAppleSystemBundle(spelling))
         }
 
         if let blennyCanonical = BundlePolicyIdentity.canonicalKey(
@@ -442,6 +485,85 @@ public enum PolicyEditPersistenceMode: Equatable, Sendable {
     case restorePreviousPolicy
 }
 
+public extension PersistentBundlePolicyDocument {
+    var policyFingerprint: String {
+        PolicyFingerprint.sha256(
+            [
+                "schema=\(schemaVersion)",
+                "managementEnabled=\(managementEnabled)",
+            ] + policies.map {
+                "policy=\($0.bundleIdentifier.lowercased())|\($0.policy.rawValue)"
+            }
+        )
+    }
+}
+
+public struct PolicyReviewBinding: Equatable, Sendable {
+    public static let unversionedCandidateGeneration = UUID(
+        uuidString: "00000000-0000-0000-0000-000000000000"
+    )!
+
+    public let acceptedPolicyFingerprint: String
+    public let draftFingerprint: String
+    public let candidateGeneration: UUID
+    public let candidateInventoryFingerprint: String
+    public let validationScopeFingerprint: String
+    public let observationFingerprint: String
+    public let runtimeContractFingerprint: String
+    public let recoveryBackupFingerprint: String?
+    public let baselinePlanFingerprint: String?
+    public let ordinaryRevealPlanFingerprint: String?
+    public let authorizedBundleIdentifiers: [String]
+
+    public var fingerprint: String {
+        PolicyFingerprint.sha256([
+            "accepted=\(acceptedPolicyFingerprint)",
+            "draft=\(draftFingerprint)",
+            "candidateGeneration=\(candidateGeneration.uuidString.lowercased())",
+            "inventory=\(candidateInventoryFingerprint)",
+            "scope=\(validationScopeFingerprint)",
+            "observation=\(observationFingerprint)",
+            "runtime=\(runtimeContractFingerprint)",
+            "backup=\(recoveryBackupFingerprint ?? "none")",
+            "baseline=\(baselinePlanFingerprint ?? "unavailable")",
+            "reveal=\(ordinaryRevealPlanFingerprint ?? "unavailable")",
+            "authorized=\(authorizedBundleIdentifiers.joined(separator: ","))",
+        ])
+    }
+
+    public static func make(
+        acceptedPolicy: PersistentBundlePolicyDocument,
+        draft: BundlePolicyDraft,
+        candidateGeneration: UUID,
+        candidates: PolicyCandidateInventory,
+        scope: PolicyValidationScope,
+        observedRunningBundleIdentifiers: Set<String>,
+        runtimeContractFingerprint: String,
+        recoveryBackupFingerprint: String?,
+        baselinePlan: RevealAllowlistPlan?,
+        ordinaryRevealPlan: RevealAllowlistPlan?
+    ) -> Self {
+        Self(
+            acceptedPolicyFingerprint: acceptedPolicy.policyFingerprint,
+            draftFingerprint: draft.fingerprint,
+            candidateGeneration: candidateGeneration,
+            candidateInventoryFingerprint: candidates.fingerprint,
+            validationScopeFingerprint: scope.fingerprint,
+            observationFingerprint: PolicyFingerprint.sha256(
+                observedRunningBundleIdentifiers
+                    .map { "running=\($0.lowercased())" }
+                    .sorted()
+            ),
+            runtimeContractFingerprint: runtimeContractFingerprint,
+            recoveryBackupFingerprint: recoveryBackupFingerprint,
+            baselinePlanFingerprint: baselinePlan?.fingerprint,
+            ordinaryRevealPlanFingerprint: ordinaryRevealPlan?.fingerprint,
+            authorizedBundleIdentifiers: scope.approvedBundleIdentifiers
+                .sortedByBundleIdentifier()
+        )
+    }
+}
+
 public struct PolicyDryRunImpactReport: Equatable, Sendable {
     public let oldPolicy: PersistentBundlePolicyDocument
     public let proposedPolicy: PersistentBundlePolicyDocument?
@@ -452,6 +574,7 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
     public let newBaselinePlan: RevealAllowlistPlan?
     public let newRevealPlan: RevealAllowlistPlan?
     public let approvedBundleIdentifiers: [String]
+    public let reviewBinding: PolicyReviewBinding
     public let recoverySteps: [String]
 
     public var isApplicable: Bool {
@@ -460,7 +583,7 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
 
     public var text: String {
         var lines: [String] = [
-            "Blenny 0.0.5 Policy Editing Core dry-run impact report",
+            "Blenny 0.5.0 Reviewed Management Loop dry-run impact report",
             "OLD POLICY",
         ]
         lines.append(contentsOf: Self.policyLines(oldPolicy))
@@ -487,6 +610,8 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
                 approvedBundleIdentifiers: approvedBundleIdentifiers
             )
         )
+        lines.append("EXACT BASELINE ALLOWED BUNDLES")
+        lines.append(contentsOf: Self.allowedBundleLines(newBaselinePlan))
         lines.append("ORDINARY REVEAL IMPACT")
         lines.append(
             Self.planLine(
@@ -495,10 +620,40 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
                 approvedBundleIdentifiers: approvedBundleIdentifiers
             )
         )
+        lines.append("EXACT ORDINARY REVEAL ALLOWED BUNDLES")
+        lines.append(contentsOf: Self.allowedBundleLines(newRevealPlan))
+        lines.append("HIDDEN EXCLUSION")
+        if let proposedPolicy {
+            let hidden = proposedPolicy.policies
+                .filter { $0.policy == .hidden }
+                .map(\.bundleIdentifier)
+                .sorted { $0.lowercased() < $1.lowercased() }
+            lines.append(contentsOf: hidden.isEmpty ? ["- none"] : hidden.map { "- \($0): excluded from baseline and ordinary reveal" })
+        } else {
+            lines.append("- unavailable")
+        }
         lines.append("APPROVED BUNDLES")
         lines.append(contentsOf: approvedBundleIdentifiers.map { "- \($0)" })
+        lines.append("REVIEW BINDING")
+        lines.append("- review=\(reviewBinding.fingerprint)")
+        lines.append("- accepted=\(reviewBinding.acceptedPolicyFingerprint)")
+        lines.append("- draft=\(reviewBinding.draftFingerprint)")
+        lines.append("- candidateGeneration=\(reviewBinding.candidateGeneration.uuidString.lowercased())")
+        lines.append("- inventory=\(reviewBinding.candidateInventoryFingerprint)")
+        lines.append("- validationScope=\(reviewBinding.validationScopeFingerprint)")
+        lines.append("- observation=\(reviewBinding.observationFingerprint)")
+        lines.append("- runtime=\(reviewBinding.runtimeContractFingerprint)")
         lines.append("VALIDATION")
         lines.append(contentsOf: issues.isEmpty ? ["PASS"] : issues.map { "FAIL: \($0)" })
+        lines.append("TRANSACTION")
+        lines.append("- writer: one serialized exact allow-list replacement")
+        lines.append("- assertion replacement: activate reviewed baseline, then verify once")
+        lines.append("- failed write: verify prior state once; retry the exact write at most once")
+        lines.append("- persistence: commit accepted policy only after activation verification")
+        lines.append("- backup: scoped atomic 0600 previous policy; no no-op rotation")
+        lines.append("- rollback: replace and verify previous baseline, otherwise invalidate and fail closed")
+        lines.append("- Stop: reviewed disabled commit followed by owned-assertion cleanup")
+        lines.append("- restoration: reviewed scoped backup restore; repeated restore is idempotent")
         lines.append("RECOVERY PLAN")
         lines.append(contentsOf: recoverySteps.enumerated().map { "\($0.offset + 1). \($0.element)" })
         return lines.joined(separator: "\n")
@@ -529,6 +684,15 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
             "revealable=\(draft.revealable.joined(separator: ","))",
             "hidden=\(draft.hidden.joined(separator: ","))",
         ]
+    }
+
+    private static func allowedBundleLines(
+        _ plan: RevealAllowlistPlan?
+    ) -> [String] {
+        guard let plan else { return ["- unavailable"] }
+        let identifiers = plan.allowedBundleIdentifiers
+            .sorted { $0.lowercased() < $1.lowercased() }
+        return identifiers.isEmpty ? ["- none"] : identifiers.map { "- \($0)" }
     }
 
     private static func planLine(
@@ -566,10 +730,13 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
 }
 
 public struct PreparedPolicyEdit: Equatable, Sendable {
+    public let reviewIdentifier: UUID
     public let oldPolicy: PersistentBundlePolicyDocument
     public let newPolicy: PersistentBundlePolicyDocument
     public let report: PolicyDryRunImpactReport
     public let persistenceMode: PolicyEditPersistenceMode
+
+    public var reviewBinding: PolicyReviewBinding { report.reviewBinding }
 }
 
 public enum PolicyDryRunError: Error, Equatable, Sendable {
@@ -585,7 +752,11 @@ public enum PolicyDryRunner {
         observedRunningBundleIdentifiers: Set<String>,
         scope: PolicyValidationScope,
         blennyBundleIdentifier: String,
-        persistenceMode: PolicyEditPersistenceMode = .saveAcceptedPolicy
+        persistenceMode: PolicyEditPersistenceMode = .saveAcceptedPolicy,
+        candidateGeneration: UUID = PolicyReviewBinding.unversionedCandidateGeneration,
+        runtimeContractFingerprint: String = "deterministic-core",
+        recoveryBackupFingerprint: String? = nil,
+        reviewIdentifier: UUID = UUID()
     ) throws -> (report: PolicyDryRunImpactReport, prepared: PreparedPolicyEdit?) {
         _ = try oldPolicy.validated(forBlennyBundleIdentifier: blennyBundleIdentifier)
         let validation = PolicyDraftValidator.validate(
@@ -632,6 +803,18 @@ public enum PolicyDryRunner {
             "For a disabled proposal, acquire the current writer, persist disabled intent first, then invalidate all owned assertions; process disconnect remains the final restoration boundary.",
             "Restore Previous Policy reuses the scoped backup without rotating it; repeating the restore is a no-op.",
         ]
+        let reviewBinding = PolicyReviewBinding.make(
+            acceptedPolicy: oldPolicy,
+            draft: draft,
+            candidateGeneration: candidateGeneration,
+            candidates: candidates,
+            scope: scope,
+            observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+            runtimeContractFingerprint: runtimeContractFingerprint,
+            recoveryBackupFingerprint: recoveryBackupFingerprint,
+            baselinePlan: newBaseline,
+            ordinaryRevealPlan: newReveal
+        )
         let report = PolicyDryRunImpactReport(
             oldPolicy: oldPolicy,
             proposedPolicy: validation.document,
@@ -642,6 +825,7 @@ public enum PolicyDryRunner {
             newBaselinePlan: newBaseline,
             newRevealPlan: newReveal,
             approvedBundleIdentifiers: scope.approvedBundleIdentifiers,
+            reviewBinding: reviewBinding,
             recoverySteps: recoverySteps
         )
         guard let newPolicy = validation.document, report.isApplicable else {
@@ -650,6 +834,7 @@ public enum PolicyDryRunner {
         return (
             report,
             PreparedPolicyEdit(
+                reviewIdentifier: reviewIdentifier,
                 oldPolicy: oldPolicy,
                 newPolicy: newPolicy,
                 report: report,

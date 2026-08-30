@@ -164,7 +164,9 @@ Implemented exit criteria:
 
 ## 0.5.0 — Reviewed management loop
 
-Advance when:
+Status: **Complete on the exact Debug development boundary for macOS 27.0 build `26A5416b`; closed at local annotated tag `v0.5.0`, push deferred.**
+
+Implemented exit criteria:
 
 - A valid reviewed application-bundle draft can complete the intended baseline and ordinary-reveal behavior through the one serial writer on the explicitly supported development build.
 - The exact diff, impact report, validation state, and recovery plan remain visible before mutation.
@@ -174,6 +176,16 @@ Advance when:
 - Release promotion of the unsupported backend remains a separate, deliberate compatibility decision rather than an accidental consequence of UI integration.
 
 ## 0.6.0 — Lifecycle and display hardening
+
+Begin with a separate safety-feasibility investigation of real menu-bar ordering:
+
+- Distinguish application-bundle policy, a status-item instance, and physical menu-bar position.
+- Do not ship ordering that changes only the Blenny Board while leaving the real menu bar unchanged.
+- Do not use synthetic pointer movement, clicks, or Command-drag.
+- Decide whether to implement ordering only after exact position write, snapshot, diff, Review, restoration, and lifecycle behavior can all be proven.
+- Keep all ordering design, experiments, and implementation out of `0.5.0`.
+
+The existing lifecycle and display hardening scope remains:
 
 Advance when the supported matrix passes:
 

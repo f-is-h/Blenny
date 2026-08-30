@@ -71,7 +71,7 @@ struct PolicyEditingTransactionTests {
         }
 
         let store = MemoryPolicyStore(document: old)
-        let writer = TransactionPolicyWriter(behaviors: [.fail])
+        let writer = TransactionPolicyWriter(behaviors: [.fail, .fail])
         let activationFailure = PolicyEditingTransactionCoordinator(
             store: store,
             writerProvider: { writer }
@@ -85,6 +85,116 @@ struct PolicyEditingTransactionTests {
         }
         #expect(await store.document == old)
         #expect(await writer.restoreCount == 1)
+    }
+
+    @Test("A proven-safe activation failure retries the identical plan at most once")
+    func activationRetriesOnce() async throws {
+        let old = try document(enabled: false, revealable: usage, hidden: cleanShot)
+        let prepared = try makePrepared(old: old, enabled: true)
+        let store = MemoryPolicyStore(document: old)
+        let writer = TransactionPolicyWriter(behaviors: [.fail, .succeed])
+        let coordinator = PolicyEditingTransactionCoordinator(
+            store: store,
+            writerProvider: { writer }
+        )
+
+        #expect(try await coordinator.commit(prepared) == .committed(prepared.newPolicy))
+        #expect(await writer.appliedPlans.count == 2)
+        #expect(await writer.appliedPlans.allSatisfy {
+            $0 == prepared.report.newBaselinePlan
+        })
+    }
+
+    @Test("Verification failure cannot commit persistence")
+    func verificationFailureFailsClosed() async throws {
+        let old = try document(enabled: false, revealable: usage, hidden: cleanShot)
+        let prepared = try makePrepared(old: old, enabled: true)
+        let store = MemoryPolicyStore(document: old)
+        let writer = TransactionPolicyWriter(
+            behaviors: [.succeed],
+            verificationResults: [false]
+        )
+        let coordinator = PolicyEditingTransactionCoordinator(
+            store: store,
+            writerProvider: { writer }
+        )
+
+        do {
+            _ = try await coordinator.commit(prepared)
+            Issue.record("Expected verification failure")
+        } catch let failure as PolicyEditingTransactionFailure {
+            #expect(failure.stage == .verification)
+            #expect(failure.systemState == .unrestricted)
+        }
+        #expect(await store.document == old)
+        #expect(await store.saveCount == 0)
+        #expect(await writer.restoreCount == 1)
+    }
+
+    @Test("Verification failure restores a previously managed baseline")
+    func verificationFailureRestoresOldBaseline() async throws {
+        let old = try document(enabled: true, revealable: usage, hidden: cleanShot)
+        let prepared = try makePrepared(
+            old: old,
+            enabled: true,
+            revealable: cleanShot,
+            hidden: usage
+        )
+        let store = MemoryPolicyStore(document: old)
+        let writer = TransactionPolicyWriter(
+            behaviors: [.succeed, .succeed],
+            verificationResults: [false]
+        )
+        let coordinator = PolicyEditingTransactionCoordinator(
+            store: store,
+            writerProvider: { writer }
+        )
+
+        do {
+            _ = try await coordinator.commit(prepared)
+            Issue.record("Expected verification failure")
+        } catch let failure as PolicyEditingTransactionFailure {
+            #expect(failure.stage == .verification)
+            #expect(failure.systemState == .previousPolicyActive)
+        }
+        #expect(await writer.appliedPlans == [
+            prepared.report.newBaselinePlan,
+            prepared.report.oldBaselinePlan,
+        ].compactMap { $0 })
+        #expect(await writer.restoreCount == 0)
+        #expect(await store.document == old)
+        #expect(await store.saveCount == 0)
+    }
+
+    @Test("Verification rollback failure invalidates every owned assertion")
+    func verificationRollbackFailureRestoresEverything() async throws {
+        let old = try document(enabled: true, revealable: usage, hidden: cleanShot)
+        let prepared = try makePrepared(
+            old: old,
+            enabled: true,
+            revealable: cleanShot,
+            hidden: usage
+        )
+        let store = MemoryPolicyStore(document: old)
+        let writer = TransactionPolicyWriter(
+            behaviors: [.succeed, .fail],
+            verificationResults: [false]
+        )
+        let coordinator = PolicyEditingTransactionCoordinator(
+            store: store,
+            writerProvider: { writer }
+        )
+
+        do {
+            _ = try await coordinator.commit(prepared)
+            Issue.record("Expected rollback failure")
+        } catch let failure as PolicyEditingTransactionFailure {
+            #expect(failure.stage == .rollback)
+            #expect(failure.systemState == .unrestricted)
+        }
+        #expect(await writer.restoreCount == 1)
+        #expect(await store.document == old)
+        #expect(await store.saveCount == 0)
     }
 
     @Test("Persistence failure restores unrestricted state when management was disabled")
@@ -166,7 +276,7 @@ struct PolicyEditingTransactionTests {
             _ = try await coordinator.commit(prepared)
             Issue.record("Expected process-disconnect failure")
         } catch let failure as PolicyEditingTransactionFailure {
-            #expect(failure.stage == .activation)
+            #expect(failure.stage == .verification)
             #expect(failure.systemState == .unrestricted)
         }
         #expect(await store.document == old)
@@ -311,6 +421,98 @@ struct PolicyEditingTransactionTests {
         #expect(try await core.commit(prepared) == .committed(prepared.newPolicy))
         #expect(await store.document?.managementEnabled == false)
         #expect(await provider.creationCount == 1)
+    }
+
+    @Test("Stale reviewed inputs cannot reach the writer and Review is single-use")
+    func staleReviewFailsBeforeWriter() async throws {
+        let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)
+        let store = MemoryPolicyStore(document: accepted)
+        let provider = TransactionWriterProvider()
+        let core = PolicyEditingCore(
+            store: store,
+            blennyBundleIdentifier: blenny,
+            scope: scope,
+            writerProvider: { try await provider.makeWriter() }
+        )
+        let generation = UUID()
+        let draft = BundlePolicyDraft(acceptedPolicy: accepted)
+        let preview = try await core.previewResumeManaging(
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            candidateGeneration: generation,
+            runtimeContractFingerprint: "runtime-a"
+        )
+        let prepared = try #require(preview.1)
+
+        await #expect(throws: PolicyEditingCoreError.staleReviewedPlan) {
+            _ = try await core.commit(
+                prepared,
+                currentDraft: draft,
+                candidates: inventory(),
+                observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+                candidateGeneration: UUID(),
+                runtimeContractFingerprint: "runtime-a"
+            )
+        }
+        #expect(await provider.creationCount == 0)
+
+        #expect(try await core.commit(
+            prepared,
+            currentDraft: draft,
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            candidateGeneration: generation,
+            runtimeContractFingerprint: "runtime-a"
+        ) == .committed(prepared.newPolicy))
+        #expect(await provider.creationCount == 1)
+
+        await #expect(throws: PolicyEditingCoreError.reviewAlreadyConsumed) {
+            _ = try await core.commit(
+                prepared,
+                currentDraft: draft,
+                candidates: inventory(),
+                observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+                candidateGeneration: generation,
+                runtimeContractFingerprint: "runtime-a"
+            )
+        }
+        #expect(await provider.creationCount == 1)
+    }
+
+    @Test("A Draft edit after Review cannot reach the writer")
+    func staleDraftFailsBeforeWriter() async throws {
+        let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)
+        let store = MemoryPolicyStore(document: accepted)
+        let provider = TransactionWriterProvider()
+        let core = PolicyEditingCore(
+            store: store,
+            blennyBundleIdentifier: blenny,
+            scope: scope,
+            writerProvider: { try await provider.makeWriter() }
+        )
+        let generation = UUID()
+        let preview = try await core.preview(
+            draft: BundlePolicyDraft(acceptedPolicy: accepted),
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            candidateGeneration: generation,
+            runtimeContractFingerprint: "runtime-a"
+        )
+        let prepared = try #require(preview.1)
+        let changedDraft = BundlePolicyDraft(acceptedPolicy: accepted)
+            .assigning(usage, to: .hidden)
+
+        await #expect(throws: PolicyEditingCoreError.staleReviewedPlan) {
+            _ = try await core.commit(
+                prepared,
+                currentDraft: changedDraft,
+                candidates: inventory(),
+                observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+                candidateGeneration: generation,
+                runtimeContractFingerprint: "runtime-a"
+            )
+        }
+        #expect(await provider.creationCount == 0)
     }
 
     @Test("Malformed policy or unsupported backup cannot reach writer creation")
@@ -470,15 +672,18 @@ private actor TransactionPolicyWriter: PolicyAssertionWriting {
     private(set) var appliedPlans: [RevealAllowlistPlan] = []
     private(set) var restoreCount = 0
     private var behaviors: [TransactionWriterBehavior]
+    private var verificationResults: [Bool]
     private var activePlan: RevealAllowlistPlan?
     private let events: TransactionEventRecorder?
 
     init(
         events: TransactionEventRecorder? = nil,
-        behaviors: [TransactionWriterBehavior]
+        behaviors: [TransactionWriterBehavior],
+        verificationResults: [Bool] = []
     ) {
         self.events = events
         self.behaviors = behaviors
+        self.verificationResults = verificationResults
     }
 
     func applySessionTransition(with plan: RevealAllowlistPlan) async throws {
@@ -507,6 +712,13 @@ private actor TransactionPolicyWriter: PolicyAssertionWriting {
 
     func activePlanSnapshot() async -> RevealAllowlistPlan? {
         activePlan
+    }
+
+    func verifyActivePlan(_ expected: RevealAllowlistPlan) async throws -> Bool {
+        if !verificationResults.isEmpty {
+            return verificationResults.removeFirst()
+        }
+        return activePlan == expected
     }
 }
 

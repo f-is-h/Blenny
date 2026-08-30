@@ -5,6 +5,8 @@ import ObjectiveC.runtime
 
 public enum ExperimentalAssessmentRuntimeError: Error, Equatable, Sendable {
     case unsupportedOperatingSystem(majorVersion: Int)
+    case unsupportedOperatingSystemBuild(expected: String, actual: String)
+    case unsupportedArchitecture
     case frameworkUnavailable
     case classUnavailable(String)
     case selectorUnavailable(className: String, selector: String)
@@ -24,6 +26,9 @@ public final class ExperimentalMacOS27AssessmentFactory:
     RevealAssertionCandidateFactory,
     @unchecked Sendable
 {
+    public static let supportedOperatingSystemBuild = "26A5416b"
+    public static let compatibilityFingerprint =
+        "debug-arm64-macos27-26A5416b-assessment-contract-v1"
     private static let frameworkPath =
         "/System/Library/PrivateFrameworks/MenuBarClientCore.framework/MenuBarClientCore"
 
@@ -33,10 +38,20 @@ public final class ExperimentalMacOS27AssessmentFactory:
     private let methods: RuntimeMethods
 
     public init() throws {
+        #if !arch(arm64)
+        throw ExperimentalAssessmentRuntimeError.unsupportedArchitecture
+        #endif
         let majorVersion = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         guard majorVersion == 27 else {
             throw ExperimentalAssessmentRuntimeError.unsupportedOperatingSystem(
                 majorVersion: majorVersion
+            )
+        }
+        let operatingSystemBuild = Self.operatingSystemBuild() ?? "unavailable"
+        guard operatingSystemBuild == Self.supportedOperatingSystemBuild else {
+            throw ExperimentalAssessmentRuntimeError.unsupportedOperatingSystemBuild(
+                expected: Self.supportedOperatingSystemBuild,
+                actual: operatingSystemBuild
             )
         }
         guard let frameworkHandle = dlopen(Self.frameworkPath, RTLD_NOW | RTLD_LOCAL) else {
@@ -150,6 +165,22 @@ public final class ExperimentalMacOS27AssessmentFactory:
             throw ExperimentalAssessmentRuntimeError.classUnavailable(name)
         }
         return runtimeClass
+    }
+
+    private static func operatingSystemBuild() -> String? {
+        var size = 0
+        guard sysctlbyname("kern.osversion", nil, &size, nil, 0) == 0,
+              size > 1 else {
+            return nil
+        }
+        var bytes = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("kern.osversion", &bytes, &size, nil, 0) == 0 else {
+            return nil
+        }
+        return String(
+            decoding: bytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) },
+            as: UTF8.self
+        )
     }
 }
 

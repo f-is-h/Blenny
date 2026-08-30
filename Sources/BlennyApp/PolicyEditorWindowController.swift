@@ -140,11 +140,13 @@ struct ProductReviewPresentation {
     let safetyMessage: String
     let safetyTone: ReviewSafetyTone
     let prepared: PreparedPolicyEdit?
+    let mutationAvailable: Bool
 
     var canApply: Bool {
         guard let prepared else { return false }
-        return prepared.newPolicy == prepared.oldPolicy
-            || (!prepared.oldPolicy.managementEnabled && !prepared.newPolicy.managementEnabled)
+        let requiresAssertion = prepared.newPolicy != prepared.oldPolicy
+            && prepared.newPolicy.managementEnabled
+        return !requiresAssertion || mutationAvailable
     }
 }
 
@@ -166,6 +168,8 @@ final class ProductInterfaceModel: ObservableObject {
         availability: .disabled
     )
     @Published private(set) var candidateGeneration = UUID()
+    @Published private(set) var managementRuntimeState: ManagementLoopState = .unknown
+    @Published private(set) var developmentMutationAvailable = false
 
     private let iconResolver = WorkspacePolicyIconResolver()
     private var assignmentCoordinator = PolicyDraftAssignmentCoordinator()
@@ -182,7 +186,16 @@ final class ProductInterfaceModel: ObservableObject {
         )
     }
 
-    var managementEnabled: Bool? { model?.acceptedPolicy.managementEnabled }
+    var managementEnabled: Bool? {
+        switch managementRuntimeState {
+        case .active, .baselineVerified, .ordinaryRevealSession:
+            true
+        case .stopped, .unsupportedRuntimeContract, .failClosedUnrestricted:
+            false
+        default:
+            nil
+        }
+    }
     var hasDraftChanges: Bool { model?.hasDraftChanges == true }
     var systemItems: [SystemMenuBarItemObservation] { model?.systemItems ?? [] }
 
@@ -215,6 +228,9 @@ final class ProductInterfaceModel: ObservableObject {
         recoveryAvailable: Bool
     ) {
         self.model = model
+        if !model.acceptedPolicy.managementEnabled {
+            managementRuntimeState = .stopped
+        }
         assignmentCoordinator.replaceCandidateGeneration()
         candidateGeneration = assignmentCoordinator.candidateGeneration
         self.observationCount = observationCount
@@ -261,6 +277,14 @@ final class ProductInterfaceModel: ObservableObject {
 
     func setLaunchAtLoginState(_ state: LaunchAtLoginPresentationState) {
         launchAtLoginState = state
+    }
+
+    func setManagementRuntimeState(
+        _ state: ManagementLoopState,
+        developmentMutationAvailable: Bool
+    ) {
+        managementRuntimeState = state
+        self.developmentMutationAvailable = developmentMutationAvailable
     }
 
     func candidates(in policy: MenuBarBundlePolicy) -> [PolicyCandidate] {
@@ -392,16 +416,19 @@ final class ProductInterfaceModel: ObservableObject {
     ) {
         let requiresAssertion = prepared.map { edit in
             edit.newPolicy != edit.oldPolicy
-                && (edit.oldPolicy.managementEnabled || edit.newPolicy.managementEnabled)
+                && edit.newPolicy.managementEnabled
         } ?? false
         let safetyMessage: String
         let safetyTone: ReviewSafetyTone
         if prepared == nil {
             safetyMessage = "Apply is unavailable because validation failed. Review every FAIL line, refresh the bounded observation, and try again."
             safetyTone = .error
-        } else if requiresAssertion {
-            safetyMessage = "Preview only — this plan would create or restore a macOS 27 assertion. Complete the installed Debug dry-run, review the exact fingerprints and recovery plan, then obtain explicit authorization before any real write."
+        } else if requiresAssertion, developmentMutationAvailable {
+            safetyMessage = "Ready for this installed Debug build. Apply will use only this reviewed plan through the serial writer, verify it once, and restore the previous baseline if commit fails."
             safetyTone = .warning
+        } else if requiresAssertion {
+            safetyMessage = "Apply is unavailable because this build is outside the approved development compatibility boundary. No assertion can be created."
+            safetyTone = .error
         } else {
             safetyMessage = "Ready to apply. This plan does not create a system assertion; it only saves disabled policy intent or confirms a no-op."
             safetyTone = .neutral
@@ -411,7 +438,8 @@ final class ProductInterfaceModel: ObservableObject {
             report: report.text,
             safetyMessage: safetyMessage,
             safetyTone: safetyTone,
-            prepared: prepared
+            prepared: prepared,
+            mutationAvailable: developmentMutationAvailable
         )
         var updatedNavigation = navigation
         updatedNavigation.presentReview()
@@ -541,7 +569,8 @@ final class ProductInterfaceModel: ObservableObject {
                 """,
             safetyMessage: "Preview only — exact installed dry-run and explicit authorization remain required before any real assertion write.",
             safetyTone: .warning,
-            prepared: nil
+            prepared: nil,
+            mutationAvailable: false
         )
         var updatedNavigation = navigation
         updatedNavigation.presentReview()
@@ -687,7 +716,7 @@ final class PolicyEditorWindowController: NSWindowController {
         )
         let version = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "0.4.0"
+        ) as? String ?? "0.5.0"
         window.title = "Blenny \(version)"
         window.toolbarStyle = .unified
         window.contentMinSize = Self.minimumContentSize(
@@ -748,6 +777,21 @@ final class PolicyEditorWindowController: NSWindowController {
             model: model,
             observationCount: observationCount,
             recoveryAvailable: recoveryAvailable
+        )
+    }
+
+    var candidateGeneration: UUID {
+        interfaceModel.candidateGeneration
+    }
+
+    func setManagementRuntimeState(
+        _ state: ManagementLoopState,
+        developmentMutationAvailable: Bool
+    ) {
+        guard !usesPopulatedValidationFixture else { return }
+        interfaceModel.setManagementRuntimeState(
+            state,
+            developmentMutationAvailable: developmentMutationAvailable
         )
     }
 

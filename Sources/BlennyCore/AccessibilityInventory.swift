@@ -3,6 +3,7 @@ import Foundation
 
 public actor AccessibilityInventory {
     private let maximumElementsPerRefresh: Int
+    private let maximumDurationMilliseconds: Int
     private let maximumDurationNanoseconds: UInt64
     private let messagingTimeoutSeconds: Float
 
@@ -12,7 +13,8 @@ public actor AccessibilityInventory {
         messagingTimeoutSeconds: Float = 0.5
     ) {
         self.maximumElementsPerRefresh = max(1, maximumElementsPerRefresh)
-        self.maximumDurationNanoseconds = UInt64(max(1, maximumDurationMilliseconds)) * 1_000_000
+        self.maximumDurationMilliseconds = max(1, maximumDurationMilliseconds)
+        self.maximumDurationNanoseconds = UInt64(self.maximumDurationMilliseconds) * 1_000_000
         self.messagingTimeoutSeconds = max(0.1, messagingTimeoutSeconds)
     }
 
@@ -133,7 +135,7 @@ public actor AccessibilityInventory {
             notes.append("The bounded element limit was reached; the report is intentionally truncated instead of retrying or polling.")
         }
         if timeLimitReached {
-            notes.append("The five-second wall-clock budget was reached; the report is intentionally partial and no retry was attempted.")
+            notes.append("The \(maximumDurationMilliseconds)-millisecond wall-clock budget was reached; the report is intentionally partial and no retry was attempted.")
         }
 
         assignStableIdentities(to: &observations)

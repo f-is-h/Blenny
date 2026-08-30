@@ -15,7 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         "com.apple.weather.menu",
     ])
 
-    private let inventory = AccessibilityInventory()
+    private let inventory = AccessibilityInventory(
+        maximumDurationMilliseconds: 10_000,
+        messagingTimeoutSeconds: 0.1
+    )
     private var isRefreshing = false
     private var lastKnownAccessibilityTrust: Bool?
     private var persistentStore: PersistentBundlePolicyStore?
@@ -25,9 +28,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var ownershipSnapshot: MenuBarOwnershipSnapshot?
     private var observedRunningBundleIdentifiers = Set<String>()
     private var recoveryAvailable = false
+    private var developmentMutationAvailable = false
+    private var terminationRestoreInProgress = false
+    private var activeBaselinePlan: RevealAllowlistPlan?
+    private var activeRevealPlan: RevealAllowlistPlan?
+    private var ordinaryRevealTimeoutTask: Task<Void, Never>?
+    private lazy var managementLoop = ManagementLoopController(
+        writerProvider: {
+            #if DEBUG
+            let factory = try ExperimentalMacOS27AssessmentFactory()
+            return RevealAssertionWriter(factory: factory)
+            #else
+            throw PolicyInterfaceWriteError.releaseBackendUnavailable
+            #endif
+        }
+    )
     #if DEBUG
     private var policyCoexistenceController: DebugPolicyCoexistenceController?
-    private var terminationRestoreInProgress = false
     #endif
 
     private lazy var editorWindowController = PolicyEditorWindowController(
@@ -51,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onOpenDiagnostics: { [weak self] in self?.showEditor() },
         onRefresh: { [weak self] in self?.refresh() },
         onRequestAccess: { [weak self] in self?.requestAccessibilityAccess() },
+        onToggleOrdinaryReveal: { [weak self] in self?.toggleOrdinaryReveal() },
         onResumeManaging: { [weak self] in self?.reviewResumeManaging() },
         onStopManaging: { [weak self] in self?.reviewStopManaging() },
         onRestorePreviousPolicy: { [weak self] in self?.reviewRestorePreviousPolicy() },
@@ -62,6 +80,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = statusItemController
         updatePermissionPresentation()
         updateLaunchAtLoginPresentation()
+
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES",
+           !AccessibilityAuthorization.isTrusted {
+            Self.writeDryRunOutput(
+                "DRY-RUN FAILED: Accessibility is not granted to the installed 0.5.0 Debug app."
+            )
+            NSApplication.shared.terminate(nil)
+            return
+        }
+        #endif
 
         #if DEBUG
         if ProcessInfo.processInfo.environment[
@@ -81,20 +110,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         #if DEBUG
-        guard let policyCoexistenceController,
-              policyCoexistenceController.isRunning else {
+        if ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES" {
             return .terminateNow
         }
+        #endif
+        #if DEBUG
+        if let policyCoexistenceController,
+           policyCoexistenceController.isRunning {
+            guard !terminationRestoreInProgress else { return .terminateLater }
+            terminationRestoreInProgress = true
+            Task { @MainActor in
+                await policyCoexistenceController.stop()
+                sender.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
+        }
+        #endif
         guard !terminationRestoreInProgress else { return .terminateLater }
         terminationRestoreInProgress = true
+        ordinaryRevealTimeoutTask?.cancel()
+        ordinaryRevealTimeoutTask = nil
         Task { @MainActor in
-            await policyCoexistenceController.stop()
+            await managementLoop.terminate()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
-        #else
-        return .terminateNow
-        #endif
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -120,6 +160,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        ordinaryRevealTimeoutTask?.cancel()
+        ordinaryRevealTimeoutTask = nil
+        Task { await managementLoop.terminate() }
         #if DEBUG
         statusItemController.restoreDebugStatusItemPlacement()
         #endif
@@ -182,6 +225,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         isRefreshing = true
         let descriptors = runningApplicationDescriptors()
+        let runningIdentifiers = Set(
+            NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+        ).union(Bundle.main.bundleIdentifier.map { [$0] } ?? [])
         statusItemController.setRefreshing(true)
         editorWindowController.setRefreshing(true)
         Task { [weak self, inventory] in
@@ -190,11 +236,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 accessibilityTrusted: true
             )
             guard let self else { return }
-            await self.completeRefresh(report: report)
+            await self.completeRefresh(
+                report: report,
+                runningBundleIdentifiers: runningIdentifiers
+            )
         }
     }
 
-    private func completeRefresh(report: DiagnosticReport) async {
+    private func completeRefresh(
+        report: DiagnosticReport,
+        runningBundleIdentifiers: Set<String>
+    ) async {
         isRefreshing = false
         statusItemController.setRefreshing(false)
         editorWindowController.setRefreshing(false)
@@ -203,6 +255,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ownershipSnapshot = snapshot
         guard snapshot.isComplete else {
             let detail = snapshot.issues.map(\.description).joined(separator: "; ")
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES" {
+                Self.writeDryRunOutput(
+                    "DRY-RUN FAILED: read-only observation was incomplete: \(detail)"
+                )
+                NSApplication.shared.terminate(nil)
+            }
+            #endif
             editorWindowController.setStatus(
                 "The read-only observation was incomplete: \(detail). Apply remains unavailable.",
                 isError: true
@@ -235,34 +295,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 persistentStore: store,
                 initialPolicy: accepted
             )
+            let managementLoop = self.managementLoop
             let core = PolicyEditingCore(
                 store: interfaceStore,
                 blennyBundleIdentifier: blennyBundleIdentifier,
                 scope: model.validationScope,
                 writerProvider: {
-                    throw PolicyInterfaceWriteError.installedDryRunRequired
+                    try await managementLoop.writerForTransaction()
                 }
             )
-            let runningIdentifiers = Set(
-                NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
-            ).union([blennyBundleIdentifier])
-            let hasBackup = try await store.loadBackup() != nil
+            let runningIdentifiers = runningBundleIdentifiers.union([blennyBundleIdentifier])
+            let backup = try await store.loadBackup()
+            let hasBackup = backup != nil
 
             self.interfaceStore = interfaceStore
             editingCore = core
             editorModel = model
             observedRunningBundleIdentifiers = runningIdentifiers
             recoveryAvailable = hasBackup
-            statusItemController.setManagementEnabled(
-                accepted.managementEnabled,
-                recoveryAvailable: hasBackup
-            )
             statusItemController.setDraftHasChanges(model.hasDraftChanges)
             editorWindowController.display(
                 model: model,
                 observationCount: candidateInventory.candidates.count,
                 recoveryAvailable: hasBackup
             )
+            developmentMutationAvailable = developmentCompatibilityAvailable(
+                bundleIdentifier: blennyBundleIdentifier
+            )
+            let managementState = await recoverManagement(
+                accepted: accepted,
+                backup: backup,
+                model: model,
+                candidateGeneration: editorWindowController.candidateGeneration
+            )
+            presentManagementState(
+                managementState,
+                persistedManagementEnabled: accepted.managementEnabled
+            )
+            #if DEBUG
+            await runInstalledDryRunIfRequested(model: model)
+            #endif
         } catch {
             editingCore = nil
             editorWindowController.setStatus(
@@ -270,6 +342,180 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 isError: true
             )
         }
+    }
+
+    private func recoverManagement(
+        accepted: PersistentBundlePolicyDocument,
+        backup: PersistentBundlePolicyBackup?,
+        model: PolicyEditorViewModel,
+        candidateGeneration: UUID
+    ) async -> ManagementLoopState {
+        guard accepted.managementEnabled else {
+            activeBaselinePlan = nil
+            activeRevealPlan = nil
+            return await managementLoop.recover(
+                acceptedPolicy: accepted,
+                baseline: nil
+            )
+        }
+        guard developmentMutationAvailable else {
+            await managementLoop.failClosed(
+                "development runtime compatibility is unavailable"
+            )
+            return await managementLoop.state
+        }
+        guard let backup,
+              (try? backup.previousPolicy.validated(
+                forBlennyBundleIdentifier: model.blennyBundleIdentifier
+              )) != nil,
+              !backup.previousPolicy.policies.contains(where: {
+                $0.bundleIdentifier.lowercased().hasPrefix("com.apple.")
+              }) else {
+            await managementLoop.failClosed(
+                "the scoped recovery backup is missing or incompatible"
+            )
+            return await managementLoop.state
+        }
+
+        do {
+            let prepared = try PolicyDryRunner.prepare(
+                oldPolicy: accepted,
+                draft: BundlePolicyDraft(acceptedPolicy: accepted),
+                managementEnabled: true,
+                candidates: model.candidateInventory,
+                observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+                scope: model.acceptedPolicyScope,
+                blennyBundleIdentifier: model.blennyBundleIdentifier,
+                candidateGeneration: candidateGeneration,
+                runtimeContractFingerprint: runtimeContractFingerprint,
+                recoveryBackupFingerprint: backup.backupFingerprint
+            )
+            guard let baseline = prepared.report.newBaselinePlan,
+                  let reveal = prepared.report.newRevealPlan,
+                  prepared.prepared != nil else {
+                await managementLoop.failClosed(
+                    "accepted policy could not produce a valid startup baseline"
+                )
+                return await managementLoop.state
+            }
+            activeBaselinePlan = baseline
+            activeRevealPlan = reveal
+            return await managementLoop.recover(
+                acceptedPolicy: accepted,
+                baseline: baseline
+            )
+        } catch {
+            await managementLoop.failClosed("startup preflight failed: \(error)")
+            return await managementLoop.state
+        }
+    }
+
+    private func presentManagementState(
+        _ state: ManagementLoopState,
+        persistedManagementEnabled: Bool
+    ) {
+        statusItemController.setManagementState(
+            state,
+            persistedManagementEnabled: persistedManagementEnabled,
+            recoveryAvailable: recoveryAvailable
+        )
+        editorWindowController.setManagementRuntimeState(
+            state,
+            developmentMutationAvailable: developmentMutationAvailable
+        )
+        switch state {
+        case .active:
+            editorWindowController.setStatus(
+                "Management is active for the verified policy baseline.",
+                isError: false
+            )
+        case .stopped:
+            editorWindowController.setStatus(
+                "Management is stopped. Draft changes remain local until Review and Apply.",
+                isError: false
+            )
+        case .unsupportedRuntimeContract:
+            editorWindowController.setStatus(
+                "Management is unavailable because this runtime contract is unsupported. No assertion was created.",
+                isError: true
+            )
+        case .failClosedUnrestricted where persistedManagementEnabled:
+            editorWindowController.setStatus(
+                "Management could not be safely restored. Blenny is unrestricted and is not reporting management as active.",
+                isError: true
+            )
+        default:
+            break
+        }
+    }
+
+    #if DEBUG
+    private func runInstalledDryRunIfRequested(
+        model: PolicyEditorViewModel
+    ) async {
+        guard ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES"
+        else { return }
+        do {
+            let core = try makeCore(scope: model.acceptedPolicyScope)
+            let preview = try await core.previewResumeManaging(
+                candidates: model.candidateInventory,
+                observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+                candidateGeneration: editorWindowController.candidateGeneration,
+                runtimeContractFingerprint: runtimeContractFingerprint
+            )
+            Self.writeDryRunOutput(
+                preview.0.text
+                    + "\nDRY-RUN GUARANTEES"
+                    + "\n- installedBundle=\(Bundle.main.bundleURL.path)"
+                    + "\n- writerCreated=false"
+                    + "\n- assertionCreated=false"
+                    + "\n- persistenceChanged=false"
+                    + "\n- managementEnabledChanged=false"
+            )
+        } catch {
+            Self.writeDryRunOutput("DRY-RUN FAILED: \(error)")
+        }
+        NSApplication.shared.terminate(nil)
+    }
+
+    private static func writeDryRunOutput(_ text: String) {
+        guard let data = "\(text)\n".data(using: .utf8) else { return }
+        FileHandle.standardOutput.write(data)
+    }
+    #endif
+
+    private var runtimeContractFingerprint: String {
+        #if DEBUG
+        ExperimentalMacOS27AssessmentFactory.compatibilityFingerprint
+        #else
+        "release-backend-unavailable"
+        #endif
+    }
+
+    private func developmentCompatibilityAvailable(
+        bundleIdentifier: String
+    ) -> Bool {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] != "YES",
+              AccessibilityAuthorization.isTrusted,
+              Bundle.main.bundleURL.path.hasPrefix("/Applications/"),
+              Bundle.main.bundleIdentifier == bundleIdentifier,
+              let registeredURL = NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: bundleIdentifier
+              ),
+              registeredURL.resolvingSymlinksInPath().standardizedFileURL
+                == Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL else {
+            return false
+        }
+        do {
+            _ = try ExperimentalMacOS27AssessmentFactory()
+            return true
+        } catch {
+            return false
+        }
+        #else
+        return false
+        #endif
     }
 
     private func reviewResumeManaging() {
@@ -282,8 +528,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 let preview = try await core.previewResumeManaging(
                     candidates: model.candidateInventory,
-                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers
+                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+                    candidateGeneration: editorWindowController.candidateGeneration,
+                    runtimeContractFingerprint: runtimeContractFingerprint
                 )
+                editingCore = core
                 presentReview(
                     title: "Review Resume Managing",
                     report: preview.0,
@@ -309,7 +558,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let preview = try await core.preview(
                     draft: model.draft,
                     candidates: model.candidateInventory,
-                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers
+                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+                    candidateGeneration: editorWindowController.candidateGeneration,
+                    runtimeContractFingerprint: runtimeContractFingerprint
                 )
                 guard editorModel?.draft == model.draft else {
                     editorWindowController.setStatus(
@@ -340,8 +591,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 let preview = try await core.previewStopManaging(
                     candidates: model.candidateInventory,
-                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers
+                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+                    candidateGeneration: editorWindowController.candidateGeneration,
+                    runtimeContractFingerprint: runtimeContractFingerprint
                 )
+                editingCore = core
                 presentReview(
                     title: "Review Stop Managing and Restore",
                     report: preview.0,
@@ -370,8 +624,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 let preview = try await core.previewRestorePreviousPolicy(
                     candidates: model.candidateInventory,
-                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers
+                    observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+                    candidateGeneration: editorWindowController.candidateGeneration,
+                    runtimeContractFingerprint: runtimeContractFingerprint
                 )
+                editingCore = core
                 presentReview(
                     title: "Review Restore Previous Policy",
                     report: preview.0,
@@ -397,8 +654,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func apply(_ prepared: PreparedPolicyEdit) {
         let changesSystemAssertion = prepared.newPolicy != prepared.oldPolicy
-            && (prepared.oldPolicy.managementEnabled || prepared.newPolicy.managementEnabled)
-        guard !changesSystemAssertion else {
+            && prepared.newPolicy.managementEnabled
+        guard !changesSystemAssertion || developmentMutationAvailable else {
             editorWindowController.setStatus(
                 PolicyInterfaceWriteError.installedDryRunRequired.localizedDescription,
                 isError: true
@@ -406,23 +663,221 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         guard let core = editingCore else { return }
-        editorWindowController.setStatus("Applying reviewed policy intent…", isError: false)
+        guard let model = editorModel else { return }
+        editorWindowController.setStatus("Applying the exact reviewed plan…", isError: false)
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                _ = try await core.commit(prepared)
-                editorWindowController.setStatus(
-                    "Reviewed policy intent applied. No system assertion was created.",
-                    isError: false
+                if case .ordinaryRevealSession = await managementLoop.state,
+                   let baseline = activeBaselinePlan {
+                    await endOrdinaryReveal(
+                        baseline: baseline,
+                        persistedManagementEnabled: prepared.oldPolicy.managementEnabled
+                    )
+                    guard case .active = await managementLoop.state else {
+                        throw ManagementLoopError.managementIsNotActive
+                    }
+                }
+                let currentObservation: (
+                    candidates: PolicyCandidateInventory,
+                    runningBundleIdentifiers: Set<String>
                 )
-                refresh()
+                if prepared.newPolicy.managementEnabled {
+                    editorWindowController.setStatus(
+                        "Revalidating the exact reviewed observation…",
+                        isError: false
+                    )
+                    currentObservation = try await captureApplyPreflight()
+                } else {
+                    // A reviewed Stop never creates or replaces an assertion. Keep it
+                    // bound to the reviewed snapshot so unrelated process churn cannot
+                    // prevent the safety action. Draft and generation changes still
+                    // invalidate the prepared review in PolicyEditingCore.
+                    currentObservation = (
+                        candidates: model.candidateInventory,
+                        runningBundleIdentifiers: observedRunningBundleIdentifiers
+                    )
+                }
+                await managementLoop.beginTransaction()
+                presentManagementState(
+                    await managementLoop.state,
+                    persistedManagementEnabled: prepared.oldPolicy.managementEnabled
+                )
+                _ = try await core.commit(
+                    prepared,
+                    currentDraft: prepared.persistenceMode == .restorePreviousPolicy
+                        ? prepared.report.rawDraft : model.draft,
+                    candidates: currentObservation.candidates,
+                    observedRunningBundleIdentifiers: currentObservation.runningBundleIdentifiers,
+                    candidateGeneration: editorWindowController.candidateGeneration,
+                    runtimeContractFingerprint: runtimeContractFingerprint
+                )
+                activeBaselinePlan = prepared.newPolicy.managementEnabled
+                    ? prepared.report.newBaselinePlan : nil
+                activeRevealPlan = prepared.newPolicy.managementEnabled
+                    ? prepared.report.newRevealPlan : nil
+                try await managementLoop.synchronizeCommittedPolicy(
+                    prepared.newPolicy,
+                    baseline: prepared.report.newBaselinePlan
+                )
+                try await synchronizeInterfaceAfterCommit(
+                    prepared.newPolicy,
+                    previousModel: model
+                )
             } catch {
+                await reconcileManagementAfterFailure(prepared)
                 editorWindowController.setStatus(
-                    "Apply failed without broadening system access: \(error.localizedDescription)",
+                    "Apply failed without broadening the reviewed scope: \(error.localizedDescription)",
                     isError: true
                 )
             }
         }
+    }
+
+    private func captureApplyPreflight() async throws -> (
+        candidates: PolicyCandidateInventory,
+        runningBundleIdentifiers: Set<String>
+    ) {
+        guard AccessibilityAuthorization.isTrusted else {
+            throw PolicyInterfaceWriteError.applyPreflightUnavailable(
+                "Accessibility is not granted"
+            )
+        }
+        guard !isRefreshing else {
+            throw PolicyInterfaceWriteError.applyPreflightUnavailable(
+                "a manual refresh is already running"
+            )
+        }
+
+        let descriptors = runningApplicationDescriptors()
+        let runningBundleIdentifiers = Set(
+            NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+        )
+        let report = await inventory.capture(
+            applications: descriptors,
+            accessibilityTrusted: true
+        )
+        let snapshot = MenuBarOwnershipSnapshotBuilder.make(from: report)
+        guard snapshot.isComplete else {
+            let detail = snapshot.issues.map(\.description).joined(separator: "; ")
+            throw PolicyInterfaceWriteError.applyPreflightUnavailable(detail)
+        }
+        let blennyBundleIdentifier = try currentBundleIdentifier()
+        return (
+            PolicyCandidateInventory(observations: snapshot.observations),
+            runningBundleIdentifiers.union([blennyBundleIdentifier])
+        )
+    }
+
+    private func synchronizeInterfaceAfterCommit(
+        _ accepted: PersistentBundlePolicyDocument,
+        previousModel: PolicyEditorViewModel
+    ) async throws {
+        let synchronized = try PolicyEditorViewModel(
+            acceptedPolicy: accepted,
+            candidateInventory: previousModel.candidateInventory,
+            systemItems: previousModel.systemItems,
+            blennyBundleIdentifier: previousModel.blennyBundleIdentifier
+        )
+        let hasBackup = try await persistentStore?.loadBackup() != nil
+        editorModel = synchronized
+        editingCore = nil
+        recoveryAvailable = hasBackup
+        statusItemController.setDraftHasChanges(false)
+        editorWindowController.display(
+            model: synchronized,
+            observationCount: synchronized.candidateInventory.candidates.count,
+            recoveryAvailable: hasBackup
+        )
+        let state = await managementLoop.state
+        presentManagementState(
+            state,
+            persistedManagementEnabled: accepted.managementEnabled
+        )
+    }
+
+    private func reconcileManagementAfterFailure(
+        _ prepared: PreparedPolicyEdit
+    ) async {
+        if prepared.oldPolicy.managementEnabled,
+           let oldBaseline = prepared.report.oldBaselinePlan,
+           await managementLoop.activePlanSnapshot() == oldBaseline {
+            try? await managementLoop.synchronizeCommittedPolicy(
+                prepared.oldPolicy,
+                baseline: oldBaseline
+            )
+        } else if !prepared.oldPolicy.managementEnabled,
+                  await managementLoop.activePlanSnapshot() == nil {
+            await managementLoop.stop()
+        } else {
+            await managementLoop.failClosed("transaction failure cleanup")
+        }
+        presentManagementState(
+            await managementLoop.state,
+            persistedManagementEnabled: prepared.oldPolicy.managementEnabled
+        )
+    }
+
+    private func toggleOrdinaryReveal() {
+        guard let baseline = activeBaselinePlan,
+              let reveal = activeRevealPlan,
+              let accepted = editorModel?.acceptedPolicy else { return }
+        ordinaryRevealTimeoutTask?.cancel()
+        ordinaryRevealTimeoutTask = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                switch await managementLoop.state {
+                case .active:
+                    try await managementLoop.beginOrdinaryReveal(reveal)
+                    presentManagementState(
+                        await managementLoop.state,
+                        persistedManagementEnabled: accepted.managementEnabled
+                    )
+                    ordinaryRevealTimeoutTask = Task { @MainActor [weak self] in
+                        do {
+                            try await Task.sleep(for: .seconds(30))
+                        } catch {
+                            return
+                        }
+                        await self?.endOrdinaryReveal(
+                            baseline: baseline,
+                            persistedManagementEnabled: accepted.managementEnabled
+                        )
+                    }
+                case .ordinaryRevealSession:
+                    await endOrdinaryReveal(
+                        baseline: baseline,
+                        persistedManagementEnabled: accepted.managementEnabled
+                    )
+                default:
+                    break
+                }
+            } catch {
+                await managementLoop.failClosed("ordinary reveal activation failed")
+                presentManagementState(
+                    await managementLoop.state,
+                    persistedManagementEnabled: accepted.managementEnabled
+                )
+            }
+        }
+    }
+
+    private func endOrdinaryReveal(
+        baseline: RevealAllowlistPlan,
+        persistedManagementEnabled: Bool
+    ) async {
+        ordinaryRevealTimeoutTask?.cancel()
+        ordinaryRevealTimeoutTask = nil
+        do {
+            try await managementLoop.endOrdinaryReveal(baseline)
+        } catch {
+            await managementLoop.failClosed("ordinary reveal restoration failed")
+        }
+        presentManagementState(
+            await managementLoop.state,
+            persistedManagementEnabled: persistedManagementEnabled
+        )
     }
 
     private func showPreviewError(_ action: String, error: Error) {
@@ -436,12 +891,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let interfaceStore else {
             throw PolicyInterfaceWriteError.interfaceStoreUnavailable
         }
+        let managementLoop = self.managementLoop
         return PolicyEditingCore(
             store: interfaceStore,
             blennyBundleIdentifier: try currentBundleIdentifier(),
             scope: scope,
             writerProvider: {
-                throw PolicyInterfaceWriteError.installedDryRunRequired
+                try await managementLoop.writerForTransaction()
             }
         )
     }

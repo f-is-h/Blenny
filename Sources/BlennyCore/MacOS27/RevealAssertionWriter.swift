@@ -16,6 +16,7 @@ public enum RevealAssertionWriterError: Error, Equatable, Sendable {
     case activationTimedOut
     case transitionSuperseded
     case writerStopped
+    case invalidBaselineReplacement
 }
 
 public enum RevealAssertionWriterState: Equatable, Sendable {
@@ -117,6 +118,24 @@ public actor RevealAssertionWriter {
             }
             throw error
         }
+    }
+
+    public func applyBaselineReplacement(
+        with plan: RevealAllowlistPlan
+    ) async throws {
+        guard plan.presentation == .baseline else {
+            throw RevealAssertionWriterError.invalidBaselineReplacement
+        }
+        try await replace(with: plan)
+    }
+
+    public func verifyActivePlan(_ expected: RevealAllowlistPlan) -> Bool {
+        !stopped
+            && !transitioning
+            && pendingAssertion == nil
+            && activeAssertion != nil
+            && activePlan == expected
+            && state == .active(expected.presentation)
     }
 
     public func restoreAndStop() async {

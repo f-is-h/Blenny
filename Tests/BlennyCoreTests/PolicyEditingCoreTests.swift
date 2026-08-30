@@ -105,8 +105,8 @@ struct PolicyEditingCoreTests {
         #expect(await provider.assertionCount == 0)
     }
 
-    @Test("Dry-run authorization ignores unrelated running-bundle churn")
-    func dryRunIgnoresUnrelatedRunningBundles() throws {
+    @Test("Reviewed observation binds unrelated running-bundle churn")
+    func reviewBindsUnrelatedRunningBundles() throws {
         let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)
         let draft = BundlePolicyDraft(acceptedPolicy: accepted)
         let first = try PolicyDryRunner.prepare(
@@ -133,8 +133,8 @@ struct PolicyEditingCoreTests {
             blennyBundleIdentifier: blenny
         )
 
-        #expect(first.report.fingerprint == churned.report.fingerprint)
-        #expect(first.report.text == churned.report.text)
+        #expect(first.report.fingerprint != churned.report.fingerprint)
+        #expect(first.prepared?.reviewBinding != churned.prepared?.reviewBinding)
         #expect(
             first.report.newBaselinePlan?.fingerprint
                 != churned.report.newBaselinePlan?.fingerprint
@@ -267,8 +267,8 @@ struct PolicyEditingCoreTests {
         #expect(revealed.allowedBundleIdentifiers.contains(usage))
     }
 
-    @Test("PID replacement preserves accepted identity and report fingerprint")
-    func pidReplacementPreservesDraftIdentity() throws {
+    @Test("PID replacement preserves policy identity but invalidates Review")
+    func pidReplacementInvalidatesReview() throws {
         let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)
         let first = try PolicyDryRunner.prepare(
             oldPolicy: accepted,
@@ -289,8 +289,98 @@ struct PolicyEditingCoreTests {
             blennyBundleIdentifier: blenny
         )
 
-        #expect(first.report.fingerprint == replacement.report.fingerprint)
+        #expect(first.report.fingerprint != replacement.report.fingerprint)
+        #expect(first.prepared?.reviewBinding != replacement.prepared?.reviewBinding)
         #expect(first.prepared?.newPolicy == replacement.prepared?.newPolicy)
+    }
+
+    @Test("Candidate generation, validation scope, and observation bind Review")
+    func reviewBindingRejectsEveryStaleInput() throws {
+        let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)
+        let draft = BundlePolicyDraft(acceptedPolicy: accepted)
+        let generation = UUID()
+        let first = try PolicyDryRunner.prepare(
+            oldPolicy: accepted,
+            draft: draft,
+            managementEnabled: true,
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            scope: approvedScope,
+            blennyBundleIdentifier: blenny,
+            candidateGeneration: generation,
+            runtimeContractFingerprint: "runtime-a"
+        )
+        let newGeneration = try PolicyDryRunner.prepare(
+            oldPolicy: accepted,
+            draft: draft,
+            managementEnabled: true,
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            scope: approvedScope,
+            blennyBundleIdentifier: blenny,
+            candidateGeneration: UUID(),
+            runtimeContractFingerprint: "runtime-a"
+        )
+        let changedScope = try PolicyDryRunner.prepare(
+            oldPolicy: accepted,
+            draft: draft,
+            managementEnabled: true,
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            scope: PolicyValidationScope(
+                approvedBundleIdentifiers: [blenny, usage]
+            ),
+            blennyBundleIdentifier: blenny,
+            candidateGeneration: generation,
+            runtimeContractFingerprint: "runtime-a"
+        )
+        let changedRuntime = try PolicyDryRunner.prepare(
+            oldPolicy: accepted,
+            draft: draft,
+            managementEnabled: true,
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            scope: approvedScope,
+            blennyBundleIdentifier: blenny,
+            candidateGeneration: generation,
+            runtimeContractFingerprint: "runtime-b"
+        )
+
+        #expect(first.prepared?.reviewBinding != newGeneration.prepared?.reviewBinding)
+        #expect(first.report.reviewBinding != changedScope.report.reviewBinding)
+        #expect(first.prepared?.reviewBinding != changedRuntime.prepared?.reviewBinding)
+    }
+
+    @Test("Apple system bundles cannot become mutable targets")
+    func appleBundlesStayReadOnly() throws {
+        let apple = "com.apple.controlcenter"
+        let candidates = PolicyCandidateInventory(
+            observations: observations(order: [blenny, usage, cleanShot]) + [
+                MenuBarPolicyOwnershipObservation(
+                    bundleIdentifier: apple,
+                    processIdentifier: 99,
+                    menuBarItemCount: 1
+                )
+            ]
+        )
+        let result = try PolicyDryRunner.prepare(
+            oldPolicy: document(enabled: false, revealable: usage, hidden: cleanShot),
+            draft: BundlePolicyDraft(
+                visible: [blenny],
+                revealable: [usage],
+                hidden: [cleanShot, apple]
+            ),
+            managementEnabled: true,
+            candidates: candidates,
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot, apple],
+            scope: PolicyValidationScope(
+                approvedBundleIdentifiers: [blenny, usage, cleanShot, apple]
+            ),
+            blennyBundleIdentifier: blenny
+        )
+
+        #expect(result.prepared == nil)
+        #expect(result.report.issues.contains(.mutableAppleSystemBundle(apple)))
     }
 
     private var approvedScope: PolicyValidationScope {

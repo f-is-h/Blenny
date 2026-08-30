@@ -1859,7 +1859,7 @@ private struct SupportView: View {
 
     private var applicationVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
-            as? String ?? "0.4.0"
+            as? String ?? "0.5.0"
     }
 }
 

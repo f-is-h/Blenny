@@ -268,6 +268,91 @@ struct PersistentBundlePolicyTests {
         #expect((backupAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
     }
 
+    @Test("No-op save does not rewrite accepted policy or rotate recovery")
+    func noOpSavePreservesFiles() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BlennyPolicyNoOp-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let policyURL = directory.appendingPathComponent("bundle-policies.json")
+        let backupURL = directory.appendingPathComponent("previous.blenny-backup.json")
+        let store = try PersistentBundlePolicyStore(
+            policyURL: policyURL,
+            backupURL: backupURL
+        )
+        let enabled = try makeDocument()
+        try await store.save(enabled)
+        let disabled = try #require(try await store.disableManagement())
+        let policyData = try Data(contentsOf: policyURL)
+        let backupData = try Data(contentsOf: backupURL)
+        let transactionPath = await store.transactionURL.path
+
+        try await store.save(disabled)
+
+        #expect(try Data(contentsOf: policyURL) == policyData)
+        #expect(try Data(contentsOf: backupURL) == backupData)
+        #expect(!FileManager.default.fileExists(atPath: transactionPath))
+    }
+
+    @Test("Interrupted persistence restores old backup before commit and completes after commit")
+    func interruptedPersistenceRecovery() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BlennyPolicyRecovery-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let policyURL = directory.appendingPathComponent("bundle-policies.json")
+        let backupURL = directory.appendingPathComponent("previous.blenny-backup.json")
+        let store = try PersistentBundlePolicyStore(
+            policyURL: policyURL,
+            backupURL: backupURL
+        )
+        let enabled = try makeDocument()
+        try await store.save(enabled)
+        let oldPolicy = try #require(try await store.disableManagement())
+        let oldPolicyData = try Data(contentsOf: policyURL)
+        let oldBackupData = try Data(contentsOf: backupURL)
+        let newPolicy = try PersistentBundlePolicyDocument(
+            managementEnabled: true,
+            policies: [
+                .init(bundleIdentifier: blenny, policy: .visible),
+                .init(bundleIdentifier: hidden, policy: .revealable),
+                .init(bundleIdentifier: revealable, policy: .hidden),
+            ]
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        let newPolicyData = try encoder.encode(newPolicy)
+        let newBackupData = try encoder.encode(
+            PersistentBundlePolicyBackup(previousPolicy: oldPolicy)
+        )
+        let marker = PersistentBundlePolicyTransactionMarker(
+            oldPolicyData: oldPolicyData,
+            newPolicyHash: PersistentBundlePolicyStore.hash(newPolicyData),
+            oldBackupData: oldBackupData,
+            newBackupData: newBackupData
+        )
+        let markerURL = await store.transactionURL
+
+        try encoder.encode(marker).write(to: markerURL, options: .atomic)
+        try newBackupData.write(to: backupURL, options: .atomic)
+        let recoveredBeforeCommit = try PersistentBundlePolicyStore(
+            policyURL: policyURL,
+            backupURL: backupURL
+        )
+        #expect(try await recoveredBeforeCommit.load() == oldPolicy)
+        #expect(try Data(contentsOf: backupURL) == oldBackupData)
+        #expect(!FileManager.default.fileExists(atPath: markerURL.path))
+
+        try encoder.encode(marker).write(to: markerURL, options: .atomic)
+        try newBackupData.write(to: backupURL, options: .atomic)
+        try newPolicyData.write(to: policyURL, options: .atomic)
+        let recoveredAfterCommit = try PersistentBundlePolicyStore(
+            policyURL: policyURL,
+            backupURL: backupURL
+        )
+        #expect(try await recoveredAfterCommit.load() == newPolicy)
+        #expect(try await recoveredAfterCommit.loadBackup()?.previousPolicy == oldPolicy)
+        #expect(!FileManager.default.fileExists(atPath: markerURL.path))
+    }
+
     @Test("Policy and backup paths cannot alias")
     func storePathsMustDiffer() {
         let url = URL(fileURLWithPath: "/tmp/blenny-policy-test.json")

@@ -5,6 +5,8 @@ set -euo pipefail
 script_directory=${0:A:h}
 repository_root=${script_directory:h}
 configuration=${1:-debug}
+build_root=${BLENNY_BUILD_ROOT:-"$repository_root/build/$configuration"}
+scratch_directory="$build_root/swift"
 
 case "$configuration" in
   debug|release) ;;
@@ -14,10 +16,10 @@ case "$configuration" in
     ;;
 esac
 
-swift build --package-path "$repository_root" --configuration "$configuration" --product Blenny
-binary_directory=$(swift build --package-path "$repository_root" --configuration "$configuration" --show-bin-path)
+swift build --package-path "$repository_root" --scratch-path "$scratch_directory" --configuration "$configuration" --product Blenny
+binary_directory=$(swift build --package-path "$repository_root" --scratch-path "$scratch_directory" --configuration "$configuration" --show-bin-path)
 
-application_directory="$repository_root/build/$configuration/Blenny.app"
+application_directory="$build_root/Blenny.app"
 contents_directory="$application_directory/Contents"
 executable_directory="$contents_directory/MacOS"
 resources_directory="$contents_directory/Resources"
