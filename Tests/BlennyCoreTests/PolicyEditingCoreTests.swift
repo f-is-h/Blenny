@@ -105,8 +105,8 @@ struct PolicyEditingCoreTests {
         #expect(await provider.assertionCount == 0)
     }
 
-    @Test("Reviewed observation binds unrelated running-bundle churn")
-    func reviewBindsUnrelatedRunningBundles() throws {
+    @Test("Reviewed authorization ignores unrelated running-bundle churn")
+    func reviewIgnoresUnrelatedRunningBundles() throws {
         let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)
         let draft = BundlePolicyDraft(acceptedPolicy: accepted)
         let first = try PolicyDryRunner.prepare(
@@ -134,11 +134,31 @@ struct PolicyEditingCoreTests {
         )
 
         #expect(first.report.fingerprint != churned.report.fingerprint)
-        #expect(first.prepared?.reviewBinding != churned.prepared?.reviewBinding)
+        #expect(first.prepared?.reviewBinding == churned.prepared?.reviewBinding)
         #expect(
             first.report.newBaselinePlan?.fingerprint
                 != churned.report.newBaselinePlan?.fingerprint
         )
+    }
+
+    @Test("Draft Apply prepares active management without mutating during preparation")
+    func draftApplyStartsManagement() async throws {
+        let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)
+        let core = PolicyEditingCore(
+            store: MemoryPolicyStore(document: accepted),
+            blennyBundleIdentifier: blenny,
+            scope: approvedScope,
+            writerProvider: { ProbePolicyWriter(probe: WriterProviderProbe()) }
+        )
+        let preview = try await core.preview(
+            draft: BundlePolicyDraft(acceptedPolicy: accepted).assigning(usage, to: .hidden),
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot]
+        )
+
+        #expect(preview.1?.newPolicy.managementEnabled == true)
+        #expect(preview.0.text.contains("REVIEW BINDING"))
+        #expect(preview.0.text.contains("RECOVERY PLAN"))
     }
 
     @Test("Invalid, duplicate, case-conflicting, overlapping, and unknown input fails closed")

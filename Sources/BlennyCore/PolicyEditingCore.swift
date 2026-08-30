@@ -181,6 +181,23 @@ public struct PolicyCandidateInventory: Equatable, Sendable {
         )
     }
 
+    public func fingerprint(
+        for authorizedBundleIdentifiers: [String]
+    ) -> String {
+        let authorized = Set(
+            authorizedBundleIdentifiers.compactMap(BundlePolicyIdentity.canonicalKey)
+        )
+        let lines = candidates
+            .filter { candidate in
+                BundlePolicyIdentity.canonicalKey(for: candidate.bundleIdentifier)
+                    .map(authorized.contains) == true
+            }
+            .map {
+                "candidate=\($0.bundleIdentifier)|pids=\($0.processIdentifiers.map(String.init).joined(separator: ","))|items=\($0.menuBarItemCount)"
+            }
+        return PolicyFingerprint.sha256(lines)
+    }
+
     fileprivate var candidatesByCanonicalIdentifier: [String: PolicyCandidate] {
         Dictionary(uniqueKeysWithValues: candidates.compactMap { candidate in
             BundlePolicyIdentity.canonicalKey(for: candidate.bundleIdentifier).map {
@@ -483,6 +500,8 @@ public struct BundlePolicyDiff: Equatable, Sendable {
 public enum PolicyEditPersistenceMode: Equatable, Sendable {
     case saveAcceptedPolicy
     case restorePreviousPolicy
+    /// An unchanged accepted policy still needs activation after failed startup.
+    case resumeManagement
 }
 
 public extension PersistentBundlePolicyDocument {
@@ -543,23 +562,37 @@ public struct PolicyReviewBinding: Equatable, Sendable {
         baselinePlan: RevealAllowlistPlan?,
         ordinaryRevealPlan: RevealAllowlistPlan?
     ) -> Self {
-        Self(
+        let authorizedBundleIdentifiers = scope.approvedBundleIdentifiers
+            .sortedByBundleIdentifier()
+        let authorizedCanonicalIdentifiers = Set(
+            authorizedBundleIdentifiers.compactMap(BundlePolicyIdentity.canonicalKey)
+        )
+        return Self(
             acceptedPolicyFingerprint: acceptedPolicy.policyFingerprint,
             draftFingerprint: draft.fingerprint,
             candidateGeneration: candidateGeneration,
-            candidateInventoryFingerprint: candidates.fingerprint,
+            candidateInventoryFingerprint: candidates.fingerprint(
+                for: authorizedBundleIdentifiers
+            ),
             validationScopeFingerprint: scope.fingerprint,
             observationFingerprint: PolicyFingerprint.sha256(
                 observedRunningBundleIdentifiers
+                    .filter {
+                        BundlePolicyIdentity.canonicalKey(for: $0)
+                            .map(authorizedCanonicalIdentifiers.contains) == true
+                    }
                     .map { "running=\($0.lowercased())" }
                     .sorted()
             ),
             runtimeContractFingerprint: runtimeContractFingerprint,
             recoveryBackupFingerprint: recoveryBackupFingerprint,
-            baselinePlanFingerprint: baselinePlan?.fingerprint,
-            ordinaryRevealPlanFingerprint: ordinaryRevealPlan?.fingerprint,
-            authorizedBundleIdentifiers: scope.approvedBundleIdentifiers
-                .sortedByBundleIdentifier()
+            baselinePlanFingerprint: baselinePlan?.authorizationFingerprint(
+                for: authorizedBundleIdentifiers
+            ),
+            ordinaryRevealPlanFingerprint: ordinaryRevealPlan?.authorizationFingerprint(
+                for: authorizedBundleIdentifiers
+            ),
+            authorizedBundleIdentifiers: authorizedBundleIdentifiers
         )
     }
 }
@@ -583,7 +616,7 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
 
     public var text: String {
         var lines: [String] = [
-            "Blenny 0.5.0 Reviewed Management Loop dry-run impact report",
+            "Blenny Reviewed Management Loop technical dry-run report",
             "OLD POLICY",
         ]
         lines.append(contentsOf: Self.policyLines(oldPolicy))
@@ -650,6 +683,7 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
         lines.append("- assertion replacement: activate reviewed baseline, then verify once")
         lines.append("- failed write: verify prior state once; retry the exact write at most once")
         lines.append("- persistence: commit accepted policy only after activation verification")
+        lines.append("- unchanged Resume: activate and verify only if inactive; no policy save or backup rotation; failure restores unrestricted state")
         lines.append("- backup: scoped atomic 0600 previous policy; no no-op rotation")
         lines.append("- rollback: replace and verify previous baseline, otherwise invalidate and fail closed")
         lines.append("- Stop: reviewed disabled commit followed by owned-assertion cleanup")
@@ -729,6 +763,24 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
     }
 }
 
+public extension PolicyDryRunImpactReport {
+    var validationFailureSummary: String {
+        let missing = Set(issues.compactMap { issue -> String? in
+            switch issue {
+            case let .unknownBundleIdentifier(identifier), let .missingCurrentOwnership(identifier):
+                identifier
+            default:
+                nil
+            }
+        }).sorted()
+        if !missing.isEmpty {
+            return "Open the managed app(s) \(missing.joined(separator: ", ")) with their menu-bar items, then choose Resume."
+        }
+        let detail = issues.map(\.description).joined(separator: "; ")
+        return detail.isEmpty ? "No safe baseline is available. Refresh and try again." : detail
+    }
+}
+
 public struct PreparedPolicyEdit: Equatable, Sendable {
     public let reviewIdentifier: UUID
     public let oldPolicy: PersistentBundlePolicyDocument
@@ -798,7 +850,7 @@ public enum PolicyDryRunner {
         let recoverySteps = [
             "For an enabled proposal, keep the accepted policy file unchanged until the proposed baseline activates.",
             "If activation fails, invalidate the candidate and preserve the previous safe assertion or unrestricted state.",
-            "After activation, atomically persist the accepted policy and one 0600 previous-policy backup.",
+            "After activation, atomically persist changed accepted policy and one 0600 previous-policy backup. Unchanged Resume does not save or rotate either file.",
             "If persistence fails, replace the candidate with the previous baseline; if that replacement fails, invalidate all owned assertions and remain unrestricted.",
             "For a disabled proposal, acquire the current writer, persist disabled intent first, then invalidate all owned assertions; process disconnect remains the final restoration boundary.",
             "Restore Previous Policy reuses the scoped backup without rotating it; repeating the restore is a no-op.",

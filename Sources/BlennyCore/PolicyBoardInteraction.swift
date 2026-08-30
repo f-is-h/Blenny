@@ -71,9 +71,12 @@ public enum PolicyDraftAssignmentRejection: String, Equatable, Sendable {
     case samePolicy
     case blennyMustRemainVisible
     case unknownCandidate
+    case interactionInProgress
 
     public var interfaceReason: String {
         switch self {
+        case .interactionInProgress:
+            "Wait for the current operation to finish."
         case .duplicateDelivery:
             "This drop was already handled."
         case .staleCandidateGeneration:

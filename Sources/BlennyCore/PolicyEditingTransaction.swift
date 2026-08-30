@@ -64,6 +64,20 @@ public struct PolicyEditingTransactionFailure: Error, Equatable, Sendable {
 public enum PolicyEditingTransactionResult: Equatable, Sendable {
     case noChange
     case committed(PersistentBundlePolicyDocument)
+    case reactivated(PersistentBundlePolicyDocument)
+}
+
+public struct PolicyEditingCommitOutcome: Equatable, Sendable {
+    public let result: PolicyEditingTransactionResult
+    public let effectivePrepared: PreparedPolicyEdit
+
+    public init(
+        result: PolicyEditingTransactionResult,
+        effectivePrepared: PreparedPolicyEdit
+    ) {
+        self.result = result
+        self.effectivePrepared = effectivePrepared
+    }
 }
 
 public actor PolicyEditingTransactionCoordinator {
@@ -103,6 +117,9 @@ public actor PolicyEditingTransactionCoordinator {
             )
         }
         guard prepared.newPolicy != prepared.oldPolicy else {
+            if prepared.persistenceMode == .resumeManagement && prepared.newPolicy.managementEnabled {
+                return try await resumeUnchangedPolicy(prepared)
+            }
             return .noChange
         }
         guard let newBaseline = prepared.report.newBaselinePlan,
@@ -210,6 +227,51 @@ public actor PolicyEditingTransactionCoordinator {
                 detail: "persistence failed; newly activated assertion was restored: \(error)"
             )
         }
+    }
+
+    private func resumeUnchangedPolicy(
+        _ prepared: PreparedPolicyEdit
+    ) async throws -> PolicyEditingTransactionResult {
+        guard let backupFingerprint = prepared.reviewBinding.recoveryBackupFingerprint,
+              try await store.loadBackup()?.backupFingerprint == backupFingerprint else {
+            throw PolicyEditingTransactionFailure(
+                stage: .staleAcceptedPolicy, systemState: .unrestricted,
+                detail: "resume recovery backup is missing or changed after preparation"
+            )
+        }
+        guard let baseline = prepared.report.newBaselinePlan else {
+            throw PolicyEditingTransactionFailure(
+                stage: .activation, systemState: .unrestricted,
+                detail: "resume has no validated baseline"
+            )
+        }
+        let writer: any PolicyAssertionWriting
+        do {
+            writer = try await writerProvider()
+        } catch {
+            throw PolicyEditingTransactionFailure(
+                stage: .writerCreation, systemState: .unrestricted,
+                detail: "resume writer unavailable: \(error)"
+            )
+        }
+        if let existing = await writer.activePlanSnapshot() {
+            // A repeated Resume never replaces an already verified exact plan.
+            if existing == baseline, (try? await writer.verifyActivePlan(existing)) == true {
+                return .noChange
+            }
+            await writer.restoreAndStop()
+            throw PolicyEditingTransactionFailure(
+                stage: .verification, systemState: .unrestricted,
+                detail: "resume found an unexpected or unverifiable active assertion"
+            )
+        }
+        // Persisted enabled intent is not evidence of a previous active writer.
+        // This is first activation from unrestricted, including its rollback rule.
+        try await activateAndVerify(
+            writer: writer, newBaseline: baseline, oldBaseline: baseline,
+            oldManagementEnabled: false
+        )
+        return .reactivated(prepared.newPolicy)
     }
 
     private func activateAndVerify(
@@ -322,7 +384,7 @@ public actor PolicyEditingTransactionCoordinator {
 
     private func persist(_ prepared: PreparedPolicyEdit) async throws {
         switch prepared.persistenceMode {
-        case .saveAcceptedPolicy:
+        case .saveAcceptedPolicy, .resumeManagement:
             try await store.save(prepared.newPolicy)
         case .restorePreviousPolicy:
             let restored = try await store.restoreBackup()
@@ -378,7 +440,7 @@ public actor PolicyEditingCore {
         return try PolicyDryRunner.prepare(
             oldPolicy: accepted,
             draft: draft,
-            managementEnabled: accepted.managementEnabled,
+            managementEnabled: true,
             candidates: candidates,
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
             scope: scope,
@@ -404,9 +466,10 @@ public actor PolicyEditingCore {
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
             scope: scope,
             blennyBundleIdentifier: blennyBundleIdentifier,
+            persistenceMode: .resumeManagement,
             candidateGeneration: candidateGeneration,
             runtimeContractFingerprint: runtimeContractFingerprint,
-            recoveryBackupFingerprint: try await backupFingerprint()
+            recoveryBackupFingerprint: try await resumeBackupFingerprint(accepted: accepted)
         )
     }
 
@@ -463,29 +526,38 @@ public actor PolicyEditingCore {
         observedRunningBundleIdentifiers: Set<String>,
         candidateGeneration: UUID,
         runtimeContractFingerprint: String
-    ) async throws -> PolicyEditingTransactionResult {
+    ) async throws -> PolicyEditingCommitOutcome {
         guard !consumedReviewIdentifiers.contains(prepared.reviewIdentifier) else {
             throw PolicyEditingCoreError.reviewAlreadyConsumed
         }
         guard let accepted = try await store.load() else { return try missingPolicy() }
-        let currentBackupFingerprint = try await backupFingerprint()
-        let currentBinding = PolicyReviewBinding.make(
-            acceptedPolicy: accepted,
+        let currentBackupFingerprint = prepared.persistenceMode == .resumeManagement
+            ? try await resumeBackupFingerprint(accepted: accepted)
+            : try await backupFingerprint()
+        let refreshed = try PolicyDryRunner.prepare(
+            oldPolicy: accepted,
             draft: currentDraft,
-            candidateGeneration: candidateGeneration,
+            managementEnabled: prepared.newPolicy.managementEnabled,
             candidates: candidates,
-            scope: scope,
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+            scope: scope,
+            blennyBundleIdentifier: blennyBundleIdentifier,
+            persistenceMode: prepared.persistenceMode,
+            candidateGeneration: candidateGeneration,
             runtimeContractFingerprint: runtimeContractFingerprint,
             recoveryBackupFingerprint: currentBackupFingerprint,
-            baselinePlan: prepared.report.newBaselinePlan,
-            ordinaryRevealPlan: prepared.report.newRevealPlan
+            reviewIdentifier: prepared.reviewIdentifier
         )
-        guard currentBinding == prepared.reviewBinding else {
+        guard let effectivePrepared = refreshed.prepared,
+              effectivePrepared.newPolicy == prepared.newPolicy,
+              effectivePrepared.reviewBinding == prepared.reviewBinding else {
             throw PolicyEditingCoreError.staleReviewedPlan
         }
         consumedReviewIdentifiers.insert(prepared.reviewIdentifier)
-        return try await transaction.commit(prepared)
+        return PolicyEditingCommitOutcome(
+            result: try await transaction.commit(effectivePrepared),
+            effectivePrepared: effectivePrepared
+        )
     }
 
     public func commit(
@@ -506,6 +578,20 @@ public actor PolicyEditingCore {
         try await store.loadBackup()?.backupFingerprint
     }
 
+    private func resumeBackupFingerprint(accepted: PersistentBundlePolicyDocument) async throws -> String? {
+        guard accepted.managementEnabled else { return try await backupFingerprint() }
+        guard let backup = try await store.loadBackup() else {
+            throw PolicyEditingCoreError.previousPolicyBackupMissing
+        }
+        guard (try? backup.previousPolicy.validated(forBlennyBundleIdentifier: blennyBundleIdentifier)) != nil,
+              !backup.previousPolicy.policies.contains(where: {
+                  $0.bundleIdentifier.lowercased().hasPrefix("com.apple.")
+              }) else {
+            throw PolicyEditingCoreError.previousPolicyBackupIncompatible
+        }
+        return backup.backupFingerprint
+    }
+
     private func missingPolicy<T>() throws -> T {
         throw PolicyEditingCoreError.acceptedPolicyMissing
     }
@@ -514,9 +600,29 @@ public actor PolicyEditingCore {
 public enum PolicyEditingCoreError: Error, Equatable, Sendable {
     case acceptedPolicyMissing
     case previousPolicyBackupMissing
+    case previousPolicyBackupIncompatible
     case currentReviewBindingRequired
     case staleReviewedPlan
     case reviewAlreadyConsumed
+}
+
+extension PolicyEditingCoreError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .acceptedPolicyMissing:
+            return "The accepted policy is missing. Refresh and apply again."
+        case .previousPolicyBackupMissing:
+            return "The previous-policy backup is missing."
+        case .previousPolicyBackupIncompatible:
+            return "The previous-policy backup is incompatible. Management remains unrestricted."
+        case .currentReviewBindingRequired:
+            return "The prepared changes are missing a current safety check. Apply again."
+        case .staleReviewedPlan:
+            return "A managed app, your changes, or the recovery state changed during preparation. Apply again."
+        case .reviewAlreadyConsumed:
+            return "These changes were already applied."
+        }
+    }
 }
 
 public extension PersistentBundlePolicyBackup {

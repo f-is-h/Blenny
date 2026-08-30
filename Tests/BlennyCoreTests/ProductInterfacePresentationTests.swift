@@ -3,33 +3,17 @@ import Testing
 
 @Suite("Product interface presentation")
 struct ProductInterfacePresentationTests {
-    @Test("Top-level navigation always dismisses review")
-    func topLevelNavigationDismissesReview() {
+    @Test("Normal navigation contains only Organize, Settings and Support")
+    func topLevelNavigation() {
         var state = ProductInterfaceNavigationState()
-
-        state.presentReview()
         #expect(state.section == .organize)
-        #expect(state.isReviewPresented)
-
         state.navigate(to: .settings)
         #expect(state.section == .settings)
-        #expect(!state.isReviewPresented)
-
         state.navigate(to: .support)
         #expect(state.section == .support)
-        #expect(!state.isReviewPresented)
-    }
-
-    @Test("Review is an Organize route")
-    func reviewIsAnOrganizeRoute() {
-        var state = ProductInterfaceNavigationState(section: .support)
-
-        state.presentReview()
-
+        state.navigate(to: .organize)
         #expect(state.section == .organize)
-        #expect(state.isReviewPresented)
-        state.dismissReview()
-        #expect(!state.isReviewPresented)
+        #expect(ProductInterfaceSection.allCases == [.organize, .settings, .support])
     }
 
     @Test("Stopped management enables only its valid recovery controls")
@@ -37,6 +21,7 @@ struct ProductInterfacePresentationTests {
         let state = ProductInterfaceControlState(
             hasModel: true,
             managementEnabled: false,
+            managementRuntimeState: .stopped,
             recoveryAvailable: true,
             hasDraftChanges: false,
             isRefreshing: false,
@@ -47,10 +32,33 @@ struct ProductInterfacePresentationTests {
         #expect(state.permission == .granted)
         #expect(state.refreshEnabled)
         #expect(!state.discardDraftEnabled)
-        #expect(state.reviewEnabled)
+        #expect(state.applyEnabled)
         #expect(state.resumeEnabled)
         #expect(!state.stopEnabled)
         #expect(state.restoreEnabled)
+    }
+
+    @Test("Failed startup keeps Resume reachable after permission grant despite persisted enabled intent")
+    func resumeAfterFailedStartup() {
+        for trusted in [false, true] {
+            for dirty in [false, true] {
+                for busy in [false, true] {
+                    let controls = ProductInterfaceControlState(
+                        hasModel: true, managementEnabled: true,
+                        managementRuntimeState: .failClosedUnrestricted("startup failed"),
+                        recoveryAvailable: true, hasDraftChanges: dirty,
+                        isRefreshing: false, isApplying: busy,
+                        accessibilityTrusted: trusted, accessibilityPromptRequested: true
+                    )
+                    #expect(controls.resumeEnabled == (trusted && !dirty && !busy))
+                    #expect(controls.stopEnabled == !busy)
+                }
+            }
+        }
+        #expect(!ManagementLoopState.active("baseline").canResume)
+        #expect(!ManagementLoopState.ordinaryRevealSession("reveal").canResume)
+        #expect(!ManagementLoopState.terminating.canResume)
+        #expect(!ManagementLoopState.unknown.canResume)
     }
 
     @Test("A draft protects refresh and exposes discard")
@@ -58,6 +66,7 @@ struct ProductInterfacePresentationTests {
         let state = ProductInterfaceControlState(
             hasModel: true,
             managementEnabled: true,
+            managementRuntimeState: .active("baseline"),
             recoveryAvailable: false,
             hasDraftChanges: true,
             isRefreshing: false,
@@ -68,7 +77,7 @@ struct ProductInterfacePresentationTests {
         #expect(state.permission == .requestedButNotGranted)
         #expect(!state.refreshEnabled)
         #expect(state.discardDraftEnabled)
-        #expect(state.reviewEnabled)
+        #expect(state.applyEnabled)
         #expect(!state.resumeEnabled)
         #expect(state.stopEnabled)
         #expect(!state.restoreEnabled)
@@ -79,6 +88,7 @@ struct ProductInterfacePresentationTests {
         let state = ProductInterfaceControlState(
             hasModel: true,
             managementEnabled: true,
+            managementRuntimeState: .active("baseline"),
             recoveryAvailable: true,
             hasDraftChanges: true,
             isRefreshing: true,
@@ -89,7 +99,7 @@ struct ProductInterfacePresentationTests {
         #expect(state.permission == .notRequested)
         #expect(!state.refreshEnabled)
         #expect(!state.discardDraftEnabled)
-        #expect(!state.reviewEnabled)
+        #expect(!state.applyEnabled)
         #expect(!state.resumeEnabled)
         #expect(!state.stopEnabled)
         #expect(!state.restoreEnabled)
@@ -100,6 +110,7 @@ struct ProductInterfacePresentationTests {
         let state = ProductInterfaceControlState(
             hasModel: false,
             managementEnabled: nil,
+            managementRuntimeState: .unknown,
             recoveryAvailable: false,
             hasDraftChanges: false,
             isRefreshing: false,
@@ -109,7 +120,7 @@ struct ProductInterfacePresentationTests {
 
         #expect(state.permission == .notRequested)
         #expect(state.refreshEnabled)
-        #expect(!state.reviewEnabled)
+        #expect(!state.applyEnabled)
     }
 
     @Test("Launch at Login presentation follows system availability")

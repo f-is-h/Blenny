@@ -85,6 +85,33 @@ struct ManagementLoopControllerTests {
         #expect(await provider.creationCount == 0)
     }
 
+    @Test("Explicit reviewed activation can acquire a fresh writer after failed startup")
+    func explicitResumeAfterFailedStartup() async throws {
+        let provider = ManagementWriterProvider()
+        let loop = ManagementLoopController(writerProvider: { await provider.makeWriter() })
+        await loop.failClosed("permission unavailable at startup")
+        let writer = try await loop.writerForReviewedActivation()
+        try await writer.applyBaselineReplacement(with: baseline)
+        try await loop.synchronizeCommittedPolicy(policy(enabled: true), baseline: baseline)
+        #expect(await loop.state == .active(baseline.fingerprint))
+        #expect(await provider.creationCount == 1)
+        await loop.terminate()
+        #expect(await loop.activePlanSnapshot() == nil)
+    }
+
+    @Test("Explicit Resume cannot reconnect after termination or connection invalidation", arguments: [false, true])
+    func resumeDoesNotBypassLifecycleBoundary(terminating: Bool) async throws {
+        let provider = ManagementWriterProvider()
+        let loop = ManagementLoopController(writerProvider: { await provider.makeWriter() })
+        if terminating { await loop.terminate() } else { await loop.connectionInvalidated() }
+        await #expect(throws: ManagementLoopError.restartRequired) {
+            _ = try await loop.writerForReviewedActivation()
+        }
+        _ = await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline)
+        #expect(await provider.creationCount == 0)
+        #expect(await loop.activePlanSnapshot() == nil)
+    }
+
     @Test("Ordinary reveal excludes Hidden and returns to baseline")
     func ordinaryRevealReturnsToBaseline() async throws {
         let writer = ManagementTestWriter()
@@ -147,6 +174,82 @@ struct ManagementLoopControllerTests {
         #expect(await terminationWriter.restoreCount == 1)
     }
 
+    @Test("Ordinary reveal activation failure preserves a verified baseline")
+    func failedRevealPreservesBaseline() async throws {
+        let writer = ManagementTestWriter(failReveal: true)
+        let loop = ManagementLoopController(writerProvider: { writer })
+        _ = await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline)
+        await #expect(throws: ManagementLoopTestError.unsupported) {
+            try await loop.beginOrdinaryReveal(revealed)
+        }
+        #expect(await loop.state == .active(baseline.fingerprint))
+        #expect(await loop.activePlanSnapshot() == baseline)
+        #expect(await writer.restoreCount == 0)
+    }
+
+    @Test("A throwing reveal verifier clears the assertion instead of reporting active")
+    func throwingRevealVerificationFailsClosed() async throws {
+        let writer = ManagementTestWriter(throwVerificationOnCall: 2)
+        let loop = ManagementLoopController(writerProvider: { writer })
+        _ = await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline)
+        await #expect(throws: ManagementLoopTestError.unsupported) {
+            try await loop.beginOrdinaryReveal(revealed)
+        }
+        guard case .failClosedUnrestricted = await loop.state else {
+            Issue.record("Throwing verification must fail closed")
+            return
+        }
+        #expect(await loop.activePlanSnapshot() == nil)
+    }
+
+    @Test("Native events and Blenny clicks with native overflow share one writer and exclude Hidden", arguments: [false, true])
+    func nativeSessionIntegration(useBlennyButton: Bool) async throws {
+        let writer = ManagementTestWriter()
+        let loop = ManagementLoopController(writerProvider: { writer })
+        let initial = await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline)
+        var controls = OrdinaryRevealCoordinator()
+        controls.synchronize(initial, hasRevealableBundles: true)
+        controls.observe(.init(isPresent: true, presentationState: .collapsed, observationAvailable: true))
+        if useBlennyButton {
+            controls.requestBlennyToggle()
+        } else {
+            controls.observe(.init(isPresent: true, presentationState: .expanded, observationAvailable: true))
+        }
+        #expect(controls.takePendingTransition()?.presentation == .revealed)
+        try await loop.beginOrdinaryReveal(revealed)
+        controls.synchronize(await loop.state, hasRevealableBundles: true)
+        controls.observe(.init(isPresent: true, presentationState: .expanded, observationAvailable: true))
+        controls.observe(.init(isPresent: true, presentationState: .collapsed, observationAvailable: true))
+        #expect(controls.takePendingTransition()?.presentation == .baseline)
+        try await loop.endOrdinaryReveal(baseline)
+        controls.synchronize(await loop.state, hasRevealableBundles: true)
+        #expect(await writer.appliedPlans == [baseline, revealed, baseline])
+        #expect(await writer.appliedPlans.allSatisfy { !$0.allowedBundleIdentifiers.contains(hidden) })
+        await loop.terminate()
+        #expect(await loop.activePlanSnapshot() == nil)
+    }
+
+    @Test("Late successful verification cannot resurrect management after connection loss")
+    func lateVerificationAfterDisconnect() async throws {
+        let barrier = VerificationBarrier()
+        let writer = ManagementTestWriter(verificationBarrier: barrier)
+        let loop = ManagementLoopController(writerProvider: { writer })
+        _ = await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline)
+        let revealPlan = revealed
+        let transition = Task { try await loop.beginOrdinaryReveal(revealPlan) }
+        await barrier.waitUntilEntered()
+        await loop.connectionInvalidated()
+        await barrier.release()
+        await #expect(throws: ManagementLoopError.activationCouldNotBeVerified) {
+            try await transition.value
+        }
+        guard case .failClosedUnrestricted = await loop.state else {
+            Issue.record("A late verification result must not report an active session")
+            return
+        }
+        #expect(await loop.activePlanSnapshot() == nil)
+    }
+
     private var baseline: RevealAllowlistPlan {
         RevealAllowlistPlan(
             presentation: .baseline,
@@ -194,9 +297,16 @@ private actor ManagementTestWriter: PolicyAssertionWriting {
     private(set) var connectionInvalidationCount = 0
     private var activePlan: RevealAllowlistPlan?
     private var verificationResults: [Bool]
+    private let failReveal: Bool
+    private let throwVerificationOnCall: Int?
+    private var verificationCount = 0
+    private let verificationBarrier: VerificationBarrier?
 
-    init(verificationResults: [Bool] = []) {
+    init(verificationResults: [Bool] = [], failReveal: Bool = false, throwVerificationOnCall: Int? = nil, verificationBarrier: VerificationBarrier? = nil) {
         self.verificationResults = verificationResults
+        self.failReveal = failReveal
+        self.throwVerificationOnCall = throwVerificationOnCall
+        self.verificationBarrier = verificationBarrier
     }
 
     func applyBaselineReplacement(with plan: RevealAllowlistPlan) async throws {
@@ -205,11 +315,18 @@ private actor ManagementTestWriter: PolicyAssertionWriting {
     }
 
     func applySessionTransition(with plan: RevealAllowlistPlan) async throws {
+        if failReveal && plan.presentation == .revealed { throw ManagementLoopTestError.unsupported }
         appliedPlans.append(plan)
         activePlan = plan
     }
 
     func verifyActivePlan(_ expected: RevealAllowlistPlan) async throws -> Bool {
+        verificationCount += 1
+        if verificationCount == throwVerificationOnCall { throw ManagementLoopTestError.unsupported }
+        if verificationCount == 2, let verificationBarrier {
+            await verificationBarrier.enter()
+            return true
+        }
         if !verificationResults.isEmpty {
             return verificationResults.removeFirst()
         }
@@ -229,5 +346,28 @@ private actor ManagementTestWriter: PolicyAssertionWriting {
 
     func activePlanSnapshot() async -> RevealAllowlistPlan? {
         activePlan
+    }
+}
+
+private actor VerificationBarrier {
+    private var entered = false
+    private var enteredWaiter: CheckedContinuation<Void, Never>?
+    private var completion: CheckedContinuation<Void, Never>?
+
+    func enter() async {
+        entered = true
+        enteredWaiter?.resume()
+        enteredWaiter = nil
+        await withCheckedContinuation { completion = $0 }
+    }
+
+    func waitUntilEntered() async {
+        if entered { return }
+        await withCheckedContinuation { enteredWaiter = $0 }
+    }
+
+    func release() {
+        completion?.resume()
+        completion = nil
     }
 }

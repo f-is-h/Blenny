@@ -62,30 +62,13 @@ struct BlennyRootView: View {
             )
             Divider()
             Group {
-                if model.navigation.isReviewPresented,
-                   let review = model.reviewPresentation {
-                    PolicyReviewView(
-                        presentation: review,
-                        onBack: { model.dismissReview() },
-                        onApply: {
-                            guard let prepared = review.prepared, review.canApply else { return }
-                            model.dismissReview()
-                            actions.apply(prepared)
-                        }
-                    )
-                } else {
-                    switch model.navigation.section {
-                    case .organize:
-                        OrganizeView(
-                            model: model,
-                            actions: actions,
-                            interaction: $boardInteraction
-                        )
-                    case .settings:
-                        SettingsView(model: model, actions: actions)
-                    case .support:
-                        SupportView(actions: actions)
-                    }
+                switch model.navigation.section {
+                case .organize:
+                    OrganizeView(model: model, actions: actions, interaction: $boardInteraction)
+                case .settings:
+                    SettingsView(model: model, actions: actions)
+                case .support:
+                    SupportView(actions: actions)
                 }
             }
         }
@@ -332,15 +315,15 @@ private struct OrganizeView: View {
                 .lineLimit(1)
             Spacer(minLength: 10)
             if model.managementEnabled == true {
-                Button("Stop…", action: actions.stopManaging)
+                Button("Stop", action: actions.stopManaging)
                     .disabled(!model.controls.stopEnabled)
             } else {
-                Button("Resume…", action: actions.resumeManaging)
+                Button("Resume", action: actions.resumeManaging)
                     .disabled(!model.controls.resumeEnabled)
             }
-            Button("Restore…", action: actions.restorePreviousPolicy)
+            Button("Restore", action: actions.restorePreviousPolicy)
                 .disabled(!model.controls.restoreEnabled)
-                .help("Review and restore the scoped previous policy.")
+                .help("Restore the previous policy using the scoped recovery backup.")
         }
         .controlSize(.small)
         .padding(.horizontal, 10)
@@ -543,7 +526,7 @@ private struct OrganizationBoard: View {
     }
 
     private var boardIsObscured: Bool {
-        !model.accessibilityTrusted || model.isRefreshing
+        !model.accessibilityTrusted || model.isRefreshing || model.isApplying
     }
 
     private var boardSurface: Color {
@@ -939,6 +922,7 @@ private struct PolicyLaneRow: View {
         for rejection: PolicyDraftAssignmentRejection
     ) -> String {
         switch rejection {
+        case .interactionInProgress: "Wait for the current operation"
         case .duplicateDelivery: "Drop already handled"
         case .staleCandidateGeneration, .staleSourcePolicy: "Start a new drag"
         case .samePolicy: "No change"
@@ -1646,9 +1630,9 @@ private struct ObservationAndDraftFooter: View {
                 }
                 .disabled(!model.controls.discardDraftEnabled)
 
-                Button("Review Changes", action: actions.reviewDraft)
+                Button(model.isApplying ? "Applying…" : "Apply", action: actions.applyDraft)
                     .buttonStyle(.borderedProminent)
-                    .disabled(!model.controls.reviewEnabled || !model.hasDraftChanges)
+                    .disabled(!model.controls.applyEnabled || !model.hasDraftChanges)
                     .keyboardShortcut(.defaultAction)
             }
             .frame(width: 216, alignment: .trailing)
@@ -1676,6 +1660,7 @@ private struct ObservationAndDraftFooter: View {
     }
 
     private var observationSummary: String {
+        if model.isApplying { return "Applying changes…" }
         if model.hasDraftChanges {
             return "Draft changes are local and unapplied"
         }
@@ -1937,95 +1922,6 @@ private struct SettingsGridRow<Title: View, Detail: View, Control: View>: View {
             control
         }
         .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-    }
-}
-
-private struct PolicyReviewView: View {
-    let presentation: ProductReviewPresentation
-    let onBack: () -> Void
-    let onApply: () -> Void
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Button(action: onBack) {
-                    Label("Back", systemImage: "chevron.left")
-                }
-                .keyboardShortcut(.cancelAction)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(presentation.title)
-                        .font(.system(.title2, weight: .medium))
-                    Text("Review the exact diff, impact, validation, and recovery plan.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 13)
-
-            Divider()
-
-            ScrollView {
-                Text(presentation.report)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .padding(16)
-            }
-            .background(
-                effectiveReduceTransparency
-                    ? AnyShapeStyle(Color(nsColor: .textBackgroundColor))
-                    : AnyShapeStyle(.background.secondary)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 9)
-                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: safetySymbol)
-                    .foregroundStyle(safetyColor)
-                Text(presentation.safetyMessage)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(safetyColor)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 12)
-                Button("Apply", action: onApply)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!presentation.canApply)
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(20)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .accessibilityElement(children: .contain)
-    }
-
-    private var safetyColor: Color {
-        switch presentation.safetyTone {
-        case .neutral: .secondary
-        case .warning: .orange
-        case .error: .red
-        }
-    }
-
-    private var safetySymbol: String {
-        switch presentation.safetyTone {
-        case .neutral: "checkmark.shield"
-        case .warning: "exclamationmark.triangle.fill"
-        case .error: "xmark.octagon.fill"
-        }
-    }
-
-    private var effectiveReduceTransparency: Bool {
-        reduceTransparency
-            || debugAccessibilityFlag("BLENNY_VALIDATE_REDUCE_TRANSPARENCY")
     }
 }
 

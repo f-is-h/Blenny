@@ -463,7 +463,7 @@ struct PolicyEditingTransactionTests {
             observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
             candidateGeneration: generation,
             runtimeContractFingerprint: "runtime-a"
-        ) == .committed(prepared.newPolicy))
+        ).result == .committed(prepared.newPolicy))
         #expect(await provider.creationCount == 1)
 
         await #expect(throws: PolicyEditingCoreError.reviewAlreadyConsumed) {
@@ -515,6 +515,77 @@ struct PolicyEditingTransactionTests {
         #expect(await provider.creationCount == 0)
     }
 
+    @Test("Unrelated process churn refreshes the exact plan without invalidating Review")
+    func unrelatedProcessChurnRebuildsExactPlan() async throws {
+        let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)
+        let store = MemoryPolicyStore(document: accepted)
+        let provider = TransactionWriterProvider()
+        let core = PolicyEditingCore(
+            store: store,
+            blennyBundleIdentifier: blenny,
+            scope: scope,
+            writerProvider: { try await provider.makeWriter() }
+        )
+        let generation = UUID()
+        let draft = BundlePolicyDraft(acceptedPolicy: accepted)
+        let preview = try await core.previewResumeManaging(
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            candidateGeneration: generation,
+            runtimeContractFingerprint: "runtime-a"
+        )
+        let prepared = try #require(preview.1)
+        let unrelated = "com.example.UnrelatedHelper"
+
+        let outcome = try await core.commit(
+            prepared,
+            currentDraft: draft,
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot, unrelated],
+            candidateGeneration: generation,
+            runtimeContractFingerprint: "runtime-a"
+        )
+
+        #expect(outcome.result == .committed(outcome.effectivePrepared.newPolicy))
+        #expect(!prepared.report.newBaselinePlan!.allowedBundleIdentifiers.contains(unrelated))
+        #expect(outcome.effectivePrepared.report.newBaselinePlan!.allowedBundleIdentifiers.contains(unrelated))
+        #expect(await provider.appliedPlans().first?.allowedBundleIdentifiers.contains(unrelated) == true)
+    }
+
+    @Test("Unchanged active policy does not replace the writer for unrelated churn")
+    func unchangedPolicyKeepsExistingAssertion() async throws {
+        let accepted = try document(enabled: true, revealable: usage, hidden: cleanShot)
+        let store = MemoryPolicyStore(document: accepted)
+        let provider = TransactionWriterProvider()
+        let core = PolicyEditingCore(
+            store: store,
+            blennyBundleIdentifier: blenny,
+            scope: scope,
+            writerProvider: { try await provider.makeWriter() }
+        )
+        let generation = UUID()
+        let draft = BundlePolicyDraft(acceptedPolicy: accepted)
+        let preview = try await core.preview(
+            draft: draft,
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            candidateGeneration: generation,
+            runtimeContractFingerprint: "runtime-a"
+        )
+        let outcome = try await core.commit(
+            #require(preview.1),
+            currentDraft: draft,
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot, "com.example.Helper"],
+            candidateGeneration: generation,
+            runtimeContractFingerprint: "runtime-a"
+        )
+        #expect(outcome.result == .noChange)
+        #expect(await provider.creationCount == 0)
+        #expect(await store.saveCount == 0)
+        #expect(await store.document == accepted)
+    }
+
     @Test("Malformed policy or unsupported backup cannot reach writer creation")
     func malformedFilesFailBeforeWriter() async throws {
         let directory = FileManager.default.temporaryDirectory
@@ -553,6 +624,139 @@ struct PolicyEditingTransactionTests {
 
     private var scope: PolicyValidationScope {
         PolicyValidationScope(approvedBundleIdentifiers: [blenny, usage, cleanShot])
+    }
+
+    @Test("Explicit Resume activates unchanged accepted intent without saving or rotating backup")
+    func resumeUnchangedInactivePolicy() async throws {
+        let accepted = try document(enabled: true, revealable: usage, hidden: cleanShot)
+        let backup = PersistentBundlePolicyBackup(previousPolicy: try document(enabled: false, revealable: usage, hidden: cleanShot))
+        let store = MemoryPolicyStore(document: accepted, backup: backup)
+        let provider = TransactionWriterProvider()
+        let core = PolicyEditingCore(store: store, blennyBundleIdentifier: blenny, scope: scope,
+                                     writerProvider: { try await provider.makeWriter() })
+        let generation = UUID()
+        for expected in [PolicyEditingTransactionResult.reactivated(accepted), .noChange] {
+            let preview = try await core.previewResumeManaging(
+                candidates: inventory(), observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+                candidateGeneration: generation, runtimeContractFingerprint: "runtime"
+            )
+            let prepared = try #require(preview.1)
+            #expect(prepared.persistenceMode == .resumeManagement)
+            let outcome = try await core.commit(
+                prepared, currentDraft: BundlePolicyDraft(acceptedPolicy: accepted),
+                candidates: inventory(), observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+                candidateGeneration: generation, runtimeContractFingerprint: "runtime"
+            )
+            #expect(outcome.result == expected)
+        }
+        #expect(await provider.appliedPlans().count == 1)
+        #expect(await store.document == accepted)
+        #expect(await store.backup == backup)
+        #expect(await store.saveCount == 0)
+    }
+
+    @Test("Resume activation or verification failure returns to unrestricted without persistence", arguments: [false, true])
+    func resumeFailureDoesNotInventPreviousActiveBaseline(verificationFailure: Bool) async throws {
+        let accepted = try document(enabled: true, revealable: usage, hidden: cleanShot)
+        let backup = PersistentBundlePolicyBackup(previousPolicy: accepted)
+        let store = MemoryPolicyStore(document: accepted, backup: backup)
+        let writer = TransactionPolicyWriter(
+            behaviors: verificationFailure ? [.succeed] : [.fail, .fail],
+            verificationResults: verificationFailure ? [false] : []
+        )
+        let loop = ManagementLoopController(writerProvider: { writer })
+        await loop.failClosed("startup failed")
+        let core = PolicyEditingCore(store: store, blennyBundleIdentifier: blenny, scope: scope,
+                                     writerProvider: { try await loop.writerForReviewedActivation() })
+        let preview = try await core.previewResumeManaging(
+            candidates: inventory(), observedRunningBundleIdentifiers: [blenny, usage, cleanShot]
+        )
+        do {
+            _ = try await core.commit(#require(preview.1))
+            Issue.record("Expected fail-closed Resume")
+        } catch let error as PolicyEditingTransactionFailure {
+            #expect(error.stage == (verificationFailure ? .verification : .activation))
+            #expect(error.systemState == .unrestricted)
+        }
+        #expect(await writer.appliedPlans.count == (verificationFailure ? 1 : 2))
+        #expect(await writer.activePlanSnapshot() == nil)
+        #expect(await store.document == accepted)
+        #expect(await store.backup == backup)
+        #expect(await store.saveCount == 0)
+    }
+
+    @Test("Resume still rejects missing backup and missing targets before writer access")
+    func resumePreflightFailures() async throws {
+        let accepted = try document(enabled: true, revealable: usage, hidden: cleanShot)
+        let provider = TransactionWriterProvider()
+        let missingBackup = PolicyEditingCore(
+            store: MemoryPolicyStore(document: accepted), blennyBundleIdentifier: blenny, scope: scope,
+            writerProvider: { try await provider.makeWriter() }
+        )
+        await #expect(throws: PolicyEditingCoreError.previousPolicyBackupMissing) {
+            _ = try await missingBackup.previewResumeManaging(
+                candidates: inventory(), observedRunningBundleIdentifiers: [blenny, usage, cleanShot]
+            )
+        }
+        let store = MemoryPolicyStore(document: accepted, backup: PersistentBundlePolicyBackup(previousPolicy: accepted))
+        let core = PolicyEditingCore(store: store, blennyBundleIdentifier: blenny, scope: scope,
+                                     writerProvider: { try await provider.makeWriter() })
+        let preview = try await core.previewResumeManaging(
+            candidates: PolicyCandidateInventory(observations: []), observedRunningBundleIdentifiers: []
+        )
+        #expect(preview.1 == nil)
+        #expect(preview.0.validationFailureSummary.contains(usage))
+        #expect(preview.0.validationFailureSummary.contains("then choose Resume"))
+        #expect(await provider.creationCount == 0)
+    }
+
+    @Test("Unchanged Resume rejects stale managed observations and runtime")
+    func unchangedResumeStaleReview() async throws {
+        let accepted = try document(enabled: true, revealable: usage, hidden: cleanShot)
+        let backup = PersistentBundlePolicyBackup(previousPolicy: accepted)
+        let store = MemoryPolicyStore(document: accepted, backup: backup)
+        let provider = TransactionWriterProvider()
+        let core = PolicyEditingCore(store: store, blennyBundleIdentifier: blenny, scope: scope,
+                                     writerProvider: { try await provider.makeWriter() })
+        let generation = UUID()
+        let preview = try await core.previewResumeManaging(
+            candidates: inventory(), observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            candidateGeneration: generation, runtimeContractFingerprint: "runtime"
+        )
+        let prepared = try #require(preview.1)
+        for runtime in ["runtime", "changed-runtime"] {
+            await #expect(throws: PolicyEditingCoreError.staleReviewedPlan) {
+                _ = try await core.commit(
+                    prepared, currentDraft: BundlePolicyDraft(acceptedPolicy: accepted),
+                    candidates: inventory(), observedRunningBundleIdentifiers: runtime == "runtime"
+                        ? [blenny, cleanShot] : [blenny, usage, cleanShot],
+                    candidateGeneration: generation, runtimeContractFingerprint: runtime
+                )
+            }
+        }
+        #expect(await provider.creationCount == 0)
+        #expect(await store.saveCount == 0)
+    }
+
+    @Test("Resume backup replacement after preparation cannot create a writer")
+    func resumeChangedBackupRejected() async throws {
+        let accepted = try document(enabled: true, revealable: usage, hidden: cleanShot)
+        let store = MemoryPolicyStore(document: accepted, backup: PersistentBundlePolicyBackup(previousPolicy: accepted))
+        let provider = TransactionWriterProvider()
+        let core = PolicyEditingCore(store: store, blennyBundleIdentifier: blenny, scope: scope,
+                                     writerProvider: { try await provider.makeWriter() })
+        let preview = try await core.previewResumeManaging(
+            candidates: inventory(), observedRunningBundleIdentifiers: [blenny, usage, cleanShot]
+        )
+        let changedBackup = PersistentBundlePolicyBackup(previousPolicy: try document(enabled: false, revealable: usage, hidden: cleanShot))
+        let coordinator = PolicyEditingTransactionCoordinator(
+            store: MemoryPolicyStore(document: accepted, backup: changedBackup),
+            writerProvider: { try await provider.makeWriter() }
+        )
+        await #expect(throws: PolicyEditingTransactionFailure.self) {
+            _ = try await coordinator.commit(#require(preview.1))
+        }
+        #expect(await provider.creationCount == 0)
     }
 
     private func document(
@@ -724,10 +928,18 @@ private actor TransactionPolicyWriter: PolicyAssertionWriting {
 
 private actor TransactionWriterProvider {
     private(set) var creationCount = 0
+    private var writer: TransactionPolicyWriter?
 
     func makeWriter() throws -> any PolicyAssertionWriting {
         creationCount += 1
-        return TransactionPolicyWriter(behaviors: [.succeed])
+        if let writer { return writer }
+        let writer = TransactionPolicyWriter(behaviors: [.succeed])
+        self.writer = writer
+        return writer
+    }
+
+    func appliedPlans() async -> [RevealAllowlistPlan] {
+        await writer?.appliedPlans ?? []
     }
 }
 

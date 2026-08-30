@@ -12,8 +12,7 @@ struct ProductInterfaceActions {
     let stopManaging: () -> Void
     let restorePreviousPolicy: () -> Void
     let draftDidChange: (PolicyEditorViewModel) -> Void
-    let reviewDraft: () -> Void
-    let apply: (PreparedPolicyEdit) -> Void
+    let applyDraft: () -> Void
     let openProjectWebsite: () -> Void
     let openMonthlySponsor: () -> Void
     let openOneTimeSponsor: () -> Void
@@ -128,28 +127,6 @@ final class WorkspacePolicyIconResolver {
     }
 }
 
-enum ReviewSafetyTone {
-    case neutral
-    case warning
-    case error
-}
-
-struct ProductReviewPresentation {
-    let title: String
-    let report: String
-    let safetyMessage: String
-    let safetyTone: ReviewSafetyTone
-    let prepared: PreparedPolicyEdit?
-    let mutationAvailable: Bool
-
-    var canApply: Bool {
-        guard let prepared else { return false }
-        let requiresAssertion = prepared.newPolicy != prepared.oldPolicy
-            && prepared.newPolicy.managementEnabled
-        return !requiresAssertion || mutationAvailable
-    }
-}
-
 @MainActor
 final class ProductInterfaceModel: ObservableObject {
     @Published var navigation = ProductInterfaceNavigationState()
@@ -161,7 +138,7 @@ final class ProductInterfaceModel: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var statusMessage = "Preparing the policy editor…"
     @Published private(set) var statusIsError = false
-    @Published private(set) var reviewPresentation: ProductReviewPresentation?
+    @Published private(set) var isApplying = false
     @Published private(set) var applicationIcons: [String: ResolvedPolicyIcon] = [:]
     @Published private(set) var systemIcons: [String: ResolvedPolicyIcon] = [:]
     @Published private(set) var launchAtLoginState = LaunchAtLoginPresentationState(
@@ -178,9 +155,11 @@ final class ProductInterfaceModel: ObservableObject {
         ProductInterfaceControlState(
             hasModel: model != nil,
             managementEnabled: model?.acceptedPolicy.managementEnabled,
+            managementRuntimeState: managementRuntimeState,
             recoveryAvailable: recoveryAvailable,
             hasDraftChanges: model?.hasDraftChanges == true,
             isRefreshing: isRefreshing,
+            isApplying: isApplying,
             accessibilityTrusted: accessibilityTrusted,
             accessibilityPromptRequested: accessibilityPromptRequested
         )
@@ -203,7 +182,6 @@ final class ProductInterfaceModel: ObservableObject {
         var updatedNavigation = navigation
         updatedNavigation.navigate(to: section)
         navigation = updatedNavigation
-        reviewPresentation = nil
     }
 
     func setAccessibilityTrusted(
@@ -220,6 +198,10 @@ final class ProductInterfaceModel: ObservableObject {
             applicationIcons.removeAll()
             systemIcons.removeAll()
         }
+    }
+
+    func setApplying(_ applying: Bool) {
+        isApplying = applying
     }
 
     func display(
@@ -345,6 +327,7 @@ final class ProductInterfaceModel: ObservableObject {
         sourcePolicy: MenuBarBundlePolicy,
         destination: MenuBarBundlePolicy
     ) -> PolicyDraftAssignmentOutcome {
+        guard !isApplying, !isRefreshing else { return .rejected(.interactionInProgress) }
         guard let model else { return .rejected(.unknownCandidate) }
         return assignmentCoordinator.validate(
             payload: PolicyDragPayload(
@@ -362,6 +345,7 @@ final class ProductInterfaceModel: ObservableObject {
         payload: PolicyDragPayload,
         destination: MenuBarBundlePolicy
     ) -> PolicyDraftAssignmentOutcome {
+        guard !isApplying, !isRefreshing else { return .rejected(.interactionInProgress) }
         guard var editor = model else { return .rejected(.unknownCandidate) }
         let outcome = assignmentCoordinator.assign(
             payload: payload,
@@ -380,6 +364,7 @@ final class ProductInterfaceModel: ObservableObject {
         bundleIdentifier: String,
         destination: MenuBarBundlePolicy
     ) -> PolicyDraftAssignmentOutcome {
+        guard !isApplying, !isRefreshing else { return .rejected(.interactionInProgress) }
         guard var editor = model else { return .rejected(.unknownCandidate) }
         let outcome = assignmentCoordinator.assign(
             bundleIdentifier: bundleIdentifier,
@@ -395,6 +380,7 @@ final class ProductInterfaceModel: ObservableObject {
 
     @discardableResult
     func discardDraft() -> PolicyEditorViewModel? {
+        guard !isApplying, !isRefreshing else { return nil }
         guard var editor = model else { return nil }
         editor.discardDraft(
             using: BundlePolicyDraft(acceptedPolicy: editor.acceptedPolicy)
@@ -407,50 +393,6 @@ final class ProductInterfaceModel: ObservableObject {
             isError: false
         )
         return editor
-    }
-
-    func presentReview(
-        title: String,
-        report: PolicyDryRunImpactReport,
-        prepared: PreparedPolicyEdit?
-    ) {
-        let requiresAssertion = prepared.map { edit in
-            edit.newPolicy != edit.oldPolicy
-                && edit.newPolicy.managementEnabled
-        } ?? false
-        let safetyMessage: String
-        let safetyTone: ReviewSafetyTone
-        if prepared == nil {
-            safetyMessage = "Apply is unavailable because validation failed. Review every FAIL line, refresh the bounded observation, and try again."
-            safetyTone = .error
-        } else if requiresAssertion, developmentMutationAvailable {
-            safetyMessage = "Ready for this installed Debug build. Apply will use only this reviewed plan through the serial writer, verify it once, and restore the previous baseline if commit fails."
-            safetyTone = .warning
-        } else if requiresAssertion {
-            safetyMessage = "Apply is unavailable because this build is outside the approved development compatibility boundary. No assertion can be created."
-            safetyTone = .error
-        } else {
-            safetyMessage = "Ready to apply. This plan does not create a system assertion; it only saves disabled policy intent or confirms a no-op."
-            safetyTone = .neutral
-        }
-        reviewPresentation = ProductReviewPresentation(
-            title: title,
-            report: report.text,
-            safetyMessage: safetyMessage,
-            safetyTone: safetyTone,
-            prepared: prepared,
-            mutationAvailable: developmentMutationAvailable
-        )
-        var updatedNavigation = navigation
-        updatedNavigation.presentReview()
-        navigation = updatedNavigation
-    }
-
-    func dismissReview() {
-        reviewPresentation = nil
-        var updatedNavigation = navigation
-        updatedNavigation.dismissReview()
-        navigation = updatedNavigation
     }
 
     #if DEBUG
@@ -544,38 +486,6 @@ final class ProductInterfaceModel: ObservableObject {
         }
     }
 
-    func presentReviewForVisualValidation() {
-        reviewPresentation = ProductReviewPresentation(
-            title: "Review Draft Changes",
-            report: """
-                ACTION: edit bundle policy
-
-                DIFF
-                MOVE xyz.fi5h.Usage4Claude: Visible -> Revealable
-
-                IMPACT
-                Baseline: Usage4Claude is concealed.
-                Ordinary reveal: Usage4Claude is included.
-                Hidden bundles remain excluded.
-
-                VALIDATION
-                PASS: Blenny remains Visible.
-                PASS: Apple system items remain read only.
-                PASS: policy identity is the owning bundle identifier.
-
-                RECOVERY
-                Preserve the accepted policy until the reviewed plan commits.
-                Stop Managing restores every owned assertion.
-                """,
-            safetyMessage: "Preview only — exact installed dry-run and explicit authorization remain required before any real assertion write.",
-            safetyTone: .warning,
-            prepared: nil,
-            mutationAvailable: false
-        )
-        var updatedNavigation = navigation
-        updatedNavigation.presentReview()
-        navigation = updatedNavigation
-    }
     #endif
 }
 
@@ -592,8 +502,6 @@ final class PolicyEditorWindowController: NSWindowController {
         "BLENNY_VALIDATE_DARK_APPEARANCE"
     private static let initialSectionValidationEnvironmentKey =
         "BLENNY_VALIDATE_INITIAL_SECTION"
-    private static let reviewValidationEnvironmentKey =
-        "BLENNY_VALIDATE_REVIEW"
     private static let populatedValidationEnvironmentKey =
         "BLENNY_VALIDATE_POPULATED_INTERFACE"
     private static let untrustedValidationEnvironmentKey =
@@ -617,8 +525,7 @@ final class PolicyEditorWindowController: NSWindowController {
         onStopManaging: @escaping () -> Void,
         onRestorePreviousPolicy: @escaping () -> Void,
         onDraftDidChange: @escaping (PolicyEditorViewModel) -> Void,
-        onReviewDraft: @escaping () -> Void,
-        onApply: @escaping (PreparedPolicyEdit) -> Void,
+        onApplyDraft: @escaping () -> Void,
         onOpenProjectWebsite: @escaping () -> Void,
         onOpenMonthlySponsor: @escaping () -> Void,
         onOpenOneTimeSponsor: @escaping () -> Void,
@@ -640,11 +547,7 @@ final class PolicyEditorWindowController: NSWindowController {
         ], let section = ProductInterfaceSection(rawValue: rawSection) {
             interfaceModel.navigate(to: section)
         }
-        if ProcessInfo.processInfo.environment[
-            Self.reviewValidationEnvironmentKey
-        ] == "YES" {
-            interfaceModel.presentReviewForVisualValidation()
-        } else if usesPopulatedValidationFixture {
+        if usesPopulatedValidationFixture {
             interfaceModel.installPopulatedVisualValidationFixture(
                 accessibilityTrusted: ProcessInfo.processInfo.environment[
                     Self.untrustedValidationEnvironmentKey
@@ -683,8 +586,7 @@ final class PolicyEditorWindowController: NSWindowController {
             stopManaging: onStopManaging,
             restorePreviousPolicy: onRestorePreviousPolicy,
             draftDidChange: onDraftDidChange,
-            reviewDraft: onReviewDraft,
-            apply: onApply,
+            applyDraft: onApplyDraft,
             openProjectWebsite: onOpenProjectWebsite,
             openMonthlySponsor: onOpenMonthlySponsor,
             openOneTimeSponsor: onOpenOneTimeSponsor,
@@ -784,6 +686,10 @@ final class PolicyEditorWindowController: NSWindowController {
         interfaceModel.candidateGeneration
     }
 
+    #if DEBUG
+    var debugResumeEnabled: Bool { interfaceModel.controls.resumeEnabled }
+    #endif
+
     func setManagementRuntimeState(
         _ state: ManagementLoopState,
         developmentMutationAvailable: Bool
@@ -804,17 +710,8 @@ final class PolicyEditorWindowController: NSWindowController {
         interfaceModel.setLaunchAtLoginState(state)
     }
 
-    func presentReview(
-        actionTitle: String,
-        report: PolicyDryRunImpactReport,
-        prepared: PreparedPolicyEdit?
-    ) {
-        interfaceModel.presentReview(
-            title: actionTitle,
-            report: report,
-            prepared: prepared
-        )
-        showEditor()
+    func setApplying(_ applying: Bool) {
+        interfaceModel.setApplying(applying)
     }
 
     private func restoreUsableWindowSizeIfNeeded() {

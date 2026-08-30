@@ -15,28 +15,15 @@ public enum ProductSupportLinks {
 
 public struct ProductInterfaceNavigationState: Equatable, Sendable {
     public private(set) var section: ProductInterfaceSection
-    public private(set) var isReviewPresented: Bool
 
     public init(
-        section: ProductInterfaceSection = .organize,
-        isReviewPresented: Bool = false
+        section: ProductInterfaceSection = .organize
     ) {
         self.section = section
-        self.isReviewPresented = isReviewPresented && section == .organize
     }
 
     public mutating func navigate(to section: ProductInterfaceSection) {
         self.section = section
-        isReviewPresented = false
-    }
-
-    public mutating func presentReview() {
-        section = .organize
-        isReviewPresented = true
-    }
-
-    public mutating func dismissReview() {
-        isReviewPresented = false
     }
 }
 
@@ -98,7 +85,7 @@ public struct ProductInterfaceControlState: Equatable, Sendable {
     public let permission: ProductInterfacePermissionState
     public let refreshEnabled: Bool
     public let discardDraftEnabled: Bool
-    public let reviewEnabled: Bool
+    public let applyEnabled: Bool
     public let resumeEnabled: Bool
     public let stopEnabled: Bool
     public let restoreEnabled: Bool
@@ -106,9 +93,11 @@ public struct ProductInterfaceControlState: Equatable, Sendable {
     public init(
         hasModel: Bool,
         managementEnabled: Bool?,
+        managementRuntimeState: ManagementLoopState,
         recoveryAvailable: Bool,
         hasDraftChanges: Bool,
         isRefreshing: Bool,
+        isApplying: Bool = false,
         accessibilityTrusted: Bool,
         accessibilityPromptRequested: Bool
     ) {
@@ -120,11 +109,13 @@ public struct ProductInterfaceControlState: Equatable, Sendable {
             permission = .notRequested
         }
 
-        refreshEnabled = !isRefreshing && !hasDraftChanges
-        discardDraftEnabled = hasDraftChanges && !isRefreshing
-        reviewEnabled = hasModel && !isRefreshing
-        resumeEnabled = hasModel && managementEnabled == false && !isRefreshing
-        stopEnabled = hasModel && managementEnabled == true && !isRefreshing
-        restoreEnabled = hasModel && recoveryAvailable && !isRefreshing
+        let idle = !isRefreshing && !isApplying
+        refreshEnabled = idle && !hasDraftChanges
+        discardDraftEnabled = hasDraftChanges && idle
+        applyEnabled = hasModel && idle
+        resumeEnabled = hasModel && managementRuntimeState.canResume
+            && accessibilityTrusted && idle && !hasDraftChanges
+        stopEnabled = hasModel && managementEnabled == true && idle
+        restoreEnabled = hasModel && recoveryAvailable && idle && !hasDraftChanges
     }
 }

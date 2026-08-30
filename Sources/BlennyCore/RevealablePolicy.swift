@@ -75,6 +75,24 @@ public struct RevealAllowlistPlan: Equatable, Sendable {
         return Self.sha256(canonical)
     }
 
+    /// Binds Review to the effective state of owner-approved bundles while
+    /// allowing unrelated pass-through processes to change before Apply.
+    public func authorizationFingerprint(
+        for authorizedBundleIdentifiers: [String]
+    ) -> String {
+        let allowed = Set(allowedBundleIdentifiers.map { $0.lowercased() })
+        let authorizedStates = authorizedBundleIdentifiers
+            .map { $0.lowercased() }
+            .sorted()
+            .map { "\($0)|allowed=\(allowed.contains($0))" }
+        let canonical = [
+            "presentation=\(presentation.rawValue)",
+            "system=\(allowedSystemItems.sorted().map(String.init).joined(separator: ","))",
+            "authorized=\(authorizedStates.joined(separator: "\n"))",
+        ].joined(separator: "\n")
+        return Self.sha256(canonical)
+    }
+
     /// A stable authorization fingerprint for owner-approved managed policy.
     ///
     /// The exact plan fingerprint above deliberately includes every observed

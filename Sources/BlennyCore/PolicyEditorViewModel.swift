@@ -248,6 +248,20 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
 
     public var hasDraftChanges: Bool { draft != initialDraft }
 
+    public func synchronizingAcceptedPolicy(
+        _ accepted: PersistentBundlePolicyDocument,
+        preservingDraft: Bool
+    ) throws -> Self {
+        var updated = try Self(
+            acceptedPolicy: accepted,
+            candidateInventory: candidateInventory,
+            systemItems: systemItems,
+            blennyBundleIdentifier: blennyBundleIdentifier
+        )
+        if preservingDraft { updated.draft = draft }
+        return updated
+    }
+
     public var validationScope: PolicyValidationScope {
         PolicyValidationScope(
             approvedBundleIdentifiers: draft.visible + draft.revealable + draft.hidden

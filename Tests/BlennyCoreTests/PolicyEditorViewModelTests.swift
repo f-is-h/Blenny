@@ -156,6 +156,27 @@ struct PolicyEditorViewModelTests {
         ])
     }
 
+    @Test("Stop synchronizes accepted policy without discarding unapplied assignments")
+    func stopPreservesDraft() throws {
+        let accepted = try policy().settingManagementEnabled(true)
+        var model = try PolicyEditorViewModel(
+            acceptedPolicy: accepted,
+            candidateInventory: PolicyCandidateInventory(observations: [
+                observation(blenny, pid: 10), observation(revealable, pid: 20),
+                observation(hidden, pid: 30)
+            ]),
+            blennyBundleIdentifier: blenny
+        )
+        _ = model.assign(bundleIdentifier: revealable, to: .hidden)
+        let stopped = try accepted.settingManagementEnabled(false)
+        let synchronized = try model.synchronizingAcceptedPolicy(stopped, preservingDraft: true)
+        #expect(synchronized.acceptedPolicy == stopped)
+        #expect(synchronized.draft == model.draft)
+        #expect(synchronized.hasDraftChanges)
+        let reset = try model.synchronizingAcceptedPolicy(stopped, preservingDraft: false)
+        #expect(!reset.hasDraftChanges)
+    }
+
     @Test("Accessibility system prompt is requested at most once")
     func onboardingPromptPolicy() {
         #expect(

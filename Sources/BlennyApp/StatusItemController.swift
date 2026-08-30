@@ -16,16 +16,29 @@ private final class DebugStatusItemContentStack: NSStackView {
 
 @MainActor
 final class StatusItemController: NSObject {
+    private static let ordinaryStatusItemLength: CGFloat = 22
     private let statusItem: NSStatusItem
+    private var revealStatusItem: NSStatusItem?
     private let permissionItem = NSMenuItem(title: "Accessibility: Checking…", action: nil, keyEquivalent: "")
     private let managementStateItem = NSMenuItem(title: "Management: Checking…", action: nil, keyEquivalent: "")
     private let ordinaryRevealItem = NSMenuItem(title: "Reveal Revealable Items", action: #selector(toggleOrdinaryReveal), keyEquivalent: "")
     private let refreshItem = NSMenuItem(title: "Refresh Menu Bar Items", action: #selector(refresh), keyEquivalent: "r")
-    private let resumeManagingItem = NSMenuItem(title: "Resume Managing…", action: #selector(resumeManaging), keyEquivalent: "")
-    private let stopManagingItem = NSMenuItem(title: "Stop Managing and Restore…", action: #selector(stopManaging), keyEquivalent: "")
-    private let restorePreviousPolicyItem = NSMenuItem(title: "Restore Previous Policy…", action: #selector(restorePreviousPolicy), keyEquivalent: "")
+    private let resumeManagingItem = NSMenuItem(title: "Resume Managing", action: #selector(resumeManaging), keyEquivalent: "")
+    private let stopManagingItem = NSMenuItem(title: "Stop Managing", action: #selector(stopManaging), keyEquivalent: "")
+    private let restorePreviousPolicyItem = NSMenuItem(title: "Restore Previous Policy", action: #selector(restorePreviousPolicy), keyEquivalent: "")
     private let menu = NSMenu()
     private var hasDraftChanges = false
+    private var interactionBusy = false
+    private var accessibilityTrusted = false
+    private var currentManagementState: ManagementLoopState = .unknown
+    private var currentManagementEnabled = false
+    private var currentRecoveryAvailable = false
+    private var hasRevealableBundles = false
+    private var nativeOverflow = NativeOverflowObservationSnapshot.unavailable
+    private var blennyImage: NSImage?
+    private var normalPresentation = ManagementStatusPresentation(
+        state: .unknown, hasRevealableBundles: false, isBusy: false
+    )
     private let onOpenDiagnostics: () -> Void
     private let onRefresh: () -> Void
     private let onRequestAccess: () -> Void
@@ -113,27 +126,44 @@ final class StatusItemController: NSObject {
 
         configureButton()
         configureMenu()
+        #if DEBUG
+        // Keep the historical single-item prototype separate from ordinary UI.
+        if ProcessInfo.processInfo.environment[DebugPolicyCoexistenceController.editingActionEnvironmentKey] == nil {
+            configureRevealStatusItem()
+        }
+        #else
+        configureRevealStatusItem()
+        #endif
     }
 
     func setAccessibilityTrusted(_ trusted: Bool) {
+        accessibilityTrusted = trusted
         permissionItem.title = trusted ? "Accessibility: Granted" : "Accessibility: Not Granted"
+        updateResumeAvailability()
     }
 
     func setRefreshing(_ refreshing: Bool) {
-        refreshItem.isEnabled = !refreshing && !hasDraftChanges
+        refreshItem.isEnabled = !refreshing && !hasDraftChanges && !interactionBusy
         refreshItem.title = refreshing ? "Refreshing Menu Bar Items…" : "Refresh Menu Bar Items"
     }
 
     func setDraftHasChanges(_ hasChanges: Bool) {
         hasDraftChanges = hasChanges
-        refreshItem.isEnabled = !hasChanges
+        refreshItem.isEnabled = !hasChanges && !interactionBusy
+        updateResumeAvailability()
+        restorePreviousPolicyItem.isEnabled = currentRecoveryAvailable && !interactionBusy && !hasChanges
     }
 
     func setManagementState(
         _ state: ManagementLoopState,
         persistedManagementEnabled: Bool,
-        recoveryAvailable: Bool
+        recoveryAvailable: Bool,
+        hasRevealableBundles: Bool = false
     ) {
+        currentManagementState = state
+        currentManagementEnabled = persistedManagementEnabled
+        currentRecoveryAvailable = recoveryAvailable
+        self.hasRevealableBundles = hasRevealableBundles
         switch state {
         case .active, .baselineVerified, .ordinaryRevealSession:
             managementStateItem.title = "Management: On"
@@ -157,12 +187,122 @@ final class StatusItemController: NSObject {
             ordinaryRevealItem.title = "Reveal Revealable Items"
             ordinaryRevealItem.isEnabled = false
         }
-        resumeManagingItem.isEnabled = !persistedManagementEnabled
-        stopManagingItem.isEnabled = persistedManagementEnabled
-        restorePreviousPolicyItem.isEnabled = recoveryAvailable
+        ordinaryRevealItem.isEnabled = ordinaryRevealItem.isEnabled
+            && hasRevealableBundles && !interactionBusy
+        updateResumeAvailability()
+        stopManagingItem.isEnabled = persistedManagementEnabled && !interactionBusy
+        restorePreviousPolicyItem.isEnabled = recoveryAvailable && !interactionBusy && !hasDraftChanges
+        updateNormalButton()
+    }
+
+    func setInteractionBusy(_ busy: Bool) {
+        interactionBusy = busy
+        refreshItem.isEnabled = !busy && !hasDraftChanges
+        setManagementState(
+            currentManagementState,
+            persistedManagementEnabled: currentManagementEnabled,
+            recoveryAvailable: currentRecoveryAvailable,
+            hasRevealableBundles: hasRevealableBundles
+        )
+    }
+
+    private func updateResumeAvailability() {
+        resumeManagingItem.isEnabled = currentManagementState.canResume
+            && accessibilityTrusted && !interactionBusy && !hasDraftChanges
     }
 
     #if DEBUG
+    var debugResumeEnabled: Bool { resumeManagingItem.isEnabled }
+    #endif
+
+    func setNativeOverflow(_ snapshot: NativeOverflowObservationSnapshot) {
+        nativeOverflow = snapshot
+        updateNormalButton()
+    }
+
+    private func updateNormalButton() {
+        #if DEBUG
+        guard revealPrototypeToggle == nil else { return }
+        #endif
+        guard let button = statusItem.button else { return }
+        normalPresentation = ManagementStatusPresentation(
+            state: currentManagementState,
+            hasRevealableBundles: hasRevealableBundles,
+            isBusy: interactionBusy,
+            nativeOverflow: nativeOverflow
+        )
+        button.image = blennyImage
+        button.title = blennyImage == nil ? "B" : ""
+        statusItem.length = Self.ordinaryStatusItemLength
+        let arrowImage = NSImage(systemSymbolName: normalPresentation.nativeArrowSymbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: ManagementStatusPresentation.arrowPointSize, weight: .medium))
+        arrowImage?.isTemplate = true
+        revealStatusItem?.button?.image = arrowImage
+        revealStatusItem?.button?.isEnabled = normalPresentation.canToggleReveal
+        revealStatusItem?.button?.setAccessibilityLabel(normalPresentation.nativeArrowHelp)
+        revealStatusItem?.button?.toolTip = normalPresentation.nativeArrowHelp
+        ordinaryRevealItem.isEnabled = normalPresentation.canToggleReveal
+        button.setAccessibilityLabel("Open Blenny")
+        button.setAccessibilityHelp("Right-click to open Blenny, stop managing, or restore the previous policy.")
+        button.toolTip = "Open Blenny — right-click for menu"
+    }
+
+    @objc private func handleNormalStatusButton(_ sender: Any?) {
+        handleStatusControl(.artwork)
+    }
+
+    @objc private func handleRevealStatusButton(_ sender: Any?) {
+        handleStatusControl(.arrow)
+    }
+
+    private func handleStatusControl(_ control: StatusItemControl) {
+        let event = NSApp.currentEvent
+        let action = StatusItemClickRouting.action(
+            control: control,
+            isSecondaryClick: event?.type == .rightMouseUp || event?.type == .rightMouseDown,
+            canToggleReveal: normalPresentation.canToggleReveal
+        )
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["BLENNY_SESSION_DIAGNOSTICS"] == "YES" {
+            Self.debugLog("BLENNY_SESSION statusControl=\(control.rawValue) action=\(action.rawValue)")
+        }
+        #endif
+        switch action {
+        case .toggleReveal:
+            // Exactly the same entry point as the working safety-menu action.
+            toggleOrdinaryReveal()
+        case .openMenu:
+            _ = openNormalMenu()
+        case .openEditor:
+            onOpenDiagnostics()
+        case .ignore:
+            break
+        }
+    }
+
+    @objc private func openNormalMenu() -> Bool {
+        guard let button = statusItem.button else { return false }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+        return true
+    }
+
+    #if DEBUG
+    /// Read-only installed validation of the actual AppKit control, not pixels.
+    var debugOrdinaryRevealButtonEnabled: Bool { revealStatusItem?.button?.isEnabled == true }
+    var debugOrdinaryRevealButtonVisible: Bool { revealStatusItem?.isVisible == true }
+    var debugOrdinaryRevealArrowOnLeft: Bool {
+        guard let arrowFrame = revealStatusItem?.button?.window?.frame,
+              let artworkFrame = statusItem.button?.window?.frame else { return false }
+        return arrowFrame.midX < artworkFrame.midX
+    }
+    var debugOrdinaryRevealHasDedicatedButton: Bool {
+        guard let arrow = revealStatusItem?.button else { return false }
+        return arrow !== statusItem.button
+            && arrow.target as? StatusItemController === self
+            && arrow.action == #selector(handleRevealStatusButton(_:))
+            && statusItem.button?.action == #selector(handleNormalStatusButton(_:))
+    }
+
     func configureDebugRevealPrototype(
         onToggle: @escaping () -> Void,
         onStopManagingAndRestore: @escaping () -> Void
@@ -259,6 +399,7 @@ final class StatusItemController: NSObject {
         )
         image?.size = NSSize(width: 18, height: 18)
         image?.isTemplate = true
+        blennyImage = image
         button.image = image
         button.imageScaling = .scaleNone
         if image == nil {
@@ -268,6 +409,22 @@ final class StatusItemController: NSObject {
             forInfoDictionaryKey: "CFBundleShortVersionString"
         ) as? String ?? "0.5.0"
         button.toolTip = "Blenny \(version)"
+    }
+
+    private func configureRevealStatusItem() {
+        // Both native items exist before the first inventory. Do not create or
+        // remove an item on each management transition: that would stale our own
+        // candidate count. Unavailable management leaves this button disabled.
+        let item = NSStatusBar.system.statusItem(withLength: Self.ordinaryStatusItemLength)
+        revealStatusItem = item
+        item.button?.target = self
+        item.button?.action = #selector(handleRevealStatusButton(_:))
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        item.button?.imageScaling = .scaleNone
+        item.button?.setAccessibilityCustomActions([
+            NSAccessibilityCustomAction(name: "Open Blenny menu", target: self, selector: #selector(openNormalMenu))
+        ])
+        updateNormalButton()
     }
 
     private func configureMenu() {
@@ -307,7 +464,15 @@ final class StatusItemController: NSObject {
         menu.addItem(requestItem)
         menu.addItem(.separator())
         menu.addItem(quitItem)
-        statusItem.menu = menu
+        statusItem.menu = nil
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(handleNormalStatusButton(_:))
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        statusItem.button?.setAccessibilityCustomActions([
+            NSAccessibilityCustomAction(
+                name: "Open Blenny menu", target: self, selector: #selector(openNormalMenu)
+            )
+        ])
     }
 
     #if DEBUG
