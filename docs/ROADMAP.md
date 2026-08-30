@@ -175,15 +175,28 @@ Implemented exit criteria:
 - Real validation remains bounded to explicitly approved bundles and ends in verified restoration.
 - Release promotion of the unsupported backend remains a separate, deliberate compatibility decision rather than an accidental consequence of UI integration.
 
-## 0.6.0 — Lifecycle and display hardening
+## 0.5.1 — Review usability and resilient Apply
 
-Begin with a separate safety-feasibility investigation of real menu-bar ordering:
+Status: **Implementation and release checks audited; final compact-spacing visual acceptance and local tag pending. `v0.5.0` remains unchanged.**
 
-- Distinguish application-bundle policy, a status-item instance, and physical menu-bar position.
-- Do not ship ordering that changes only the Blenny Board while leaving the real menu bar unchanged.
-- Do not use synthetic pointer movement, clicks, or Command-drag.
-- Decide whether to implement ordering only after exact position write, snapshot, diff, Review, restoration, and lifecycle behavior can all be proven.
-- Keep all ordering design, experiments, and implementation out of `0.5.0`.
+- Remove the ordinary Review page. Apply, Resume, Stop and Restore prepare and validate plans internally; recovery stays durable and bounded action diagnostics remain process-local. Keep full reports in Debug dry-run evidence.
+- Connect the normal Blenny status item to ordinary reveal: a smaller double-chevron left of the artwork/editor control as two compact 22-point native status items, with right-click safety access. Keep Blenny's arrow available independently of native presence and bind its native action directly to the same toggle as the menu; remove coordinate-based click splitting. Native-control integration and the reported missing Bartender candidate are explicitly deferred to 0.6.0; no repair of either is included in this patch. No polling or positioning writes.
+- Audit ordinary-path wiring for native observation, timeout gating, failed reveal, read-only Refresh, and connection/termination cleanup; do not silently promote separate Debug experiments.
+- Gate in-flight actions against duplicate clicks and Draft/Refresh/reveal overlap. Preserve unapplied assignments when stopping; do not silently replace a dirty Draft during Resume or Restore.
+- Make a valid Draft Apply start management on the supported Debug build instead of silently persisting stopped intent.
+- Keep explicit Resume available after failed startup; freshly validate and activate unchanged accepted intent without rewriting policy or rotating recovery. Missing targets are named, not silently dropped. Connection loss still requires restart.
+- Bind Review to managed targets and safety inputs, not unrelated pass-through processes.
+- Rebuild the exact full allow-list from one fresh bounded Apply preflight. Managed target, Draft, generation, scope, policy, runtime, or recovery changes still reject before writer access.
+- Preserve the 0.5.0 serial writer, rollback, Stop, Restore, Debug/Release isolation, and all ordering exclusions.
+
+## 0.6.0 — Native integration, discovery, and lifecycle hardening
+
+Owner-confirmed scope after 0.5.1:
+
+- Investigate reliable native overflow expand/collapse integration while retaining a usable Blenny control. Observing native state is not interception or ownership of Apple's button; do not promise a complete takeover.
+- Diagnose missing application candidates after manual Refresh, including the reported Bartender item. Distinguish discovery, ownership attribution, and presentation failures before changing behavior; do not infer that all newly launched apps are unsupported.
+- Keep discovery bounded and read-only. Candidate discovery is not mutation authorization; new real-write targets require their own exact plan and approval.
+- Defer all ordering investigation, design, experiments and implementation to `0.7.0`.
 
 The existing lifecycle and display hardening scope remains:
 
@@ -197,7 +210,20 @@ Advance when the supported matrix passes:
 - Native overflow present and absent.
 - Clock, Notification Center, and Control Center remain functional after every mutation class.
 
-## 0.7.0 — Distribution prototype
+## 0.7.0 — Real menu-bar ordering feasibility
+
+Begin with a separate safety-feasibility investigation, not an implementation promise:
+
+- Distinguish application-bundle policy, a status-item instance, and physical menu-bar position.
+- Do not ship ordering that changes only the Blenny Board while leaving the real menu bar unchanged.
+- Do not use synthetic pointer movement, clicks, or Command-drag.
+- Decide whether to implement ordering only after exact position write, snapshot, diff, Review, restoration, and lifecycle behavior can all be proven.
+- Keep all ordering design, experiments, and implementation out of `0.5.x` and `0.6.0`.
+- Include the desired Blenny control location at the edge of the always-visible region beside the overflow control as a positioning question, not a guarantee implied by Visible policy.
+
+## 0.8.0 — Distribution prototype
+
+Moved from 0.7.0 to retain the separate ordering milestone; distribution scope is unchanged.
 
 Advance when:
 
