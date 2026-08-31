@@ -4,9 +4,51 @@ Blenny is a minimal, native menu bar organizer designed exclusively for macOS 27
 
 Project website: <https://blenny.fi5h.xyz>. The application uses the stable reverse-DNS bundle identifier `xyz.fi5h.blenny`.
 
+Version `0.6.0` completed the native-overflow integration investigation, accepted
+by the owner on 2026-08-31 on the exact Debug development boundary: macOS 27.0
+build `26A5416b`, arm64, one 1600 × 900 logical-point display at 2x scale.
+Native expand/collapse now coordinates Blenny's Revealable session, including
+when the system arrow first appears while Blenny is already running, without
+requiring a preceding Blenny click. This observes native Accessibility state;
+it does not intercept, replace, or modify Apple's button.
+
+Blenny hides its fallback arrow when one known, registered native control is
+usable and restores it when native observation is absent, unavailable or
+ambiguous. The fish, safety-menu action, existing artwork and fixed 22-point
+slots remain. This is not a fixed-position or physical-visibility guarantee.
+Transient presentation loss preserves an authorized reveal and its original
+deadline; lifecycle or permission loss still restores through the serial writer.
+Canonical-root topology subscriptions and one coalesced post-activation read
+discover newly created controls without waiting for a Blenny write. Discovery
+alone never opens a session; there is no polling or automatic reconciliation.
+
+The missing-app report concerned **Coffee Buzz**, not Bartender. Bounded discovery,
+ownership attribution and installed-icon presentation succeeded; discovery grants
+no mutation authority, and the owner's later explicit assignment is preserved.
+Xcode 27 verification passed 255 Debug and 253 Release tests and both app builds.
+Installed no-write preflight, bounded real-run cleanup and unchanged policy/backup
+checks are recorded separately from the owner's visual acceptance in
+[the 0.6.0 spike](docs/TECH_SPIKE_0.6.0.md).
+
+This is a local engineering milestone, not general macOS compatibility or a
+distributable release. Release has no unsupported mutation backend. Broader
+lifecycle/display validation remains an explicit carry-forward gate in
+[the roadmap](docs/ROADMAP.md). All sorting and positioning, including Revealable
+items to the arrow's right and fixed fish placement, remain `0.7.0` work.
+Local closure uses annotated tag `v0.6.0`. Existing tags and history are
+preserved; no push is authorized.
+
 The project is currently under private development. Versions through `0.4.0` established the bounded macOS 27 backend, persistent bundle policy, deterministic Review, the single-window product, icon-first Organization Board, and native cross-lane Draft assignment. Version `0.5.0` connects a freshly reviewed application-bundle plan to one Debug-only serial writer on one exact development runtime. Activation is verified before transactional persistence; scoped 0600 recovery, rollback, ordinary Reveal, Stop Managing, Restore Previous Policy, connection invalidation, and termination cleanup close the loop. Blenny remains Visible, Hidden never enters ordinary Reveal, Apple system items remain read-only, and stale or unauthorized plans cannot reach the writer. Release still cannot access the unsupported backend. This remains a local engineering milestone, not a distributable release or a general compatibility claim.
 
-Version `0.5.0` completed the reviewed management loop and its direct-control follow-ups, with Debug/Release deterministic verification, installed no-mutation dry-run, owner-approved exact real-write validation, restoration checks, and owner acceptance of the current fish/arrow presentation. The final local annotated tag is `v0.5.0`; there is no separate patch release. In the final interface, the ordinary Review page is removed while internal plan validation and recovery remain mandatory. Draft Apply starts management, and unrelated process churn is incorporated into a freshly rebuilt exact writer plan instead of producing a false stale-plan error. A smaller double-chevron button sits left of the artwork/editor button as two compact 22-point native status items. Blenny keeps its arrow throughout verified management and ordinary reveal, independently of native overflow presence. The arrow has its own native action, shared with the safety menu; the artwork opens the editor without coordinate-based click routing. Native-control integration and missing-application discovery, including the reported Bartender issue, are deferred to 0.6.0 with lifecycle/display hardening. This is not a promise to intercept Apple's button. Ordering investigation moves to 0.7.0, retaining all safety gates; distribution preparation follows at 0.8.0. Refresh stays read-only after startup and cannot silently replace the assertion. The owner authorized updating only the unpublished local `v0.5.0` tag to include these follow-ups. All other tags and the existing commit history are preserved; nothing is pushed.
+The previous `0.5.0` milestone closed the reviewed management loop and direct
+fish/arrow controls at `v0.5.0`, with no separate patch release. It removed the
+ordinary Review page while retaining internal plan validation and recovery,
+made Draft Apply start management, and rebuilt exact plans from fresh bounded
+preflight instead of treating unrelated process churn as changed authorization.
+Its always-shown fallback policy is superseded by the accepted 0.6.0 native
+handoff above; the artwork and separate native actions are unchanged. Historical
+missing-app wording is retained in the older spike, not treated as a Bartender
+diagnosis. Existing tags, including `v0.5.0`, are not modified by this version.
 
 Icon-first recognition remains intact: installed application icons come from public AppKit/Workspace APIs, known Apple system items remain read-only semantic symbols, and unresolved candidates use one explicit fallback. Cross-lane movement changes only `BundlePolicyDraft`; Apply accepts only the exact current prepared Review. A false-to-true Accessibility transition triggers one bounded read-only refresh; later observations remain manual. No sorting, Screen Recording, menu-bar pixel capture, polling, automatic reconciliation, synthetic input, helper, or Release backend promotion is included.
 

@@ -191,23 +191,53 @@ The owner accepted the current fish/arrow presentation and folded these fixes in
 
 ## 0.6.0 — Native integration, discovery, and lifecycle hardening
 
-Owner-confirmed scope after 0.5.0:
+Status: **Complete as the owner-accepted native-integration investigation on macOS 27.0 build `26A5416b`, arm64, one display; local closure at `v0.6.0`, no push. Broader compatibility is not accepted.**
+
+The owner confirmed implementation on 2026-08-31 and corrected the reported
+missing application from Bartender to Coffee Buzz. Native-arrow compatibility
+is this version's priority. Existing fish/arrow artwork and spacing are retained.
+The implementation and actual evidence matrix are recorded in
+`docs/TECH_SPIKE_0.6.0.md`; unexercised rows are not compatibility claims.
+
+The owner accepted the final installed behavior on 2026-08-31, closing the
+runtime-appearance regression as well as steady-state coordination. The accepted
+scope is this native-integration investigation with bounded discovery and safety
+invalidation, not a claim that the originally proposed full lifecycle/display
+matrix passed. Its unexercised rows remain explicit cross-version gates below.
+
+Implemented and accepted scope after 0.5.0:
 
 - Investigate reliable native overflow expand/collapse integration while retaining a usable Blenny control. Observing native state is not interception or ownership of Apple's button; do not promise a complete takeover.
-- Diagnose missing application candidates after manual Refresh, including the reported Bartender item. Distinguish discovery, ownership attribution, and presentation failures before changing behavior; do not infer that all newly launched apps are unsupported.
+- Hide the fallback arrow only for a single, known, registered native control; restore it on absence, unknown state, or observation ambiguity/loss. Keep the fish and explicit safety-menu action, and retain the fallback's fixed allocation to prevent width-driven oscillation. Verify actual installed native edges separately from presentation fixtures.
+- Keep read-only native observation independent of management and share ordinary/dry-run wiring. Follow fresh known layout/value state edges outside owned writes without claiming click interception. Preserve a revealed session and its original deadline across presentation loss by handing control to Blenny. Keep actual lifecycle failure separate, clear hidden status content, and bound event-triggered read recovery.
+- Treat a successful empty native root followed by one newly expanded control on a layout event as the first runtime handoff edge. Do not extend this exception to startup, failed reads, explicit samples, ambiguity, identity replacement or own-write reflow.
+- Discover newly created native controls independently of Blenny writer completion: retain canonical-root creation/layout subscriptions and one coalesced post-activation read. Cancel queued reads on observer teardown; discovery and read failures cannot acquire or recreate a writer.
+- Diagnose missing application candidates after manual Refresh, including the corrected Coffee Buzz report. Distinguish discovery, ownership attribution, and presentation failures before changing behavior; do not infer that all newly launched apps are unsupported.
 - Keep discovery bounded and read-only. Candidate discovery is not mutation authorization; new real-write targets require their own exact plan and approval.
 - Defer all ordering investigation, design, experiments and implementation to `0.7.0`.
 
-The existing lifecycle and display hardening scope remains:
+Evidence supporting closure:
 
-Advance when the supported matrix passes:
+- Owner-operated startup with native overflow present and absent, native expand/collapse, runtime first appearance without a preceding Blenny click, and return to fallback when native overflow disappears.
+- Installed Coffee Buzz discovery, owning-bundle attribution and icon presentation; the owner's explicit assignment is preserved, not inferred from discovery.
+- Xcode 27: 255 Debug tests in 27 suites, 253 Release tests in 26 suites, both arm64 app builds, strict signatures, macOS 27 deployment/SDK and Release-isolation checks.
+- Structurally no-write installed preflight, real baseline activation, event-triggered frozen-scope invalidation, verified serial-writer cleanup and normal Quit; policy/backup bytes, hashes and 0600 modes unchanged. Historical failed diagnostic termination runs remain documented as failures, not normal-Quit passes.
+- Deterministic lifecycle/failure/restoration coverage is distinguished from installed compatibility evidence in the spike. No new system mutation class or physical ordering path is introduced.
+
+### Carry-forward lifecycle/display gates
+
+The following originally planned matrix is **not completed by the 0.6.0 owner
+acceptance**. Keep it as cross-version hardening work and require direct evidence
+before expanding the supported matrix, promoting the private backend to Release,
+or completing distribution/stable-release gates. This records the narrower
+accepted milestone rather than silently converting untested rows to passes:
 
 - Login, logout, lock, unlock, sleep, and wake.
 - Blenny crash and serial-writer failure simulation; no helper is added merely to create a helper-crash scenario.
 - Managed-app launch, quit, relaunch, and update-like replacement.
 - MenuBarAgent recreation without Blenny restarting it.
 - One and multiple displays, scaling changes, Spaces, full-screen apps, and menu-bar auto-hide.
-- Native overflow present and absent.
+- Native overflow present and absent on each additional claimed configuration; the current single-display configuration is owner-accepted.
 - Clock, Notification Center, and Control Center remain functional after every mutation class.
 
 ## 0.7.0 — Real menu-bar ordering feasibility
@@ -220,6 +250,7 @@ Begin with a separate safety-feasibility investigation, not an implementation pr
 - Decide whether to implement ordering only after exact position write, snapshot, diff, Review, restoration, and lifecycle behavior can all be proven.
 - Keep all ordering design, experiments, and implementation out of `0.5.x` and `0.6.0`.
 - Include the desired Blenny control location at the edge of the always-visible region beside the overflow control as a positioning question, not a guarantee implied by Visible policy.
+- Investigate the owner's clarified goal that revealed Revealable items sit to the arrow's **right**. This is physical ordering, not a lane-order change; Hidden items remain excluded from ordinary reveal.
 
 ## 0.8.0 — Distribution prototype
 
