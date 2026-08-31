@@ -103,4 +103,25 @@ struct NativeOverflowPresentationStateTests {
             ) == .unknown
         )
     }
+
+    @Test("English expanded labels cannot match a shorter collapsed substring", arguments: [
+        "Hide more menu bar items", "Hide hidden menu bar items"
+    ])
+    func englishExpanded(_ description: String) {
+        #expect(NativeOverflowPresentationStateClassifier.classify(
+            title: nil, itemDescription: description, accessibilityIdentifier: nil
+        ) == .expanded)
+    }
+
+    @Test("Contradictory or extended labels remain unknown")
+    func ambiguousLabels() {
+        #expect(NativeOverflowPresentationStateClassifier.classify(
+            title: "Show more menu bar items", itemDescription: "Hide more menu bar items",
+            accessibilityIdentifier: nil
+        ) == .unknown)
+        #expect(NativeOverflowPresentationStateClassifier.classify(
+            title: nil, itemDescription: "Unexpected show more menu bar items behavior",
+            accessibilityIdentifier: nil
+        ) == .unknown)
+    }
 }

@@ -157,6 +157,7 @@ public struct DiagnosticReport: Codable, Equatable, Sendable {
     public let aggregateErrors: [String: Int]
     public let notes: [String]
     public let items: [MenuBarItemRecord]
+    public let applicationDiscoveries: [ApplicationMenuBarDiscovery]
 
     public init(
         generatedAt: Date,
@@ -170,9 +171,10 @@ public struct DiagnosticReport: Codable, Equatable, Sendable {
         timeLimitReached: Bool,
         aggregateErrors: [String: Int],
         notes: [String],
-        items: [MenuBarItemRecord]
+        items: [MenuBarItemRecord],
+        applicationDiscoveries: [ApplicationMenuBarDiscovery] = []
     ) {
-        self.schemaVersion = 2
+        self.schemaVersion = 3
         self.generatedAt = generatedAt
         self.environment = environment
         self.accessibilityTrusted = accessibilityTrusted
@@ -185,5 +187,6 @@ public struct DiagnosticReport: Codable, Equatable, Sendable {
         self.aggregateErrors = aggregateErrors
         self.notes = notes
         self.items = items
+        self.applicationDiscoveries = applicationDiscoveries
     }
 }

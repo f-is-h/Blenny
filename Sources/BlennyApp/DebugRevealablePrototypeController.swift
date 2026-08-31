@@ -486,8 +486,7 @@ final class DebugPolicyCoexistenceController {
         )
         enqueue(
             .entryAvailabilityChanged(
-                nativeOverflowPresent: snapshot.isPresent
-                    && snapshot.observationAvailable,
+                nativeOverflowPresent: snapshot.isUsable,
                 blennyFallbackInstalled: fallbackInstalledAndRegistered,
                 sequence: nextSequence()
             )
@@ -508,8 +507,7 @@ final class DebugPolicyCoexistenceController {
             pendingNativeSnapshot = nil
             let entryDisposition = reducer.reduce(
                 .entryAvailabilityChanged(
-                    nativeOverflowPresent: snapshot.isPresent
-                        && snapshot.observationAvailable,
+                    nativeOverflowPresent: snapshot.isUsable,
                     blennyFallbackInstalled: fallbackInstalledAndRegistered,
                     sequence: nextSequence()
                 )

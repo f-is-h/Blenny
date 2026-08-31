@@ -39,6 +39,7 @@ final class StatusItemController: NSObject {
     private var normalPresentation = ManagementStatusPresentation(
         state: .unknown, hasRevealableBundles: false, isBusy: false
     )
+    private var lastRenderedPresentation: ManagementStatusPresentation?
     private let onOpenDiagnostics: () -> Void
     private let onRefresh: () -> Void
     private let onRequestAccess: () -> Void
@@ -91,7 +92,9 @@ final class StatusItemController: NSObject {
         self.onRestorePreviousPolicy = onRestorePreviousPolicy
         self.onQuit = onQuit
         #if DEBUG
-        let placementProbeEnabled = ProcessInfo.processInfo.environment[
+        let readOnlyValidation = ProcessInfo.processInfo.environment["BLENNY_0_6_0_DRY_RUN"] == "YES"
+            || ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES"
+        let placementProbeEnabled = !readOnlyValidation && ProcessInfo.processInfo.environment[
             Self.placementEnvironmentKey
         ] == "YES"
         self.placementProbeEnabled = placementProbeEnabled
@@ -128,7 +131,7 @@ final class StatusItemController: NSObject {
         configureMenu()
         #if DEBUG
         // Keep the historical single-item prototype separate from ordinary UI.
-        if ProcessInfo.processInfo.environment[DebugPolicyCoexistenceController.editingActionEnvironmentKey] == nil {
+        if readOnlyValidation || ProcessInfo.processInfo.environment[DebugPolicyCoexistenceController.editingActionEnvironmentKey] == nil {
             configureRevealStatusItem()
         }
         #else
@@ -173,6 +176,8 @@ final class StatusItemController: NSObject {
             managementStateItem.title = "Management: Unsupported"
         case .failClosedUnrestricted, .connectionInvalidated:
             managementStateItem.title = "Management: Restored"
+        case .restorationFailed:
+            managementStateItem.title = "Management: Cleanup Failed"
         default:
             managementStateItem.title = "Management: Preparing"
         }
@@ -231,14 +236,27 @@ final class StatusItemController: NSObject {
             isBusy: interactionBusy,
             nativeOverflow: nativeOverflow
         )
+        // A MenuBarAgent layout notification may result from this presentation
+        // itself. Never resubmit unchanged content in response to that event.
+        guard normalPresentation != lastRenderedPresentation else { return }
+        lastRenderedPresentation = normalPresentation
         button.image = blennyImage
         button.title = blennyImage == nil ? "B" : ""
         statusItem.length = Self.ordinaryStatusItemLength
         let arrowImage = NSImage(systemSymbolName: normalPresentation.nativeArrowSymbolName, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: ManagementStatusPresentation.arrowPointSize, weight: .medium))
         arrowImage?.isTemplate = true
-        revealStatusItem?.button?.image = arrowImage
-        revealStatusItem?.button?.isEnabled = normalPresentation.canToggleReveal
+        // macOS 27 renders hosted status content in MenuBarAgent. NSView hiding
+        // alone is not a contract that clears its previously submitted image.
+        revealStatusItem?.button?.image = normalPresentation.showsInlineArrow ? arrowImage : nil
+        revealStatusItem?.button?.title = ""
+        // Keep the 22-point status-item allocation stable. Removing the item or
+        // changing its width could remove native overflow, restore our fallback,
+        // and create a layout feedback loop. Clear content and hide the hit target.
+        revealStatusItem?.button?.isHidden = !normalPresentation.showsInlineArrow
+        revealStatusItem?.button?.setAccessibilityElement(normalPresentation.showsInlineArrow)
+        revealStatusItem?.button?.isEnabled = normalPresentation.showsInlineArrow
+            && normalPresentation.canToggleReveal
         revealStatusItem?.button?.setAccessibilityLabel(normalPresentation.nativeArrowHelp)
         revealStatusItem?.button?.toolTip = normalPresentation.nativeArrowHelp
         ordinaryRevealItem.isEnabled = normalPresentation.canToggleReveal
@@ -264,7 +282,7 @@ final class StatusItemController: NSObject {
         )
         #if DEBUG
         if ProcessInfo.processInfo.environment["BLENNY_SESSION_DIAGNOSTICS"] == "YES" {
-            Self.debugLog("BLENNY_SESSION statusControl=\(control.rawValue) action=\(action.rawValue)")
+            DebugSessionTrace.shared.write("statusControl=\(control.rawValue) action=\(action.rawValue)")
         }
         #endif
         switch action {
@@ -289,7 +307,37 @@ final class StatusItemController: NSObject {
     #if DEBUG
     /// Read-only installed validation of the actual AppKit control, not pixels.
     var debugOrdinaryRevealButtonEnabled: Bool { revealStatusItem?.button?.isEnabled == true }
-    var debugOrdinaryRevealButtonVisible: Bool { revealStatusItem?.isVisible == true }
+    /// Local AppKit presentation only; this does not prove physical visibility
+    /// outside macOS overflow.
+    var debugOrdinaryRevealButtonVisible: Bool {
+        revealStatusItem?.isVisible == true && revealStatusItem?.button?.isHidden == false
+            && revealStatusItem?.button?.image != nil
+    }
+    var debugOrdinaryRevealButtonReservedWidth: CGFloat { revealStatusItem?.length ?? 0 }
+    /// Presentation-only fixtures run in the installed no-writer dry-run. They
+    /// prove local AppKit state, not native event delivery or physical placement.
+    func debugValidateNativeFallbackPresentation() -> Bool {
+        guard let item = revealStatusItem, let button = item.button else { return false }
+        let originalObservation = nativeOverflow
+        defer { setNativeOverflow(originalObservation) }
+        let native = NativeOverflowObservationSnapshot(
+            isPresent: true, presentationState: .collapsed, observationAvailable: true,
+            controlIdentifier: UUID()
+        )
+        for snapshot in [native, .unavailable, native, .observed(states: [.collapsed, .collapsed], controlIdentifier: nil)] {
+            setNativeOverflow(snapshot)
+            guard button.isHidden == snapshot.isUsable,
+                  (button.image == nil) == snapshot.isUsable,
+                  button.title.isEmpty,
+                  item.length == Self.ordinaryStatusItemLength,
+                  item.isVisible,
+                  button.isEnabled == (!snapshot.isUsable && normalPresentation.canToggleReveal),
+                  ordinaryRevealItem.isEnabled == normalPresentation.canToggleReveal,
+                  statusItem.isVisible,
+                  statusItem.button?.isHidden == false else { return false }
+        }
+        return true
+    }
     var debugOrdinaryRevealArrowOnLeft: Bool {
         guard let arrowFrame = revealStatusItem?.button?.window?.frame,
               let artworkFrame = statusItem.button?.window?.frame else { return false }

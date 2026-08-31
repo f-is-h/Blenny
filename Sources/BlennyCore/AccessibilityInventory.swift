@@ -6,16 +6,19 @@ public actor AccessibilityInventory {
     private let maximumDurationMilliseconds: Int
     private let maximumDurationNanoseconds: UInt64
     private let messagingTimeoutSeconds: Float
+    private let rootMessagingTimeoutSeconds: Float
 
     public init(
         maximumElementsPerRefresh: Int = 1_024,
         maximumDurationMilliseconds: Int = 5_000,
-        messagingTimeoutSeconds: Float = 0.5
+        messagingTimeoutSeconds: Float = 0.5,
+        rootMessagingTimeoutSeconds: Float = 0.5
     ) {
         self.maximumElementsPerRefresh = max(1, maximumElementsPerRefresh)
         self.maximumDurationMilliseconds = max(1, maximumDurationMilliseconds)
         self.maximumDurationNanoseconds = UInt64(self.maximumDurationMilliseconds) * 1_000_000
         self.messagingTimeoutSeconds = max(0.1, messagingTimeoutSeconds)
+        self.rootMessagingTimeoutSeconds = max(0.1, rootMessagingTimeoutSeconds)
     }
 
     public func capture(
@@ -53,6 +56,7 @@ public actor AccessibilityInventory {
         var extrasMenuBarTreesFound = 0
         var menuBarAgentProcessesFound = 0
         var observations: [ElementObservation] = []
+        var discoveries: [ApplicationMenuBarDiscovery] = []
         var visitedElements = Set<ElementVisitKey>()
         var elementLimitReached = false
         var timeLimitReached = false
@@ -69,7 +73,9 @@ public actor AccessibilityInventory {
 
             runningApplicationsChecked += 1
             let applicationElement = AXUIElementCreateApplication(application.processIdentifier)
-            let timeoutError = AXUIElementSetMessagingTimeout(applicationElement, messagingTimeoutSeconds)
+            // The first cross-process AX request can take longer than leaf reads.
+            // Give that one read 500 ms by default; never retry a failed root.
+            let timeoutError = AXUIElementSetMessagingTimeout(applicationElement, rootMessagingTimeoutSeconds)
             if timeoutError != .success {
                 increment(error: timeoutError, in: &aggregateErrors)
             }
@@ -80,8 +86,11 @@ public actor AccessibilityInventory {
             }
 
             let extrasResult = copyAttribute(applicationElement, name: kAXExtrasMenuBarAttribute as CFString)
+            let root = axElement(from: extrasResult.value)
+            let observationStart = observations.count
+            AXUIElementSetMessagingTimeout(applicationElement, messagingTimeoutSeconds)
             if extrasResult.error == .success,
-               let extrasMenuBar = axElement(from: extrasResult.value) {
+               let extrasMenuBar = root {
                 extrasMenuBarTreesFound += 1
                 traverse(
                     root: extrasMenuBar,
@@ -98,6 +107,11 @@ public actor AccessibilityInventory {
             } else if extrasResult.error != .attributeUnsupported && extrasResult.error != .noValue {
                 increment(error: extrasResult.error, in: &aggregateErrors)
             }
+            discoveries.append(ApplicationMenuBarDiscovery(
+                application: application, rootReadResult: extrasResult.error.rawValue,
+                hasValidRoot: root != nil,
+                observationCount: observations.count - observationStart
+            ))
 
             guard isMenuBarAgent else { continue }
 
@@ -152,7 +166,8 @@ public actor AccessibilityInventory {
             timeLimitReached: timeLimitReached,
             aggregateErrors: aggregateErrors,
             notes: notes,
-            items: observations.map(\.record)
+            items: observations.map(\.record),
+            applicationDiscoveries: discoveries
         )
     }
 

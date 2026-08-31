@@ -15,6 +15,7 @@ public enum ManagementLoopState: Equatable, Sendable {
     case connectionInvalidated
     case unsupportedRuntimeContract(String)
     case failClosedUnrestricted(String)
+    case restorationFailed(String)
 
     public var canResume: Bool {
         switch self {
@@ -31,6 +32,7 @@ public enum ManagementLoopError: Error, Equatable, Sendable {
     case activationCouldNotBeVerified
     case managementIsNotActive
     case restartRequired
+    case staleLifecycleGeneration
 }
 
 extension ManagementLoopError: LocalizedError {
@@ -44,6 +46,8 @@ extension ManagementLoopError: LocalizedError {
             "Management is inactive. Choose Resume to check and activate it."
         case .restartRequired:
             "The system connection ended. Quit and reopen Blenny before resuming management."
+        case .staleLifecycleGeneration:
+            "The system context changed. Choose Resume after checking the managed apps."
         }
     }
 }
@@ -55,6 +59,7 @@ public actor ManagementLoopController {
     private var writer: (any PolicyAssertionWriting)?
     private var lifecycleGeneration: UInt64 = 0
     private var restartRequired = false
+    private var terminationCleanupAttempted = false
     public private(set) var state: ManagementLoopState = .unknown
 
     public init(writerProvider: @escaping WriterProvider) {
@@ -67,8 +72,7 @@ public actor ManagementLoopController {
     ) async -> ManagementLoopState {
         guard !restartRequired else { return state }
         guard acceptedPolicy.managementEnabled else {
-            await restoreAndStop(detail: "persisted management is stopped")
-            state = .stopped
+            if await restoreAndStop(detail: "persisted management is stopped") { state = .stopped }
             return state
         }
         guard let baseline else {
@@ -96,6 +100,7 @@ public actor ManagementLoopController {
     }
 
     public func writerForTransaction() async throws -> any PolicyAssertionWriting {
+        if case .restorationFailed = state { throw ManagementLoopError.restartRequired }
         if let writer { return writer }
         switch state {
         case .failClosedUnrestricted, .unsupportedRuntimeContract, .connectionInvalidated:
@@ -120,18 +125,27 @@ public actor ManagementLoopController {
 
     /// Call only after an explicit action has passed fresh policy/runtime checks.
     /// A failed startup may retry; connection loss and termination need a restart.
-    public func writerForReviewedActivation() async throws -> any PolicyAssertionWriting {
+    public func writerForReviewedActivation(
+        expectedGeneration: UInt64? = nil
+    ) async throws -> any PolicyAssertionWriting {
+        if let expectedGeneration, expectedGeneration != lifecycleGeneration {
+            throw ManagementLoopError.staleLifecycleGeneration
+        }
         guard !restartRequired else { throw ManagementLoopError.restartRequired }
         if state.canResume { state = .acceptedPolicyLoadedInactive }
         return try await writerForTransaction()
     }
+
+    public func generationSnapshot() -> UInt64 { lifecycleGeneration }
 
     public func synchronizeCommittedPolicy(
         _ policy: PersistentBundlePolicyDocument,
         baseline: RevealAllowlistPlan?
     ) async throws {
         guard policy.managementEnabled else {
-            await restoreAndStop(detail: "management stopped by committed policy")
+            guard await restoreAndStop(detail: "management stopped by committed policy") else {
+                throw ManagementLoopError.restartRequired
+            }
             state = .stopped
             return
         }
@@ -207,9 +221,9 @@ public actor ManagementLoopController {
     }
 
     public func stop() async {
+        if case .restorationFailed = state { return }
         state = .stopping
-        await restoreAndStop(detail: "management stopped")
-        state = .stopped
+        if await restoreAndStop(detail: "management stopped") { state = .stopped }
     }
 
     public func failClosed(_ detail: String) async {
@@ -217,38 +231,51 @@ public actor ManagementLoopController {
     }
 
     public func connectionInvalidated() async {
+        if case .restorationFailed = state { return }
         restartRequired = true
         lifecycleGeneration &+= 1
         state = .connectionInvalidated
         if let writer {
             await writer.connectionInvalidated()
         }
-        writer = nil
-        state = .failClosedUnrestricted("writer connection invalidated")
+        _ = await confirmCleanup(detail: "writer connection invalidated")
     }
 
     public func terminate() async {
+        guard !terminationCleanupAttempted else { return }
+        terminationCleanupAttempted = true
         restartRequired = true
         lifecycleGeneration &+= 1
         state = .terminating
         if let writer {
             await writer.restoreAndStop()
         }
-        writer = nil
-        state = .failClosedUnrestricted("application termination restored assertions")
+        _ = await confirmCleanup(detail: "application termination restored assertions")
     }
 
     public func activePlanSnapshot() async -> RevealAllowlistPlan? {
         await writer?.activePlanSnapshot()
     }
 
-    private func restoreAndStop(detail: String) async {
+    @discardableResult
+    private func restoreAndStop(detail: String) async -> Bool {
+        if case .restorationFailed = state { return false }
         lifecycleGeneration &+= 1
         if let writer {
             await writer.restoreAndStop()
         }
+        return await confirmCleanup(detail: detail)
+    }
+
+    private func confirmCleanup(detail: String) async -> Bool {
+        guard await writer?.activePlanSnapshot() == nil else {
+            restartRequired = true
+            state = .restorationFailed(detail)
+            return false
+        }
         writer = nil
         state = .failClosedUnrestricted(detail)
+        return true
     }
 }
 

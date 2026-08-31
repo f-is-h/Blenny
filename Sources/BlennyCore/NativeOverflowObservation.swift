@@ -8,27 +8,35 @@ public enum NativeOverflowPresentationState: String, Equatable, Sendable {
     case unknown
 }
 
-public enum NativeOverflowUpdateSource: String, Sendable {
-    case discovery, sample, valueChange
+public enum NativeOverflowUpdateSource: String, Equatable, Sendable {
+    case discovery, sample, layout, valueChange
 }
 
 public struct NativeOverflowObservationSnapshot: Equatable, Sendable {
     public let isPresent: Bool
     public let presentationState: NativeOverflowPresentationState
     public let observationAvailable: Bool
+    /// Process-local identity of one registered AX control, never a position.
+    public let controlIdentifier: UUID?
+    public let controlCount: Int
 
     public var isUsable: Bool {
         isPresent && observationAvailable && presentationState != .unknown
+            && controlCount == 1 && controlIdentifier != nil
     }
 
     public init(
         isPresent: Bool,
         presentationState: NativeOverflowPresentationState,
-        observationAvailable: Bool
+        observationAvailable: Bool,
+        controlIdentifier: UUID? = nil,
+        controlCount: Int? = nil
     ) {
         self.isPresent = isPresent
         self.presentationState = presentationState
         self.observationAvailable = observationAvailable
+        self.controlIdentifier = controlIdentifier
+        self.controlCount = controlCount ?? (isPresent ? 1 : 0)
     }
 
     public static let unavailable = NativeOverflowObservationSnapshot(
@@ -36,9 +44,30 @@ public struct NativeOverflowObservationSnapshot: Equatable, Sendable {
         presentationState: .unknown,
         observationAvailable: false
     )
+
+    public static func observed(
+        states: [NativeOverflowPresentationState], controlIdentifier: UUID?
+    ) -> Self {
+        Self(
+            isPresent: !states.isEmpty,
+            presentationState: states.count == 1 ? states[0] : .unknown,
+            observationAvailable: true,
+            controlIdentifier: states.count == 1 ? controlIdentifier : nil,
+            controlCount: states.count
+        )
+    }
 }
 
 public enum NativeOverflowPresentationStateClassifier {
+    static func availableState(
+        _ state: NativeOverflowPresentationState, enabled: Bool?, hidden: Bool?, ownerMatches: Bool
+    ) -> NativeOverflowPresentationState {
+        // AXHidden is unsupported on the observed controls. Absence is not a
+        // visibility guarantee; an explicit hidden value must reject the entry.
+        guard enabled == true, hidden != true, ownerMatches else { return .unknown }
+        return state
+    }
+
     private static let collapsedMarkers = [
         "show hidden menu bar items",
         "show more menu bar items",
@@ -64,16 +93,14 @@ public enum NativeOverflowPresentationStateClassifier {
         itemDescription: String?,
         accessibilityIdentifier: String?
     ) -> NativeOverflowPresentationState {
-        let searchable = [title, itemDescription, accessibilityIdentifier]
+        let labels = [title, itemDescription, accessibilityIdentifier]
             .compactMap(MenuBarItemIdentityResolver.normalize)
-            .joined(separator: " ")
-        if collapsedMarkers.contains(where: searchable.contains) {
-            return .collapsed
-        }
-        if expandedMarkers.contains(where: searchable.contains) {
-            return .expanded
-        }
-        return .unknown
+        // Substrings are unsafe: "hide more menu bar items" also contains the
+        // collapsed marker "more menu bar items". Contradictory labels fail closed.
+        let collapsed = labels.contains { collapsedMarkers.contains($0) }
+        let expanded = labels.contains { expandedMarkers.contains($0) }
+        guard collapsed != expanded else { return .unknown }
+        return collapsed ? .collapsed : .expanded
     }
 }
 
@@ -82,6 +109,18 @@ public final class NativeOverflowObserver {
     public private(set) var isSamplingCurrentControl = false
     public private(set) var lastUpdateSource = NativeOverflowUpdateSource.discovery
     public private(set) var unavailabilityReason: String?
+    #if DEBUG
+    public private(set) var debugObservationDetails: [String] = []
+    /// Bounded validation telemetry, separate from the state-change callback.
+    /// Duplicate or ambiguous notifications may be logged without becoming an
+    /// eligible reveal edge. No handler is installed during ordinary operation.
+    public var debugNotificationHandler: (@MainActor @Sendable (String) -> Void)?
+    public var debugSubscriptionSummary: String {
+        "applicationTopology=\(applicationTopologyRegistrationCount)"
+            + " extrasTopology=\(extrasSubscriptions.registered.joined(separator: ","))"
+            + " controls=\(observedElements.count)"
+    }
+    #endif
     public typealias UpdateHandler = @MainActor @Sendable (
         NativeOverflowObservationSnapshot
     ) -> Void
@@ -93,13 +132,19 @@ public final class NativeOverflowObserver {
     private var observer: AXObserver?
     private var menuBarAgentElement: AXUIElement?
     private var observedElements: [AXUIElement] = []
+    private var controlIdentifier: UUID?
     private var runLoopSource: CFRunLoopSource?
     private var context: NativeOverflowObserverContext?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var updateHandler: UpdateHandler?
     private var lastSnapshot: NativeOverflowObservationSnapshot?
+    private var readRecovery = NativeOverflowReadRecovery()
+    private var extrasSubscriptions = NativeOverflowRootSubscriptions<AXUIElement>()
+    private var applicationTopologyRegistrationCount = 0
+    private var activationSample = NativeOverflowActivationSample()
+    private var activationSampleTask: Task<Void, Never>?
 
-    public init(messagingTimeoutSeconds: Float = 0.1, reconnectOnAgentChange: Bool = true) {
+    public init(messagingTimeoutSeconds: Float = 0.5, reconnectOnAgentChange: Bool = true) {
         self.messagingTimeoutSeconds = messagingTimeoutSeconds
         self.reconnectOnAgentChange = reconnectOnAgentChange
     }
@@ -112,6 +157,7 @@ public final class NativeOverflowObserver {
         stop()
         unavailabilityReason = nil
         updateHandler = onUpdate
+        readRecovery.explicitRefresh()
         agentConnectionLost = onAgentConnectionLost
         installWorkspaceObservers()
 
@@ -136,10 +182,13 @@ public final class NativeOverflowObserver {
         agentConnectionLost = nil
         updateHandler = nil
         lastSnapshot = nil
+        #if DEBUG
+        debugNotificationHandler = nil
+        #endif
     }
 
-    /// One read after an explicit action or an app-activation event discovers a
-    /// newly created control even when container layout notifications are absent.
+    /// One read after an explicit action or a settled app-activation event can
+    /// discover a newly created control without waiting for a writer operation.
     /// Never reconnect or schedule another sample from this method.
     public func sampleCurrentControl() {
         guard let context else { return }
@@ -151,6 +200,26 @@ public final class NativeOverflowObserver {
             return
         }
         publish(rescanOverflowElements(context: context), source: .sample)
+    }
+
+    /// An explicit manual Refresh may re-establish a failed read-only AX
+    /// registration once. It cannot reconnect a changed MenuBarAgent or write.
+    public func refreshCurrentControl() {
+        guard updateHandler != nil, AccessibilityAuthorization.isTrusted,
+              let observedAgentPID,
+              NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.MenuBarAgent")
+                .contains(where: { $0.processIdentifier == observedAgentPID }) else { return }
+        isSamplingCurrentControl = true
+        defer { isSamplingCurrentControl = false }
+        readRecovery.explicitRefresh()
+        clearExtrasSubscriptions()
+        let snapshot: NativeOverflowObservationSnapshot
+        if let context {
+            snapshot = rescanOverflowElements(context: context)
+        } else {
+            snapshot = configureForCurrentMenuBarAgent()
+        }
+        publish(snapshot, source: .sample)
     }
 
     private func configureForCurrentMenuBarAgent() -> NativeOverflowObservationSnapshot {
@@ -193,14 +262,15 @@ public final class NativeOverflowObserver {
         self.runLoopSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
 
-        // MenuBarAgent does not promise container-level layout notifications.
-        // Register opportunistically; direct value observation remains usable
-        // when this notification is unsupported on the current build.
-        _ = register(
-            element: applicationElement,
-            notification: kAXLayoutChangedNotification as CFString,
-            context: context
-        )
+        // Discovery cannot depend on an already-registered overflow child.
+        // Application notifications cover root creation/replacement; the
+        // canonical extras root is also subscribed during each root binding.
+        for name in [kAXLayoutChangedNotification, kAXCreatedNotification] {
+            if register(element: applicationElement, notification: name as CFString,
+                        context: context, target: "application") {
+                applicationTopologyRegistrationCount += 1
+            }
+        }
         return rescanOverflowElements(context: context)
     }
 
@@ -208,9 +278,21 @@ public final class NativeOverflowObserver {
         context: NativeOverflowObserverContext
     ) -> NativeOverflowObservationSnapshot {
         guard let applicationElement = menuBarAgentElement else { return .unavailable }
-        guard let elements = discoverOverflowElements(applicationElement: applicationElement) else {
-            detachAXObserver()
+        guard readRecovery.allowsEventRead else {
+            unavailabilityReason = "native-read-recovery-exhausted-use-refresh"
             return .unavailable
+        }
+        guard let elements = discoverOverflowElements(applicationElement: applicationElement, context: context) else {
+            readRecovery.failed()
+            clearControlRegistrations()
+            // Keep the application layout subscription. One later notification
+            // can recover observation; never recreate the management writer.
+            return .unavailable
+        }
+        let retainsSingleControl = elements.count == 1 && observedElements.count == 1
+            && CFEqual(elements[0], observedElements[0])
+        if !retainsSingleControl || controlIdentifier == nil {
+            controlIdentifier = elements.count == 1 ? UUID() : nil
         }
         if let observer {
             for element in observedElements where !elements.contains(where: { CFEqual($0, element) }) {
@@ -226,7 +308,8 @@ public final class NativeOverflowObserver {
                 context: context
             ) else {
                 unavailabilityReason = "value-notification-unavailable"
-                detachAXObserver()
+                readRecovery.failed()
+                clearControlRegistrations(additionalElements: elements)
                 return .unavailable
             }
             _ = register(
@@ -236,30 +319,33 @@ public final class NativeOverflowObserver {
             )
         }
         observedElements = elements
+        readRecovery.succeeded()
         return snapshotOfObservedElements()
+    }
+
+    private func clearControlRegistrations(additionalElements: [AXUIElement] = []) {
+        if let observer {
+            for element in observedElements + additionalElements {
+                AXObserverRemoveNotification(observer, element, kAXValueChangedNotification as CFString)
+                AXObserverRemoveNotification(observer, element, kAXUIElementDestroyedNotification as CFString)
+            }
+        }
+        observedElements.removeAll()
+        controlIdentifier = nil
     }
 
     private func snapshotOfObservedElements() -> NativeOverflowObservationSnapshot {
         let states = observedElements.map(presentationState(of:))
-        let state: NativeOverflowPresentationState
-        if states.contains(.expanded) {
-            state = .expanded
-        } else if states.contains(.collapsed) {
-            state = .collapsed
-        } else {
-            state = .unknown
-        }
-        return NativeOverflowObservationSnapshot(
-            isPresent: !observedElements.isEmpty,
-            presentationState: state,
-            observationAvailable: true
+        return .observed(
+            states: states, controlIdentifier: controlIdentifier
         )
     }
 
     private func register(
         element: AXUIElement,
         notification: CFString,
-        context: NativeOverflowObserverContext
+        context: NativeOverflowObserverContext,
+        target: String = "control"
     ) -> Bool {
         guard let observer else { return false }
         let result = AXObserverAddNotification(
@@ -268,10 +354,25 @@ public final class NativeOverflowObserver {
             notification,
             Unmanaged.passUnretained(context).toOpaque()
         )
+        #if DEBUG
+        debugNotificationHandler?("register target=\(target) name=\(notification) result=\(result.rawValue)")
+        #endif
         return result == .success || result == .notificationAlreadyRegistered
     }
 
+    private func clearExtrasSubscriptions() {
+        let currentObserver = observer
+        extrasSubscriptions.clear { element, name in
+            if let currentObserver { AXObserverRemoveNotification(currentObserver, element, name as CFString) }
+        }
+    }
+
     private func detachAXObserver() {
+        activationSampleTask?.cancel()
+        activationSampleTask = nil
+        activationSample.cancel()
+        clearExtrasSubscriptions()
+        applicationTopologyRegistrationCount = 0
         context?.owner = nil
         if let runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
@@ -279,6 +380,7 @@ public final class NativeOverflowObserver {
         observer = nil
         menuBarAgentElement = nil
         observedElements.removeAll()
+        controlIdentifier = nil
         runLoopSource = nil
         context = nil
     }
@@ -287,16 +389,42 @@ public final class NativeOverflowObserver {
         _ notification: String, element: AXUIElement, source: NativeOverflowObserverContext
     ) {
         guard let context, context === source else { return }
+        #if DEBUG
+        let sender = observedElements.firstIndex(where: { CFEqual($0, element) })
+        debugNotificationHandler?("received name=\(notification) sender=\(sender.map(String.init) ?? "container")")
+        #endif
         if notification == kAXUIElementDestroyedNotification as String
-            || notification == kAXLayoutChangedNotification as String {
-            publish(rescanOverflowElements(context: context))
+            || notification == kAXLayoutChangedNotification as String
+            || notification == kAXCreatedNotification as String {
+            if notification == kAXUIElementDestroyedNotification as String {
+                // An AX handle may compare equal after recreation. A destruction
+                // notification still ends its registration identity.
+                controlIdentifier = nil
+                if extrasSubscriptions.contains(element, sameElement: { CFEqual($0, $1) }) {
+                    clearExtrasSubscriptions()
+                    clearControlRegistrations()
+                } else if observedElements.contains(where: { CFEqual($0, element) }) {
+                    // Even an equal reused handle needs a new registration.
+                    clearControlRegistrations()
+                }
+            }
+            publish(
+                rescanOverflowElements(context: context),
+                source: notification == kAXLayoutChangedNotification as String ? .layout : .discovery
+            )
             return
         }
         if notification == kAXValueChangedNotification as String {
             guard observedElements.contains(where: { CFEqual($0, element) }) else { return }
             // This is a registered native control, not a topology change.
             // Keep its subscription intact across expand/collapse edges.
-            publish(snapshotOfObservedElements(), source: .valueChange)
+            let states = observedElements.map(presentationState(of:))
+            #if DEBUG
+            let sender = observedElements.firstIndex(where: { CFEqual($0, element) })
+            let stateDetail = states.enumerated().map { "\($0.offset)=\($0.element.rawValue)" }.joined(separator: ",")
+            debugNotificationHandler?("name=\(notification) sender=\(sender.map(String.init) ?? "none") states=\(stateDetail)")
+            #endif
+            publish(.observed(states: states, controlIdentifier: controlIdentifier), source: .valueChange)
         }
     }
 
@@ -305,7 +433,7 @@ public final class NativeOverflowObserver {
         workspaceObservers.append(center.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sampleCurrentControl() }
+            MainActor.assumeIsolated { self?.scheduleActivationSample() }
         })
         for name in [
             NSWorkspace.didLaunchApplicationNotification,
@@ -344,104 +472,130 @@ public final class NativeOverflowObserver {
         }
     }
 
+    private func scheduleActivationSample() {
+        guard let context else { return }
+        activationSampleTask?.cancel()
+        let ticket = activationSample.schedule()
+        #if DEBUG
+        debugNotificationHandler?("workspace activation sample-scheduled ticket=\(ticket) delayMs=200")
+        #endif
+        // One coalesced read per external activation, not an immediate read
+        // followed by a retry. AX creation/layout events still act immediately.
+        activationSampleTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+            guard let self, self.context === context,
+                  self.activationSample.consume(ticket) else { return }
+            self.activationSampleTask = nil
+            #if DEBUG
+            self.debugNotificationHandler?("workspace activation sample-fired ticket=\(ticket)")
+            #endif
+            self.sampleCurrentControl()
+        }
+    }
+
     private func publish(
         _ snapshot: NativeOverflowObservationSnapshot,
         source: NativeOverflowUpdateSource = .discovery
     ) {
-        guard snapshot != lastSnapshot else { return }
+        // A manual sample also cancels stale queued native intent, even when
+        // the values are unchanged. Duplicate value notifications are no-ops.
+        guard source != .valueChange || lastUpdateSource != .valueChange || snapshot != lastSnapshot else { return }
         lastUpdateSource = source
         lastSnapshot = snapshot
         updateHandler?(snapshot)
     }
 
     private func discoverOverflowElements(
-        applicationElement: AXUIElement
+        applicationElement: AXUIElement,
+        context: NativeOverflowObserverContext
     ) -> [AXUIElement]? {
+        #if DEBUG
+        debugObservationDetails.removeAll()
+        #endif
         let deadline = ContinuousClock.now.advanced(by: .seconds(1))
-        var roots: [(AXUIElement, Int, AccessibilityTraversalScope)] = []
-        if let extras = copyAXElement(
-            from: applicationElement,
-            attribute: kAXExtrasMenuBarAttribute as CFString
-        ) {
-            roots.append((extras, 0, .extrasMenuBar))
-        }
-        let applicationChildren = copyAXElements(
-            from: applicationElement,
-            attribute: kAXChildrenAttribute as CFString
+        var extrasValue: CFTypeRef?
+        let extrasError = AXUIElementCopyAttributeValue(
+            applicationElement, kAXExtrasMenuBarAttribute as CFString, &extrasValue
         )
-        guard applicationChildren.count <= 256 else {
-            unavailabilityReason = "traversal-root-limit"
+        guard extrasError == .success else {
+            unavailabilityReason = "extras-root-read-failed-\(extrasError.rawValue)"
             return nil
         }
-        for child in applicationChildren {
-            guard ContinuousClock.now < deadline else {
-                unavailabilityReason = "traversal-deadline"
-                return nil
-            }
-            let role = copyAXString(child, attribute: kAXRoleAttribute as CFString)
-            guard role == "AXWindow" || role == "AXMenuBar" else { continue }
-            guard AccessibilityTraversalPolicy.isMenuBarPresentationRoot(
-                role: role, frame: nativePresentationExtent(of: child)
-            ) else { continue }
-            roots.append((child, 0, .agentPresentationRoot))
-        }
-
-        var stack = roots
-        var visited = Set<CFHashCode>()
-        var results: [AXUIElement] = []
-        var inspected = 0
-
-        while let (element, depth, scope) = stack.popLast(), inspected < 256 {
-            guard ContinuousClock.now < deadline else {
-                unavailabilityReason = "traversal-deadline"
-                return nil
-            }
-            inspected += 1
-            guard visited.insert(CFHash(element)).inserted else { continue }
-            let role = copyAXString(element, attribute: kAXRoleAttribute as CFString)
-            guard AccessibilityTraversalPolicy.shouldInclude(role: role, in: scope) else { continue }
-            let title = copyAXString(element, attribute: kAXTitleAttribute as CFString)
-            let description = copyAXString(
-                element,
-                attribute: kAXDescriptionAttribute as CFString
-            )
-            let identifier = copyAXString(
-                element,
-                attribute: kAXIdentifierAttribute as CFString
-            )
-            let classification = NativeOverflowClassifier.classify(
-                ownerBundleIdentifier: "com.apple.MenuBarAgent",
-                role: role,
-                title: title,
-                itemDescription: description,
-                accessibilityIdentifier: identifier
-            )
-            if classification.classification == .nativeOverflowPresentationControl {
-                results.append(element)
-                continue
-            }
-            guard AccessibilityTraversalPolicy.shouldTraverseChildren(
-                of: role, at: depth, in: scope
-            ) else { continue }
-            for child in copyAXElements(
-                from: element,
-                attribute: kAXChildrenAttribute as CFString
-            ).reversed() {
-                stack.append((child, depth + 1, scope))
-            }
-        }
-        guard stack.isEmpty else {
-            unavailabilityReason = "traversal-element-limit"
+        guard let extrasValue, CFGetTypeID(extrasValue) == AXUIElementGetTypeID() else {
+            unavailabilityReason = "invalid-extras-root"
             return nil
         }
-        unavailabilityReason = nil
-        return results
+        let root = unsafeDowncast(extrasValue, to: AXUIElement.self)
+        guard copyAXString(root, attribute: kAXRoleAttribute as CFString) == "AXMenuBar" else {
+            unavailabilityReason = "invalid-extras-root-role"
+            return nil
+        }
+        let currentObserver = observer
+        let rootChanged = extrasSubscriptions.update(
+            to: root, sameElement: { CFEqual($0, $1) },
+            register: { [self] element, name in
+                register(element: element, notification: name as CFString,
+                         context: context, target: "extras-root")
+            },
+            unregister: { element, name in
+                if let currentObserver { AXObserverRemoveNotification(currentObserver, element, name as CFString) }
+            }
+        )
+        if rootChanged { clearControlRegistrations() }
+        if copyAXBool(root, attribute: kAXHiddenAttribute as CFString) == true {
+            unavailabilityReason = "extras-root-hidden"
+            return nil
+        }
+        do {
+            // Do not enumerate arbitrary application windows alongside the
+            // canonical extras root. Read-only evidence found distinct window
+            // presentations that otherwise made one menu-bar entry ambiguous.
+            let controls = try NativeOverflowTreeDiscovery.discover(
+                in: root,
+                withinDeadline: { ContinuousClock.now < deadline },
+                sameElement: { CFEqual($0, $1) },
+                describe: { [self] element in
+                    let role = try copyNativeDiscoveryString(element, attribute: kAXRoleAttribute as CFString)
+                    guard AccessibilityTraversalPolicy.shouldInclude(role: role, in: .extrasMenuBar) else {
+                        return .init(role: role, isOverflowControl: false)
+                    }
+                    let title = try copyNativeDiscoveryString(element, attribute: kAXTitleAttribute as CFString)
+                    let description = try copyNativeDiscoveryString(element, attribute: kAXDescriptionAttribute as CFString)
+                    let identifier = try copyNativeDiscoveryString(element, attribute: kAXIdentifierAttribute as CFString)
+                    let classification = NativeOverflowClassifier.classify(
+                        ownerBundleIdentifier: "com.apple.MenuBarAgent", role: role,
+                        title: title, itemDescription: description, accessibilityIdentifier: identifier
+                    )
+                    let isControl = classification.classification == .nativeOverflowPresentationControl
+                    #if DEBUG
+                    if isControl {
+                        debugObservationDetails.append(
+                            "source=extrasMenuBar title=\(title ?? "none")"
+                                + " description=\(description ?? "none") identifier=\(identifier ?? "none")"
+                        )
+                    }
+                    #endif
+                    return .init(role: role, isOverflowControl: isControl)
+                },
+                children: { try copyNativeDiscoveryChildren($0) }
+            )
+            unavailabilityReason = nil
+            return controls
+        } catch let failure as NativeOverflowTreeDiscovery.Failure {
+            unavailabilityReason = failure.rawValue
+            return nil
+        } catch {
+            unavailabilityReason = "native-discovery-failed"
+            return nil
+        }
     }
 
     private func presentationState(
         of element: AXUIElement
     ) -> NativeOverflowPresentationState {
-        NativeOverflowPresentationStateClassifier.classify(
+        var ownerPID: pid_t = 0
+        let ownerResult = AXUIElementGetPid(element, &ownerPID)
+        let state = NativeOverflowPresentationStateClassifier.classify(
             title: copyAXString(element, attribute: kAXTitleAttribute as CFString),
             itemDescription: copyAXString(
                 element,
@@ -452,18 +606,12 @@ public final class NativeOverflowObserver {
                 attribute: kAXIdentifierAttribute as CFString
             )
         )
+        return NativeOverflowPresentationStateClassifier.availableState(
+            state, enabled: copyAXBool(element, attribute: kAXEnabledAttribute as CFString),
+            hidden: copyAXBool(element, attribute: kAXHiddenAttribute as CFString),
+            ownerMatches: ownerResult == .success && ownerPID == observedAgentPID
+        )
     }
-}
-
-/// Only size is needed to reuse the inventory's presentation-root boundary.
-/// No position, content pixels, or application-menu subtree is inspected.
-private func nativePresentationExtent(of element: AXUIElement) -> RectSnapshot? {
-    var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &value) == .success,
-          let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-    var size = CGSize.zero
-    guard AXValueGetValue(unsafeDowncast(value, to: AXValue.self), .cgSize, &size) else { return nil }
-    return RectSnapshot(x: 0, y: 0, width: size.width, height: size.height)
 }
 
 fileprivate final class NativeOverflowObserverContext: @unchecked Sendable {
@@ -497,32 +645,28 @@ private struct NativeOverflowNotification: @unchecked Sendable {
     let name: String
 }
 
-private func copyAXElement(
-    from element: AXUIElement,
-    attribute: CFString
-) -> AXUIElement? {
+private func copyNativeDiscoveryChildren(_ element: AXUIElement) throws -> [AXUIElement] {
     var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
-          let value,
-          CFGetTypeID(value) == AXUIElementGetTypeID() else {
-        return nil
+    let result = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value)
+    if result == .noValue || result == .attributeUnsupported { return [] }
+    guard result == .success else { throw NativeOverflowTreeDiscovery.Failure.readFailure }
+    guard let value else { return [] }
+    guard let values = value as? [AXUIElement] else {
+        throw NativeOverflowTreeDiscovery.Failure.readFailure
     }
-    return unsafeDowncast(value, to: AXUIElement.self)
+    return values
 }
 
-private func copyAXElements(
-    from element: AXUIElement,
-    attribute: CFString
-) -> [AXUIElement] {
+private func copyNativeDiscoveryString(_ element: AXUIElement, attribute: CFString) throws -> String? {
     var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
-          let values = value as? [AnyObject] else {
-        return []
+    let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+    if result == .noValue || result == .attributeUnsupported { return nil }
+    guard result == .success else { throw NativeOverflowTreeDiscovery.Failure.readFailure }
+    guard let value else { return nil }
+    guard let string = value as? String else {
+        throw NativeOverflowTreeDiscovery.Failure.readFailure
     }
-    return values.compactMap { value in
-        guard CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
-        return unsafeDowncast(value, to: AXUIElement.self)
-    }
+    return string
 }
 
 private func copyAXString(
@@ -534,4 +678,11 @@ private func copyAXString(
         return nil
     }
     return value as? String
+}
+
+private func copyAXBool(_ element: AXUIElement, attribute: CFString) -> Bool? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+          let value, CFGetTypeID(value) == CFBooleanGetTypeID() else { return nil }
+    return CFBooleanGetValue(unsafeDowncast(value, to: CFBoolean.self))
 }

@@ -47,9 +47,10 @@ public struct ManagementStatusPresentation: Equatable, Sendable {
             accessibilityLabel = "Blenny — Open menu"
         }
         canToggleReveal = arrowSymbolName != nil && !isBusy
-        // Native presence does not prove a working replacement for our control.
-        // Keep the explicit Blenny action available throughout its own session.
-        showsInlineArrow = arrowSymbolName != nil
+        // Presence alone is insufficient: a known, single, registered control
+        // is required. Only the fallback button's presentation is hidden; the
+        // explicit action in Blenny's safety menu stays available.
+        showsInlineArrow = !nativeOverflow.isUsable
     }
 
     public func opensMenu(isSecondaryClick: Bool) -> Bool {

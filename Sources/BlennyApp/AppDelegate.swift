@@ -40,18 +40,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var ordinaryReveal = OrdinaryRevealCoordinator()
     private var attemptedStartupRecovery = false
     private var connectionInvalidationTask: Task<Void, Never>?
-    private lazy var managementLoop = ManagementLoopController(
-        writerProvider: {
+    private var lifecycleGeneration: UInt64 = 0
+    private var lifecycleObservers: [(NotificationCenter, NSObjectProtocol)] = []
+    private var lifecycleRestartRequired = false
+    private lazy var managementLoop: ManagementLoopController = {
+        let readOnly = isReadOnlyValidation
+        return ManagementLoopController(writerProvider: {
+            guard !readOnly else { throw PolicyInterfaceWriteError.installedDryRunRequired }
             #if DEBUG
             let factory = try ExperimentalMacOS27AssessmentFactory()
+            let trace = DebugSessionTrace.shared
+            if trace.enabled {
+                return RevealAssertionWriter(factory: factory, diagnostic: { message in
+                    trace.write(message)
+                })
+            }
             return RevealAssertionWriter(factory: factory)
             #else
             throw PolicyInterfaceWriteError.releaseBackendUnavailable
             #endif
-        }
-    )
+        })
+    }()
+    private var isReadOnlyValidation: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["BLENNY_0_6_0_DRY_RUN"] == "YES"
+            || ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES"
+        #else
+        false
+        #endif
+    }
     #if DEBUG
     private var policyCoexistenceController: DebugPolicyCoexistenceController?
+    private var validationDeadlineTask: Task<Void, Never>?
     #endif
 
     private lazy var editorWindowController = PolicyEditorWindowController(
@@ -89,10 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessionDiagnostic("launch accessibility=\(AccessibilityAuthorization.isTrusted) login=\(SMAppService.mainApp.status)")
 
         #if DEBUG
-        if ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES",
+        if isReadOnlyValidation,
            !AccessibilityAuthorization.isTrusted {
             Self.writeDryRunOutput(
-                "DRY-RUN FAILED: Accessibility is not granted to the installed 0.5.0 Debug app."
+                "DRY-RUN FAILED: Accessibility is not granted to the installed Debug app."
             )
             NSApplication.shared.terminate(nil)
             return
@@ -100,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         #if DEBUG
-        if ProcessInfo.processInfo.environment[
+        if !isReadOnlyValidation, ProcessInfo.processInfo.environment[
             DebugPolicyCoexistenceController.editingActionEnvironmentKey
         ] != nil {
             policyCoexistenceController = DebugPolicyCoexistenceController(
@@ -111,7 +131,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #endif
 
-        showEditor()
+        installLifecycleObservers()
+        updateNativeOverflowObservation()
+        // Managed startup preserves the owner's current leading-menu width,
+        // just as the successful native-owner spike did. Setup/failure still
+        // opens the editor; the fish and explicit reopen always open it.
+        if !isReadOnlyValidation && !AccessibilityAuthorization.isTrusted { showEditor() }
+        #if DEBUG
+        if !isReadOnlyValidation, DebugSessionTrace.shared.enabled,
+           let raw = ProcessInfo.processInfo.environment["BLENNY_0_6_0_TRACE_SECONDS"],
+           let seconds = Int(raw), (1...300).contains(seconds) {
+            sessionDiagnostic("bounded-normal-trace seconds=\(seconds)")
+            validationDeadlineTask = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+                self?.sessionDiagnostic("bounded-normal-trace expired requesting-normal-quit")
+                // Leave both the Swift job and the main dispatch-queue drain
+                // before AppKit enters its terminateLater nested loop, so the
+                // asynchronous restoration job can run inside that loop.
+                RunLoop.main.perform(inModes: [.common]) {
+                    NSApplication.shared.terminate(nil)
+                }
+            }
+        }
+        #endif
         refresh()
     }
 
@@ -120,8 +162,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ordinaryReveal.suspend()
         nativeOverflowObserver.stop()
         nativeObservationStarted = false
+        for (center, token) in lifecycleObservers { center.removeObserver(token) }
+        lifecycleObservers.removeAll()
         #if DEBUG
-        if ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES" {
+        validationDeadlineTask?.cancel()
+        validationDeadlineTask = nil
+        if isReadOnlyValidation {
             return .terminateNow
         }
         #endif
@@ -157,6 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let previouslyTrusted = lastKnownAccessibilityTrust
         updatePermissionPresentation()
         updateLaunchAtLoginPresentation()
+        updateNativeOverflowObservation()
         let shouldRefreshAfterGrant = AccessibilityPermissionRefreshPolicy.shouldRefresh(
             previouslyTrusted: previouslyTrusted,
             isTrusted: lastKnownAccessibilityTrust == true,
@@ -244,6 +291,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ordinaryReveal.suspend()
         isRefreshing = true
         let descriptors = runningApplicationDescriptors()
+        let generation = lifecycleGeneration
         let runningIdentifiers = Set(
             NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
         ).union(Bundle.main.bundleIdentifier.map { [$0] } ?? [])
@@ -255,6 +303,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 accessibilityTrusted: true
             )
             guard let self else { return }
+            guard generation == self.lifecycleGeneration else {
+                self.isRefreshing = false
+                self.statusItemController.setRefreshing(false)
+                self.editorWindowController.setRefreshing(false)
+                self.finishManagementInteraction()
+                return
+            }
             await self.completeRefresh(
                 report: report,
                 runningBundleIdentifiers: runningIdentifiers
@@ -270,16 +325,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             isRefreshing = false
             statusItemController.setRefreshing(false)
             editorWindowController.setRefreshing(false)
-            finishManagementInteraction()
+            finishManagementInteraction(refreshNativeObservation: true)
         }
         guard !interactionGate.isTerminating else { return }
 
         let snapshot = MenuBarOwnershipSnapshotBuilder.make(from: report)
         ownershipSnapshot = snapshot
+        editorWindowController.setDiscoveryWarnings(
+            report.applicationDiscoveries.compactMap(\.failureDescription)
+        )
+        #if DEBUG
+        if isReadOnlyValidation,
+           let target = ProcessInfo.processInfo.environment["BLENNY_DISCOVERY_BUNDLE_ID"] {
+            let discovery = report.applicationDiscoveries.first {
+                $0.bundleIdentifier?.lowercased() == target.lowercased()
+            }
+            let owner = snapshot.observations.first {
+                $0.bundleIdentifier?.lowercased() == target.lowercased()
+            }
+            Self.writeDryRunOutput(
+                "DISCOVERY bundle=\(target) root=\(discovery?.outcome.rawValue ?? "not-scanned")"
+                    + " ax=\(discovery?.rootReadResult.description ?? "none")"
+                    + " records=\(discovery?.observationCount ?? 0) attributedItems=\(owner?.menuBarItemCount ?? 0)"
+            )
+        }
+        #endif
         guard snapshot.isComplete else {
             let detail = snapshot.issues.map(\.description).joined(separator: "; ")
             #if DEBUG
-            if ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES" {
+            if isReadOnlyValidation {
                 Self.writeDryRunOutput(
                     "DRY-RUN FAILED: read-only observation was incomplete: \(detail)"
                 )
@@ -297,10 +371,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let blennyBundleIdentifier = try currentBundleIdentifier()
             let store = try makePersistentStore()
             persistentStore = store
-            _ = try await store.migrateBundleIdentifier(
-                from: Self.legacyBlennyBundleIdentifier,
-                to: blennyBundleIdentifier
-            )
+            if !isReadOnlyValidation {
+                _ = try await store.migrateBundleIdentifier(
+                    from: Self.legacyBlennyBundleIdentifier,
+                    to: blennyBundleIdentifier
+                )
+            }
             let accepted = try await store.load() ?? initialPolicy(
                 blennyBundleIdentifier: blennyBundleIdentifier
             )
@@ -326,6 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 activeBaselinePlan = nil
                 activeRevealPlan = nil
             }
+            let isInitialPolicyLoad = editorModel == nil
             self.interfaceStore = interfaceStore
             editorModel = model
             observedRunningBundleIdentifiers = runningIdentifiers
@@ -336,6 +413,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 observationCount: candidateInventory.candidates.count,
                 recoveryAvailable: hasBackup
             )
+            #if DEBUG
+            if isReadOnlyValidation,
+               let target = ProcessInfo.processInfo.environment["BLENNY_DISCOVERY_BUNDLE_ID"] {
+                Self.writeDryRunOutput(
+                    "DISCOVERY candidate=\(model.effectivePolicy(for: target) != nil)"
+                        + " implicitVisible=\(model.implicitVisibleCandidates.contains { $0.bundleIdentifier.lowercased() == target.lowercased() })"
+                        + " authorized=\(model.acceptedPolicyScope.approvedBundleIdentifiers.contains { $0.lowercased() == target.lowercased() })"
+                        + " \(editorWindowController.debugPresentationSummary(for: target))"
+                )
+            }
+            #endif
             developmentMutationAvailable = developmentCompatibilityAvailable(
                 bundleIdentifier: blennyBundleIdentifier
             )
@@ -349,6 +437,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 managementState,
                 persistedManagementEnabled: accepted.managementEnabled
             )
+            if isInitialPolicyLoad && !isReadOnlyValidation {
+                switch managementState {
+                case .active, .ordinaryRevealSession: break
+                default: showEditor()
+                }
+            }
             #if DEBUG
             await runInstalledDryRunIfRequested(model: model)
             #endif
@@ -357,6 +451,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "Could not prepare the policy editor: \(error.localizedDescription)",
                 isError: true
             )
+            #if DEBUG
+            if isReadOnlyValidation {
+                Self.writeDryRunOutput("DRY-RUN FAILED: \(error)")
+                NSApplication.shared.terminate(nil)
+            }
+            #endif
         }
     }
 
@@ -435,10 +535,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ state: ManagementLoopState,
         persistedManagementEnabled: Bool
     ) {
-        let state = interactionGate.isTerminating ? ManagementLoopState.terminating : state
+        let state = interactionGate.isTerminating ? ManagementLoopState.terminating
+            : (connectionInvalidationTask != nil ? .restoring : state)
         let hasRevealable = editorModel?.acceptedPolicy.policies.contains { $0.policy == .revealable } == true
         ordinaryReveal.synchronize(state, hasRevealableBundles: hasRevealable)
-        updateNativeOverflowObservation(state: state)
+        updateNativeOverflowObservation()
         statusItemController.setNativeOverflow(ordinaryReveal.observation)
         sessionDiagnostic("management=\(state) entry=\(ordinaryReveal.entryPoint.rawValue)")
         statusItemController.setManagementState(
@@ -473,6 +574,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "Management is inactive; Blenny's restrictions are removed. \(detail)",
                 isError: true
             )
+        case let .restorationFailed(detail):
+            editorWindowController.setStatus(
+                "Cleanup could not be confirmed. Blenny will quit to release its connection. \(detail)",
+                isError: true
+            )
+            NSApplication.shared.terminate(nil)
         default:
             break
         }
@@ -482,31 +589,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func runInstalledDryRunIfRequested(
         model: PolicyEditorViewModel
     ) async {
-        guard ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES"
+        guard isReadOnlyValidation
         else { return }
         do {
-            let core = try makeCore(scope: model.acceptedPolicyScope)
+            guard statusItemController.debugValidateNativeFallbackPresentation() else {
+                throw NSError(domain: "Blenny.InstalledDryRun", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Local AppKit fallback-presentation fixtures failed."
+                ])
+            }
+            Self.writeDryRunOutput(
+                "APPKIT PRESENTATION FIXTURES passed=true"
+                    + " nativeEventEvidence=false writerCreated=false"
+            )
+            let core = try await makeCore(scope: model.acceptedPolicyScope)
             let preview = try await core.previewResumeManaging(
                 candidates: model.candidateInventory,
                 observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
                 candidateGeneration: editorWindowController.candidateGeneration,
                 runtimeContractFingerprint: runtimeContractFingerprint
             )
-            let native = nativeOverflowObserver.start(onUpdate: { _ in })
+            // The ordinary app already started this observer, independently of
+            // management. Do not create a second, dry-run-only observation path.
+            let native = ordinaryReveal.observation
             let nativeFailure = nativeOverflowObserver.unavailabilityReason ?? "none"
-            nativeOverflowObserver.stop()
+            let nativeDetails = nativeOverflowObserver.debugObservationDetails.joined(separator: "\n- ")
             Self.writeDryRunOutput(
                 preview.0.text
                     + "\nNATIVE OBSERVATION (READ ONLY)"
                     + "\n- present=\(native.isPresent) observable=\(native.observationAvailable) state=\(native.presentationState.rawValue) failure=\(nativeFailure)"
+                    + "\n- controls=\(native.controlCount) usable=\(native.isUsable)"
+                    + "\n- \(nativeDetails)"
                     + "\nDRY-RUN GUARANTEES"
                     + "\n- installedBundle=\(Bundle.main.bundleURL.path)"
                     + "\n- writerCreated=false"
                     + "\n- assertionCreated=false"
                     + "\n- persistenceChanged=false"
                     + "\n- managementEnabledChanged=false"
+                    + "\n- readOnlyStore=true"
+                    + "\n- planPrepared=\(preview.1 != nil)"
             )
+            if let raw = ProcessInfo.processInfo.environment["BLENNY_0_6_0_OBSERVE_SECONDS"],
+               let seconds = Int(raw), (1...300).contains(seconds) {
+                Self.writeDryRunOutput("READ-ONLY OBSERVATION WINDOW seconds=\(seconds); no writer is available")
+                try await Task.sleep(for: .seconds(seconds))
+            }
+            nativeOverflowObserver.stop()
+            statusItemController.setNativeOverflow(.unavailable)
         } catch {
+            nativeOverflowObserver.stop()
+            statusItemController.setNativeOverflow(.unavailable)
             Self.writeDryRunOutput("DRY-RUN FAILED: \(error)")
         }
         NSApplication.shared.terminate(nil)
@@ -530,7 +661,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bundleIdentifier: String
     ) -> Bool {
         #if DEBUG
-        guard ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] != "YES",
+        guard !isReadOnlyValidation,
               AccessibilityAuthorization.isTrusted,
               Bundle.main.bundleURL.path.hasPrefix("/Applications/"),
               Bundle.main.bundleIdentifier == bundleIdentifier,
@@ -570,16 +701,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    private func finishManagementInteraction() {
+    private func finishManagementInteraction(refreshNativeObservation: Bool = false) {
         // Read once while the transition still owns the gate. This discovers
         // an arrow created by the just-completed reflow without a polling loop.
-        if !interactionGate.isTerminating { nativeOverflowObserver.sampleCurrentControl() }
+        if !interactionGate.isTerminating {
+            if refreshNativeObservation { nativeOverflowObserver.refreshCurrentControl() }
+            else { nativeOverflowObserver.sampleCurrentControl() }
+        }
         interactionGate.finish()
         if !interactionGate.isTerminating { ordinaryReveal.resume() }
         editorWindowController.setApplying(false)
         statusItemController.setInteractionBusy(interactionGate.isTerminating)
         #if DEBUG
-        sessionDiagnostic("controls arrowEnabled=\(statusItemController.debugOrdinaryRevealButtonEnabled) arrowVisible=\(statusItemController.debugOrdinaryRevealButtonVisible) arrowLeft=\(statusItemController.debugOrdinaryRevealArrowOnLeft) coordinatorEnabled=\(ordinaryReveal.canToggleBlenny) busy=\(interactionGate.isBusy)")
+        sessionDiagnostic("controls arrowEnabled=\(statusItemController.debugOrdinaryRevealButtonEnabled) localGlyphPresent=\(statusItemController.debugOrdinaryRevealButtonVisible) coordinatorEnabled=\(ordinaryReveal.canToggleBlenny) busy=\(interactionGate.isBusy)")
         sessionDiagnostic("resume editorEnabled=\(editorWindowController.debugResumeEnabled) menuEnabled=\(statusItemController.debugResumeEnabled)")
         sessionDiagnostic("arrowHasDedicatedNativeButton=\(statusItemController.debugOrdinaryRevealHasDedicatedButton)")
         #endif
@@ -587,7 +721,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func performPolicyAction(_ action: PolicyActionAuditTrail.Action) {
-        guard let model = editorModel,
+        guard !isReadOnlyValidation, let model = editorModel,
               action != .apply || model.hasDraftChanges,
               !model.hasDraftChanges || action == .apply || action == .stop,
               beginManagementInteraction() else { return }
@@ -596,6 +730,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editorWindowController.setStatus("Checking changes…", isError: false)
         ordinaryRevealTimeoutTask?.cancel()
         ordinaryRevealTimeoutTask = nil
+        let generation = lifecycleGeneration
 
         managementInteractionTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -636,37 +771,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     scope = action == .apply ? model.validationScope : model.acceptedPolicyScope
                 }
-                let core = try makeCore(scope: scope, permitsReviewedActivation: permitsReviewedActivation)
+                guard generation == lifecycleGeneration else {
+                    throw ManagementLoopError.staleLifecycleGeneration
+                }
+                let core = try await makeCore(scope: scope, permitsReviewedActivation: permitsReviewedActivation)
                 let preview: (PolicyDryRunImpactReport, PreparedPolicyEdit?)
-                let generation = editorWindowController.candidateGeneration
+                let candidateGeneration = editorWindowController.candidateGeneration
                 switch action {
                 case .apply:
                     preview = try await core.preview(
                         draft: model.draft,
                         candidates: model.candidateInventory,
                         observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-                        candidateGeneration: generation,
+                        candidateGeneration: candidateGeneration,
                         runtimeContractFingerprint: runtimeContractFingerprint
                     )
                 case .resume:
                     preview = try await core.previewResumeManaging(
                         candidates: actionModel.candidateInventory,
                         observedRunningBundleIdentifiers: preparationRunning,
-                        candidateGeneration: generation,
+                        candidateGeneration: candidateGeneration,
                         runtimeContractFingerprint: runtimeContractFingerprint
                     )
                 case .stop:
                     preview = try await core.previewStopManaging(
                         candidates: model.candidateInventory,
                         observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-                        candidateGeneration: generation,
+                        candidateGeneration: candidateGeneration,
                         runtimeContractFingerprint: runtimeContractFingerprint
                     )
                 case .restore:
                     preview = try await core.previewRestorePreviousPolicy(
                         candidates: model.candidateInventory,
                         observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-                        candidateGeneration: generation,
+                        candidateGeneration: candidateGeneration,
                         runtimeContractFingerprint: runtimeContractFingerprint
                     )
                 }
@@ -678,6 +816,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 preparedForAudit = prepared
                 actionAudit.record(action, phase: .prepared, prepared: prepared)
                 guard editorModel?.draft == model.draft,
+                      generation == lifecycleGeneration,
                       !interactionGate.isTerminating else {
                     throw PolicyEditingCoreError.staleReviewedPlan
                 }
@@ -708,6 +847,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         previousModel model: PolicyEditorViewModel,
         action: PolicyActionAuditTrail.Action
     ) async throws -> PolicyEditingCommitOutcome {
+        let generation = lifecycleGeneration
         developmentMutationAvailable = developmentCompatibilityAvailable(
             bundleIdentifier: model.blennyBundleIdentifier
         )
@@ -731,6 +871,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
             guard editorModel?.draft == model.draft,
+                  generation == lifecycleGeneration,
                   !interactionGate.isTerminating else {
                 throw PolicyEditingCoreError.staleReviewedPlan
             }
@@ -748,6 +889,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 runtimeContractFingerprint: runtimeContractFingerprint
             )
             let applied = outcome.effectivePrepared
+            guard generation == lifecycleGeneration else {
+                // Persistence may have reached its commit point before the
+                // notification. Keep accepted intent, never republish its writer.
+                try await synchronizeInterfaceAfterCommit(
+                    applied.newPolicy, previousModel: model, preservingDraft: action == .stop
+                )
+                throw ManagementLoopError.staleLifecycleGeneration
+            }
             if outcome.result != .noChange {
                 activeBaselinePlan = applied.newPolicy.managementEnabled
                     ? applied.report.newBaselinePlan : nil
@@ -763,7 +912,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             return outcome
         } catch {
-            await reconcileManagementAfterFailure(prepared)
+            if generation == lifecycleGeneration {
+                await reconcileManagementAfterFailure(prepared)
+            }
             throw error
         }
     }
@@ -857,6 +1008,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func drainOrdinaryRevealRequest() {
+        guard AccessibilityAuthorization.isTrusted else {
+            handleLifecycleEvent(.permissionLost)
+            return
+        }
         guard !interactionGate.isBusy, !interactionGate.isTerminating, !isRefreshing,
               connectionInvalidationTask == nil,
               let transition = ordinaryReveal.takePendingTransition() else { return }
@@ -864,6 +1019,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let reveal = activeRevealPlan,
               let accepted = editorModel?.acceptedPolicy,
               beginManagementInteraction() else { return }
+        sessionDiagnostic("intent consumed=\(transition.presentation.rawValue) owner=\(transition.owner.rawValue) reason=\(ordinaryReveal.lastConsumedReason ?? "none") \(ordinaryReveal.diagnosticSummary)")
         ordinaryRevealTimeoutTask?.cancel()
         ordinaryRevealTimeoutTask = nil
         managementInteractionTask = Task { @MainActor [weak self] in
@@ -908,20 +1064,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func updateNativeOverflowObservation(state: ManagementLoopState) {
-        let shouldObserve: Bool
-        switch state {
-        case .active, .ordinaryRevealSession:
-            shouldObserve = developmentMutationAvailable && !interactionGate.isTerminating
-        case .applying:
-            shouldObserve = nativeObservationStarted && !interactionGate.isTerminating
-        default:
-            shouldObserve = false
-        }
+    private func updateNativeOverflowObservation() {
+        #if DEBUG
+        guard policyCoexistenceController == nil else { return }
+        #endif
+        let shouldObserve = NativeOverflowObservationPolicy.shouldObserve(
+            accessibilityTrusted: AccessibilityAuthorization.isTrusted,
+            isTerminating: interactionGate.isTerminating,
+            restartRequired: lifecycleRestartRequired
+        )
         guard shouldObserve else {
             nativeOverflowObserver.stop()
             nativeObservationStarted = false
             ordinaryReveal.observe(.unavailable)
+            statusItemController.setNativeOverflow(.unavailable)
             return
         }
         guard !nativeObservationStarted else { return }
@@ -930,43 +1086,136 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onAgentConnectionLost: { [weak self] in self?.nativeAgentConnectionLost() },
             onUpdate: { [weak self] snapshot in
                 guard let self, !self.interactionGate.isTerminating else { return }
+                let previous = self.ordinaryReveal.diagnosticSummary
                 self.ordinaryReveal.observe(
-                    snapshot, permitsReveal: !self.nativeOverflowObserver.isSamplingCurrentControl
+                    snapshot, source: self.nativeOverflowObserver.lastUpdateSource
                 )
-                self.sessionDiagnostic("native present=\(snapshot.isPresent) observable=\(snapshot.observationAvailable) state=\(snapshot.presentationState.rawValue) source=\(self.nativeOverflowObserver.lastUpdateSource.rawValue) failure=\(self.nativeOverflowObserver.unavailabilityReason ?? "none")")
+                self.sessionDiagnostic("native present=\(snapshot.isPresent) observable=\(snapshot.observationAvailable) controls=\(snapshot.controlCount) identity=\(snapshot.controlIdentifier?.uuidString ?? "none") state=\(snapshot.presentationState.rawValue) source=\(self.nativeOverflowObserver.lastUpdateSource.rawValue) failure=\(self.nativeOverflowObserver.unavailabilityReason ?? "none") before={\(previous)} after={\(self.ordinaryReveal.diagnosticSummary)}")
                 self.statusItemController.setNativeOverflow(snapshot)
+                #if DEBUG
+                if self.isReadOnlyValidation {
+                    Self.writeDryRunOutput(
+                        "NATIVE READ-ONLY EVENT wiring=ordinary source=\(self.nativeOverflowObserver.lastUpdateSource.rawValue)"
+                            + " controls=\(snapshot.controlCount) state=\(snapshot.presentationState.rawValue)"
+                            + " usable=\(snapshot.isUsable) identity=\(snapshot.controlIdentifier?.uuidString ?? "none")"
+                            + " localGlyphPresent=\(self.statusItemController.debugOrdinaryRevealButtonVisible)"
+                            + " reservedWidth=\(self.statusItemController.debugOrdinaryRevealButtonReservedWidth)"
+                    )
+                }
+                #endif
                 self.drainOrdinaryRevealRequest()
             }
         )
+        #if DEBUG
+        if isReadOnlyValidation || ProcessInfo.processInfo.environment["BLENNY_SESSION_DIAGNOSTICS"] == "YES" {
+            nativeOverflowObserver.debugNotificationHandler = { detail in
+                DebugSessionTrace.shared.write("native-notification \(detail)")
+            }
+            sessionDiagnostic("native subscriptions \(nativeOverflowObserver.debugSubscriptionSummary)")
+        }
+        #endif
     }
 
     private func nativeAgentConnectionLost() {
-        guard !interactionGate.isTerminating, connectionInvalidationTask == nil else { return }
-        nativeObservationStarted = false
-        developmentMutationAvailable = false
+        handleLifecycleEvent(.menuBarAgentChanged)
+    }
+
+    private func installLifecycleObservers() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        let events: [(Notification.Name, ManagementLifecycleEvent)] = [
+            (NSWorkspace.willSleepNotification, .willSleep),
+            (NSWorkspace.didWakeNotification, .didWake),
+            (NSWorkspace.sessionDidResignActiveNotification, .sessionChanged),
+            (NSWorkspace.sessionDidBecomeActiveNotification, .sessionChanged),
+            (NSWorkspace.screensDidSleepNotification, .sessionChanged),
+            (NSWorkspace.screensDidWakeNotification, .sessionChanged),
+            (NSWorkspace.activeSpaceDidChangeNotification, .spaceChanged),
+        ]
+        for (name, event) in events {
+            let token = workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.handleLifecycleEvent(event) }
+            }
+            lifecycleObservers.append((workspace, token))
+        }
+        let center = NotificationCenter.default
+        let token = center.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleLifecycleEvent(.displayChanged) }
+        }
+        lifecycleObservers.append((center, token))
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            let token = workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+                let identifier = application.bundleIdentifier
+                let event: ManagementLifecycleEvent = identifier?.lowercased() == "com.apple.menubaragent"
+                    ? .menuBarAgentChanged
+                    : (name == NSWorkspace.didLaunchApplicationNotification
+                        ? .applicationLaunched(identifier) : .applicationTerminated(identifier))
+                MainActor.assumeIsolated { self?.handleLifecycleEvent(event) }
+            }
+            lifecycleObservers.append((workspace, token))
+        }
+    }
+
+    private func handleLifecycleEvent(_ event: ManagementLifecycleEvent) {
+        guard !interactionGate.isTerminating else { return }
+        let managed = Set(editorModel?.validationScope.approvedBundleIdentifiers ?? [])
+        let allowed = activeBaselinePlan.map { Set($0.allowedBundleIdentifiers) }
+            ?? observedRunningBundleIdentifiers
+        guard ManagementLifecyclePolicy.invalidates(
+            event, managedBundleIdentifiers: managed, allowedBundleIdentifiers: allowed,
+            blennyBundleIdentifier: Bundle.main.bundleIdentifier ?? "xyz.fi5h.blenny"
+        ) else { return }
+        lifecycleGeneration &+= 1
+        if event == .menuBarAgentChanged { lifecycleRestartRequired = true }
+        if event == .menuBarAgentChanged || event == .permissionLost {
+            updateNativeOverflowObservation()
+        }
+        // Inactive notification handling is read-only. It never retries startup.
+        guard activeBaselinePlan != nil || interactionGate.isBusy || lifecycleRestartRequired else { return }
+        attemptedStartupRecovery = true
         ordinaryReveal.suspend()
+        // Invalidate queued intent, but keep read-only observation alive while
+        // management is safely stopped. This sample cannot activate a writer.
+        nativeOverflowObserver.sampleCurrentControl()
         ordinaryRevealTimeoutTask?.cancel()
         ordinaryRevealTimeoutTask = nil
         statusItemController.setInteractionBusy(true)
+        guard connectionInvalidationTask == nil else { return }
+        let activeInteraction = managementInteractionTask
         connectionInvalidationTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await managementLoop.connectionInvalidated()
+            if lifecycleRestartRequired {
+                developmentMutationAvailable = false
+                await managementLoop.connectionInvalidated()
+            } else {
+                await managementLoop.failClosed(event.reason)
+            }
+            // The writer is stopped first. Awaiting the bounded action prevents
+            // a late completion from repainting the just-invalidated context.
+            await activeInteraction?.value
+            if lifecycleRestartRequired {
+                await managementLoop.connectionInvalidated()
+            }
             activeBaselinePlan = nil
             activeRevealPlan = nil
+            connectionInvalidationTask = nil
             presentManagementState(
                 await managementLoop.state,
                 persistedManagementEnabled: editorModel?.acceptedPolicy.managementEnabled == true
             )
-            connectionInvalidationTask = nil
             statusItemController.setInteractionBusy(interactionGate.isBusy || interactionGate.isTerminating)
+            let restored = await managementLoop.activePlanSnapshot() == nil
+            sessionDiagnostic("lifecycle restored=\(restored) reason=\(event.reason)")
         }
     }
 
     /// Explicit local validation only; no normal disk logger or inventory dump.
     private func sessionDiagnostic(_ message: @autoclosure () -> String) {
         #if DEBUG
-        guard ProcessInfo.processInfo.environment["BLENNY_SESSION_DIAGNOSTICS"] == "YES" else { return }
-        Self.writeDryRunOutput("BLENNY_SESSION \(message())")
+        guard DebugSessionTrace.shared.enabled else { return }
+        DebugSessionTrace.shared.write(message())
         #endif
     }
 
@@ -990,25 +1239,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeCore(
         scope: PolicyValidationScope,
         permitsReviewedActivation: Bool = false
-    ) throws -> PolicyEditingCore {
+    ) async throws -> PolicyEditingCore {
         guard let interfaceStore else {
             throw PolicyInterfaceWriteError.interfaceStoreUnavailable
         }
         let managementLoop = self.managementLoop
+        let generation = lifecycleGeneration
+        let writerGeneration = await managementLoop.generationSnapshot()
         return PolicyEditingCore(
             store: interfaceStore,
             blennyBundleIdentifier: try currentBundleIdentifier(),
             scope: scope,
-            writerProvider: {
+            writerProvider: { [weak self] in
+                guard await self?.permitsWriterUse(generation: generation) == true else {
+                    throw ManagementLoopError.staleLifecycleGeneration
+                }
                 if permitsReviewedActivation {
-                    return try await managementLoop.writerForReviewedActivation()
+                    return try await managementLoop.writerForReviewedActivation(expectedGeneration: writerGeneration)
                 }
                 return try await managementLoop.writerForTransaction()
             }
         )
     }
 
+    private func permitsWriterUse(generation: UInt64) -> Bool {
+        generation == lifecycleGeneration && !interactionGate.isTerminating
+            && connectionInvalidationTask == nil && !isReadOnlyValidation
+    }
+
     private func requestAccessibilityAccess() {
+        guard !isReadOnlyValidation else { return }
         let defaults = UserDefaults.standard
         let action = AccessibilityOnboardingPolicy.action(
             isTrusted: AccessibilityAuthorization.isTrusted,
@@ -1067,6 +1327,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updatePermissionPresentation() {
         let trusted = AccessibilityAuthorization.isTrusted
+        if lastKnownAccessibilityTrust == true && !trusted {
+            handleLifecycleEvent(.permissionLost)
+        }
         lastKnownAccessibilityTrust = trusted
         let requested = UserDefaults.standard.bool(
             forKey: Self.accessibilityPromptRequestedKey
@@ -1079,6 +1342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {
+        guard !isReadOnlyValidation else { return }
         let service = SMAppService.mainApp
         do {
             if enabled {
@@ -1128,7 +1392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
+            create: !isReadOnlyValidation
         )
         let directory = applicationSupport
             .appendingPathComponent("Blenny", isDirectory: true)
@@ -1137,7 +1401,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             policyURL: directory.appendingPathComponent("bundle-policies.json"),
             backupURL: directory.appendingPathComponent(
                 "bundle-policies.previous.blenny-backup.json"
-            )
+            ),
+            readOnly: isReadOnlyValidation
         )
     }
 

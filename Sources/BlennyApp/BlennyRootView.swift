@@ -1615,6 +1615,9 @@ private struct ObservationAndDraftFooter: View {
                 .font(.system(size: 10.5))
                 .foregroundStyle(model.hasDraftChanges ? Color.primary : Color.secondary)
                 .lineLimit(1)
+                .help(model.discoveryWarnings.isEmpty
+                    ? "Only successfully attributed menu-bar applications are candidates."
+                    : model.discoveryWarnings.joined(separator: "\n"))
 
             Spacer(minLength: 10)
 
@@ -1672,6 +1675,9 @@ private struct ObservationAndDraftFooter: View {
         }
         let appSuffix = model.observationCount == 1 ? "" : "s"
         let systemSuffix = model.systemItems.count == 1 ? "" : "s"
+        if !model.discoveryWarnings.isEmpty {
+            return "\(model.observationCount) app\(appSuffix) · \(model.discoveryWarnings.count) unreadable · Manual refresh"
+        }
         return "\(model.observationCount) app\(appSuffix), \(model.systemItems.count) read-only system item\(systemSuffix) · Manual refresh"
     }
 

@@ -132,6 +132,7 @@ final class ProductInterfaceModel: ObservableObject {
     @Published var navigation = ProductInterfaceNavigationState()
     @Published private(set) var model: PolicyEditorViewModel?
     @Published private(set) var observationCount = 0
+    @Published var discoveryWarnings: [String] = []
     @Published private(set) var recoveryAvailable = false
     @Published private(set) var accessibilityTrusted = false
     @Published private(set) var accessibilityPromptRequested = false
@@ -685,6 +686,19 @@ final class PolicyEditorWindowController: NSWindowController {
     var candidateGeneration: UUID {
         interfaceModel.candidateGeneration
     }
+
+    func setDiscoveryWarnings(_ warnings: [String]) {
+        interfaceModel.discoveryWarnings = warnings
+    }
+
+    #if DEBUG
+    func debugPresentationSummary(for bundleIdentifier: String) -> String {
+        let icon = interfaceModel.applicationIcons.first {
+            $0.key.lowercased() == bundleIdentifier.lowercased()
+        }?.value
+        return "presentationIcon=\(icon != nil) iconSource=\(icon.map { String(describing: $0.descriptor) } ?? "none")"
+    }
+    #endif
 
     #if DEBUG
     var debugResumeEnabled: Bool { interfaceModel.controls.resumeEnabled }

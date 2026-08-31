@@ -200,6 +200,8 @@ public struct PersistentBundlePolicyBackup: Codable, Equatable, Sendable {
 }
 
 public enum PersistentBundlePolicyStoreError: Error, Equatable, Sendable {
+    case readOnlyStore
+    case interruptedCommitRequiresRecovery
     case policyAndBackupPathsMustDiffer
     case unsupportedBackupSchemaVersion(Int)
     case interruptedTransactionCorrupt
@@ -233,21 +235,27 @@ public actor PersistentBundlePolicyStore {
     public let policyURL: URL
     public let backupURL: URL
     let transactionURL: URL
+    private let readOnly: Bool
 
-    public init(policyURL: URL, backupURL: URL) throws {
+    public init(policyURL: URL, backupURL: URL, readOnly: Bool = false) throws {
         guard policyURL.standardizedFileURL != backupURL.standardizedFileURL else {
             throw PersistentBundlePolicyStoreError.policyAndBackupPathsMustDiffer
         }
         self.policyURL = policyURL
         self.backupURL = backupURL
+        self.readOnly = readOnly
         self.transactionURL = policyURL.deletingLastPathComponent().appendingPathComponent(
             ".\(policyURL.lastPathComponent).transaction"
         )
-        try Self.recoverInterruptedCommit(
-            policyURL: policyURL,
-            backupURL: backupURL,
-            transactionURL: transactionURL
-        )
+        if readOnly {
+            guard !FileManager.default.fileExists(atPath: transactionURL.path) else {
+                throw PersistentBundlePolicyStoreError.interruptedCommitRequiresRecovery
+            }
+        } else {
+            try Self.recoverInterruptedCommit(
+                policyURL: policyURL, backupURL: backupURL, transactionURL: transactionURL
+            )
+        }
     }
 
     public func load() throws -> PersistentBundlePolicyDocument? {
@@ -277,6 +285,7 @@ public actor PersistentBundlePolicyStore {
     }
 
     public func save(_ document: PersistentBundlePolicyDocument) throws {
+        guard !readOnly else { throw PersistentBundlePolicyStoreError.readOnlyStore }
         guard let existing = try load() else {
             try write(Self.makeEncoder().encode(document), to: policyURL)
             return
@@ -327,6 +336,7 @@ public actor PersistentBundlePolicyStore {
         from oldIdentifier: String,
         to newIdentifier: String
     ) throws -> Bool {
+        guard !readOnly else { throw PersistentBundlePolicyStoreError.readOnlyStore }
         guard BundlePolicyIdentity.canonicalKey(for: oldIdentifier) != nil else {
             throw PersistentBundlePolicyDocumentError.invalidBundleIdentifier(oldIdentifier)
         }
@@ -372,6 +382,7 @@ public actor PersistentBundlePolicyStore {
 
     @discardableResult
     public func restoreBackup() throws -> PersistentBundlePolicyDocument? {
+        guard !readOnly else { throw PersistentBundlePolicyStoreError.readOnlyStore }
         guard let backup = try loadBackup() else { return nil }
         try write(Self.makeEncoder().encode(backup.previousPolicy), to: policyURL)
         return backup.previousPolicy

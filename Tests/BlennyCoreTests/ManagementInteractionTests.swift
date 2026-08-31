@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import BlennyCore
 
@@ -49,24 +50,32 @@ struct ManagementInteractionTests {
         #expect(revealed.accessibilityLabel.contains("Conceal Revealable"))
     }
 
-    @Test("Native overflow cannot hide Blenny's active session control", arguments: [
+    @Test("One known observed native control hides only the fallback arrow", arguments: [
         NativeOverflowPresentationState.collapsed, .expanded
     ])
-    func nativeDoesNotHideInlineArrow(_ state: NativeOverflowPresentationState) {
-        let presentation = ManagementStatusPresentation(
-            state: .ordinaryRevealSession("reveal"), hasRevealableBundles: true, isBusy: false,
-            nativeOverflow: .init(isPresent: true, presentationState: state, observationAvailable: true)
-        )
-        #expect(presentation.showsInlineArrow)
-        #expect(presentation.canToggleReveal)
-        #expect(presentation.arrowSymbolName == "chevron.left.2")
+    func nativeHidesFallbackButRetainsSafetyAction(_ state: NativeOverflowPresentationState) {
+        for management in [ManagementLoopState.active("baseline"), .ordinaryRevealSession("reveal")] {
+            let presentation = ManagementStatusPresentation(
+                state: management, hasRevealableBundles: true, isBusy: false,
+                nativeOverflow: .init(
+                    isPresent: true, presentationState: state, observationAvailable: true,
+                    controlIdentifier: UUID()
+                )
+            )
+            #expect(!presentation.showsInlineArrow)
+            #expect(presentation.canToggleReveal)
+            #expect(presentation.opensMenu(isSecondaryClick: true))
+        }
     }
 
     @Test("Unknown, absent or unobservable native overflow retains the fallback", arguments: [
         NativeOverflowObservationSnapshot.unavailable,
         .init(isPresent: true, presentationState: .unknown, observationAvailable: true),
         .init(isPresent: true, presentationState: .collapsed, observationAvailable: false),
-        .init(isPresent: false, presentationState: .collapsed, observationAvailable: true)
+        .init(isPresent: false, presentationState: .collapsed, observationAvailable: true),
+        .init(isPresent: true, presentationState: .collapsed, observationAvailable: true),
+        .init(isPresent: true, presentationState: .expanded, observationAvailable: true,
+              controlIdentifier: UUID(), controlCount: 2)
     ])
     func unavailableNativeKeepsArrow(_ snapshot: NativeOverflowObservationSnapshot) {
         let presentation = ManagementStatusPresentation(
@@ -75,6 +84,41 @@ struct ManagementInteractionTests {
         )
         #expect(presentation.showsInlineArrow)
         #expect(presentation.canToggleReveal)
+    }
+
+    @Test("Native loss restores fallback without changing the verified direction")
+    func fallbackReturnsOnNativeLoss() {
+        let native = NativeOverflowObservationSnapshot(
+            isPresent: true, presentationState: .expanded, observationAvailable: true,
+            controlIdentifier: UUID()
+        )
+        let snapshots: [NativeOverflowObservationSnapshot] = [
+            .unavailable, native, .unavailable, native,
+            .observed(states: [.collapsed, .expanded], controlIdentifier: nil), .unavailable
+        ]
+        let expected = [true, false, true, false, true, true]
+        for (snapshot, visible) in zip(snapshots, expected) {
+            let presentation = ManagementStatusPresentation(
+                state: .ordinaryRevealSession("verified reveal"), hasRevealableBundles: true,
+                isBusy: false, nativeOverflow: snapshot
+            )
+            #expect(presentation.showsInlineArrow == visible)
+            #expect(presentation.arrowSymbolName == "chevron.left.2")
+            #expect(presentation.canToggleReveal)
+        }
+    }
+
+    @Test("Busy native handoff cannot expose an actionable hidden hit target")
+    func busyNativePresentation() {
+        let presentation = ManagementStatusPresentation(
+            state: .ordinaryRevealSession("verified reveal"), hasRevealableBundles: true,
+            isBusy: true,
+            nativeOverflow: .init(isPresent: true, presentationState: .expanded,
+                                  observationAvailable: true, controlIdentifier: UUID())
+        )
+        #expect(!presentation.showsInlineArrow)
+        #expect(!presentation.canToggleReveal)
+        #expect(presentation.arrowSymbolName == "chevron.left.2")
     }
 
     @Test("Unverified, failed and stopped states never offer a reveal action", arguments: [
@@ -89,6 +133,7 @@ struct ManagementInteractionTests {
         )
         #expect(presentation.arrowSymbolName == nil)
         #expect(!presentation.canToggleReveal)
+        #expect(presentation.showsInlineArrow)
         #expect(presentation.opensMenu(isSecondaryClick: false))
         #expect(presentation.opensMenu(isSecondaryClick: true))
     }

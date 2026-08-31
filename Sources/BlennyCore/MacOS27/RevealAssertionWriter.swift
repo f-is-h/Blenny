@@ -26,8 +26,10 @@ public enum RevealAssertionWriterState: Equatable, Sendable {
 }
 
 public actor RevealAssertionWriter {
+    public typealias DiagnosticHandler = @Sendable (String) -> Void
     private let factory: any RevealAssertionCandidateFactory
     private let activationTimeout: Duration
+    private let diagnostic: DiagnosticHandler?
     private var activeAssertion: (any RevealAssertionCandidate)?
     private var activePlan: RevealAllowlistPlan?
     private var pendingAssertion: (
@@ -42,24 +44,28 @@ public actor RevealAssertionWriter {
 
     public init(
         factory: any RevealAssertionCandidateFactory,
-        activationTimeout: Duration = .seconds(1)
+        activationTimeout: Duration = .seconds(1),
+        diagnostic: DiagnosticHandler? = nil
     ) {
         self.factory = factory
         self.activationTimeout = activationTimeout
+        self.diagnostic = diagnostic
     }
 
     public func replace(with plan: RevealAllowlistPlan) async throws {
+        diagnostic?("writer request=\(plan.presentation.rawValue) plan=\(plan.fingerprint) active=\(activePlan?.fingerprint ?? "none")")
         guard !stopped else { throw RevealAssertionWriterError.writerStopped }
         guard !transitioning else {
             throw RevealAssertionWriterError.transitionAlreadyInProgress
         }
-        if activePlan == plan { return }
+        if activePlan == plan { diagnostic?("writer unchanged-plan"); return }
 
         transitioning = true
         let replacement: any RevealAssertionCandidate
         do {
             replacement = try factory.makeCandidate(for: plan)
         } catch {
+            diagnostic?("writer candidate-failed error=\(error)")
             transitioning = false
             throw error
         }
@@ -69,8 +75,11 @@ public actor RevealAssertionWriter {
         pendingAssertion = (transitionIdentifier, replacement)
 
         do {
+            diagnostic?("writer activation-begin id=\(transitionIdentifier)")
             try await activate(replacement)
+            diagnostic?("writer activation-returned id=\(transitionIdentifier)")
         } catch {
+            diagnostic?("writer activation-failed id=\(transitionIdentifier) error=\(error)")
             let stillOwned = pendingAssertion?.identifier == transitionIdentifier
             if stillOwned {
                 pendingAssertion = nil
@@ -96,12 +105,15 @@ public actor RevealAssertionWriter {
         // The preceding assertion remains active throughout replacement
         // activation. Only a confirmed active replacement can become current.
         let preceding = activeAssertion
+        let precedingFingerprint = activePlan?.fingerprint ?? "none"
         pendingAssertion = nil
         activeAssertion = replacement
         activePlan = plan
         state = .active(plan.presentation)
         transitioning = false
+        diagnostic?("writer active=\(plan.presentation.rawValue) plan=\(plan.fingerprint) preceding-invalidate=\(precedingFingerprint)")
         await preceding?.invalidate()
+        diagnostic?("writer replacement-complete id=\(transitionIdentifier)")
     }
 
     public func applySessionTransition(
@@ -139,6 +151,7 @@ public actor RevealAssertionWriter {
     }
 
     public func restoreAndStop() async {
+        diagnostic?("writer restore-begin active=\(activePlan?.fingerprint ?? "none")")
         stopped = true
         transitioning = false
         let pending = pendingAssertion?.candidate
@@ -149,9 +162,11 @@ public actor RevealAssertionWriter {
         state = .restored
         await pending?.invalidate()
         await preceding?.invalidate()
+        diagnostic?("writer restore-complete active=none")
     }
 
     public func connectionInvalidated() async {
+        diagnostic?("writer connection-invalidated")
         // Invalidation is idempotent. Calling it locally as well as relying on
         // MenuBarAgent's process-connection cleanup keeps the restore path clear.
         stopped = true

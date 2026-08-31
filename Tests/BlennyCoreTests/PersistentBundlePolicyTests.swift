@@ -371,4 +371,52 @@ struct PersistentBundlePolicyTests {
             ]
         )
     }
+
+    @Test("Read-only validation loads policy and backup but cannot write or migrate")
+    func readOnlyStore() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BlennyReadOnly-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let policyURL = directory.appendingPathComponent("bundle-policies.json")
+        let backupURL = directory.appendingPathComponent("previous.blenny-backup.json")
+        let writable = try PersistentBundlePolicyStore(policyURL: policyURL, backupURL: backupURL)
+        let enabled = try makeDocument()
+        try await writable.save(enabled)
+        _ = try await writable.disableManagement()
+        let beforePolicy = try Data(contentsOf: policyURL)
+        let beforeBackup = try Data(contentsOf: backupURL)
+        let readOnly = try PersistentBundlePolicyStore(policyURL: policyURL, backupURL: backupURL, readOnly: true)
+        #expect(try await readOnly.load()?.managementEnabled == false)
+        #expect(try await readOnly.loadBackup()?.previousPolicy == enabled)
+        await #expect(throws: PersistentBundlePolicyStoreError.readOnlyStore) {
+            try await readOnly.save(enabled)
+        }
+        await #expect(throws: PersistentBundlePolicyStoreError.readOnlyStore) {
+            _ = try await readOnly.restoreBackup()
+        }
+        await #expect(throws: PersistentBundlePolicyStoreError.readOnlyStore) {
+            _ = try await readOnly.migrateBundleIdentifier(from: blenny, to: "com.example.NewIdentity")
+        }
+        #expect(try Data(contentsOf: policyURL) == beforePolicy)
+        #expect(try Data(contentsOf: backupURL) == beforeBackup)
+    }
+
+    @Test("Read-only initialization refuses interrupted recovery without changing its evidence")
+    func readOnlyNeverRecoversTransaction() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BlennyReadOnlyMarker-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let policyURL = directory.appendingPathComponent("bundle-policies.json")
+        let backupURL = directory.appendingPathComponent("previous.blenny-backup.json")
+        let markerURL = directory.appendingPathComponent(".bundle-policies.json.transaction")
+        let evidence = Data("interrupted transaction".utf8)
+        try evidence.write(to: markerURL)
+        #expect(throws: PersistentBundlePolicyStoreError.interruptedCommitRequiresRecovery) {
+            _ = try PersistentBundlePolicyStore(policyURL: policyURL, backupURL: backupURL, readOnly: true)
+        }
+        #expect(try Data(contentsOf: markerURL) == evidence)
+        #expect(!FileManager.default.fileExists(atPath: policyURL.path))
+        #expect(!FileManager.default.fileExists(atPath: backupURL.path))
+    }
 }
