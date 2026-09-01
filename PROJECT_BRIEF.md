@@ -6,7 +6,7 @@
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: ordering research reopened after the preserved local `v0.7.0` tag. A self-only MenuBarAgent table write proved that one exact Blenny autosave identity can move physically, but not close to the native arrow or as a bundle. The owner then made Usage4Claude permanently visible and used native Command-drag to place the fish six points to its left; that adjacency survived ordinary Blenny restarts in MenuBarAgent's live host state while the known agent table and owner position preference remained absent. An attended Debug calibration without a new drag read no saved value and `_currentPreferredPosition == 0.0`; a second run timed out without recording. The live placement therefore still has no exact readable, writable and reversible contract, and arbitrary third-party control remains unproven. No product ordering path or Release promotion is safe; accepted 0.6.0 behavior is preserved
+- Current phase: `0.7.0` complete with manual native placement guidance. When one usable system overflow control is observed, Settings tells the user to Command-drag Blenny's fish immediately to its right. A stable public AppKit autosave identity lets macOS retain that user-owned placement across Blenny updates, but Blenny does not promise arrow-relative pinning or reorder third-party or Apple items. No synthetic input, polling, automatic reconciliation, Board-only sorting, helper, private ordering write or Release backend promotion is included. The existing annotated `v0.7.0` tag predates this forward-only closure and remains unchanged
 - Document date: 2026-09-01
 - Product status: the AppKit-hosted SwiftUI product connects reviewed bundle-policy Drafts to one Debug-only serial management writer with bounded verification, transactional persistence, rollback, Stop, Restore, ordinary Reveal, and lifecycle cleanup on one exact development runtime; the installed loop has completed owner-approved real validation and exact restoration, while Release remains read-only
 - Source lineage decision: clean implementation, not an Ice fork
@@ -603,10 +603,13 @@ Coffee Buzz discovery and its later explicit policy assignment remain separate.
 Installed dry-run, bounded real baseline cleanup, unchanged policy/backup checks
 and owner visual acceptance have distinct evidence in `docs/TECH_SPIKE_0.6.0.md`.
 
-Next is the separate `0.7.0` ordering feasibility investigation, including fixed
-fish placement and Revealable items to the arrow's right; no ordering work was
-performed in 0.6.0. Broader lifecycle/display checks remain mandatory before
-expanding compatibility or promoting the unsupported backend to Release.
+Version `0.7.0` closes the separate ordering investigation without cross-app
+ordering. Blenny gives the ordinary fish a stable AppKit autosave identity and,
+when one usable system overflow control is observed, explains the user's native
+Command-drag placement. macOS owns the saved order; fixed arrow-relative placement
+and Revealable-item ordering remain unsupported. Broader lifecycle/display checks
+remain mandatory before expanding compatibility or promoting the unsupported
+backend to Release.
 Relevant lifecycle changes revoke the frozen context and require explicit fresh
 Resume, never automatic reconciliation. Preserve existing history and tags; do
 not push. Distribution remains `0.8.0` work.

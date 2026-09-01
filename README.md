@@ -4,55 +4,26 @@ Blenny is a minimal, native menu bar organizer designed exclusively for macOS 27
 
 Project website: <https://blenny.fi5h.xyz>. The application uses the stable reverse-DNS bundle identifier `xyz.fi5h.blenny`.
 
-The self-placement investigation is **reopened** following the owner's reminder
-of the successful 0.0.3 experiment: Blenny's own position preference `500` placed
-it visibly beside Usage4Claude, with cleanup. Two separately approved isolated Debug runs
-verified activation and scoped preference/file cleanup. The owner saw the fish beside
-Wi-Fi, not Usage4Claude. The second run's before/after AX samples reverse the relative
-Wi-Fi/reference order despite equal preference hashes: **physical layout restoration
-was unresolved. The owner later accepted the residual restoration risk for one
-self-only agent-table write. That installed Debug experiment placed the fish in
-the native arrow's right-side region and restored the exact table to absence, but
-did not place it close to the arrow or move Blenny's second item. Fresh research identifies
-MenuBarAgent's `TrailingItemPreferredPositions` as a concrete ordering candidate,
-but its privileged live reader rejects this process and exact recovery is unproven.
-Arrow-relative pinning and third-party ordering remain unimplemented. See
-the correction and approval/recovery boundary in [the spike](docs/TECH_SPIKE_0.7.0.md).
-Further nonvisual checks found different ordinary and sandbox position values
-for the reference app, and an incomplete native AX root. Preference-source
-identity and physical restoration must be established before any third-party write.
-At the next attended checkpoint, the owner reported the collapsed layout as
-`Bluetooth | Wi-Fi | Usage4Claude | WeChat`; a complete AX read independently
-matched the first three items. That order matches the second experiment's
-after-state rather than its pre-state, confirming that physical order was not
-restored. The owner later made Usage4Claude permanently visible and used native
-Command-drag to place Blenny's fish six points to its left. The real adjacency
-survived ordinary Blenny restarts even though the known agent table and owner
-position preference remained absent. A bounded installed calibration then showed
-that a newly assigned fish autosave identity could appear in that live position
-while its owner preference was absent and `_currentPreferredPosition` returned
-`0.0`. Because that run contained no new drag, it is not a numeric calibration;
-a second drag-and-record attempt timed out without reading. MenuBarAgent's live
-host state remains unidentified and cannot supply an exact inverse. No product
-ordering or third-party write is authorized by these results.
-The existing `v0.7.0` tag remains unchanged; this follow-up is not release closure.
+Version `0.7.0` closes the real menu-bar ordering investigation with a deliberately
+manual product boundary. Blenny does not reorder third-party or Apple items. When
+one usable native overflow control is observed, Settings explains how the user can
+Command-drag the fish immediately to its right. The fish has one stable public
+AppKit autosave identity so macOS can retain the user's placement across Blenny
+updates. macOS still owns the physical order, so this is guidance rather than an
+arrow-relative pinning guarantee.
 
-The tagged version `0.7.0` completed the real menu-bar ordering feasibility investigation
-with a **no-go for implementation under the current safety boundary**. No exact,
-reversible contract was established for fixing the fish beside the native
-arrow or placing revealed Revealable items to its right. Public SDK 27 APIs,
-current read-only AX/metadata inspection and historical position experiments do
-not establish those guarantees. No position write or Board-only sorting was
-added. At that tag, product source and artwork were unchanged from `v0.6.0`.
+Private API, preference storage, historical spikes, competitor behavior and
+bounded installed experiments did not establish a complete readable, writable and
+reversible cross-app ordering contract. Blenny therefore adds no synthetic input,
+polling, automatic reconciliation, third-party write, Board-only sorting, helper or
+Release backend promotion. Full findings and recovery limits are in
+[the 0.7.0 spike](docs/TECH_SPIKE_0.7.0.md).
 
-The latest source verification passed 284 Debug and 253 Release tests, both 0.7.0
-app builds and installed no-writer regression. Policy/backup bytes, hashes and 0600
-modes stayed unchanged; scoped preferred-position restore preview requires zero
-operations. After the attended calibration, the original installed app was
-restored byte-for-byte and relaunched. Full findings,
-failed/incomplete samples, reopening gates and evidence limits are in
-[the 0.7.0 spike](docs/TECH_SPIKE_0.7.0.md). Local closure uses annotated tag
-`v0.7.0`; existing tags/history are preserved and no push is authorized.
+Version `0.7.0` completed after 285 Debug and 254 Release deterministic tests,
+both app builds, and installed no-writer regression. The existing annotated
+`v0.7.0` tag predates the final placement-guidance follow-up and remains unchanged
+under the repository's no-tag-rewrite boundary. History is forward-only and no
+push is authorized.
 
 The preceding `0.6.0` completed the native-overflow integration investigation, accepted
 by the owner on 2026-08-31 on the exact Debug development boundary: macOS 27.0

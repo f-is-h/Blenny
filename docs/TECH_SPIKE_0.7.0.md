@@ -967,3 +967,53 @@ only in ignored `LocalData/0.7.0/`.
 An annotated `v0.7.0` may be created only after both audit stages pass. The tag
 closes the evidenced investigation; it does not turn the ordering no-go into an
 implemented feature or complete the inherited lifecycle/display matrix.
+
+## Final product resolution: manual native placement
+
+The owner closed the investigation by dropping third-party ordering and choosing
+the native user interaction for Blenny's own fish. The shipped boundary is:
+
+- The ordinary fish receives the stable public AppKit autosave name
+  `Blenny.Fish`. It intentionally has no version component. The existing separate
+  reveal/fallback item keeps its prior identity, allocation, icon and behavior.
+- Settings shows **Place Blenny beside System Arrow** only as an enabled action
+  when the existing event-driven observer reports exactly one usable native
+  overflow control. The action revalidates the same observation before showing
+  the steps.
+- The steps tell the user to hold Command and drag the fish immediately to the
+  right of the system double-chevron. They state that macOS owns and saves the
+  order and that Blenny does not move the pointer or reorder other applications.
+- This creates no ordering writer, third-party target, Apple-system target,
+  synthetic event, polling, reconciliation, pixel capture, helper or Release
+  backend promotion. Visible / Revealable / Hidden and ordinary reveal semantics
+  are unchanged.
+
+The autosave name gives AppKit a stable identity for macOS-owned persistence; it
+does not expose the host's hidden numeric order, establish an arrow-relative
+constraint, or repair drift caused by the user, another manager, display changes
+or MenuBarAgent reconstruction. Automatic pinning remains unsafe because the
+research above never established an exact snapshot/write/inverse contract.
+
+Deterministic availability and identity coverage passes in both configurations.
+The complete Xcode 27 run passes 285 Debug tests in 30 suites and 254 Release
+tests in 26 suites. Both final apps pass strict ad-hoc signature validation and
+are arm64 bundles with version, minimum OS and SDK all at the intended 0.7.0 /
+macOS 27 boundary. Release contains the stable autosave and placement-guide text
+but none of the Debug calibration or private position-validation entry strings.
+
+The installed Debug no-writer run used the existing exact dry-run guard. It
+observed one usable collapsed native control, passed the AppKit native/fallback
+fixtures, prepared the unchanged accepted plan, and reported
+`writerCreated=false`, `assertionCreated=false`, `persistenceChanged=false`,
+`managementEnabledChanged=false`, and `readOnlyStore=true`. It exited normally.
+The policy, previous-policy backup and owner preference plist match their saved
+copies byte-for-byte; all remain mode 0600. The exact MenuBarAgent trailing-position
+table presence and value also match. The preceding installed application was then
+restored to executable SHA-256
+`d71b0ab154fa5cd47ba5c1d6d3f7af023ac746053196bb7ba23c906eb43ac20b`,
+passed strict signature validation, and relaunched. Raw evidence and the recoverable
+bundle remain only under ignored `LocalData/0.7.0-final/`.
+
+The already-created annotated `v0.7.0` points to the earlier no-go closure. It is
+deliberately preserved rather than rewritten; this final resolution is a forward
+commit and no push is authorized.

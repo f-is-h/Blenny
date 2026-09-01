@@ -243,7 +243,7 @@ accepted milestone rather than silently converting untested rows to passes:
 
 ## 0.7.0 — Real menu-bar ordering feasibility
 
-Status: **Ordering research reopened after local `v0.7.0`; the tag is preserved and no push is authorized. One self-only MenuBarAgent table experiment moved one fish identity but did not achieve close arrow anchoring or bundle-level placement. Native owner Command-drag later produced real adjacency beside Usage4Claude, but known preference surfaces and `_currentPreferredPosition` cannot read back the live host placement. Exact recovery and third-party control remain unproven, so physical ordering is not a product feature.**
+Status: **Complete. Blenny does not implement third-party or Apple-item ordering. When one usable native overflow control is observed, Settings provides manual Command-drag instructions for placing the fish immediately to its right. The fish uses one stable public AppKit autosave identity so macOS can retain the user's placement. This is not an automatic or permanent arrow-relative pinning guarantee. The existing local `v0.7.0` tag is preserved and no push is authorized.**
 
 The earlier blanket no-go understated the successful 0.0.3 self-position `500`
 experiment beside Usage4Claude. Today's two-item reproduction used the exact
@@ -313,6 +313,23 @@ lifecycle semantics can be proven, followed by deterministic tests, installed
 dry-run and explicit authorization of a bounded experiment through one serial
 writer. Do not substitute global position clearing, synthetic input or automatic
 reconciliation for that missing contract.
+
+Final product resolution:
+
+- Do not expose ordering for third-party or Apple items. Users arrange those
+  items with macOS's native Command-drag interaction.
+- Give only the ordinary fish a stable, version-independent public AppKit
+  autosave identity. The separate reveal/fallback item remains unchanged.
+- Offer placement steps only while exactly one usable native overflow control is
+  observed. Recheck availability at activation and observer updates; do not poll.
+- Describe the result truthfully as a macOS-owned saved placement. Blenny does
+  not move the pointer, perform a position write, verify pixels, reconcile drift
+  or guarantee that the fish remains adjacent after external layout changes.
+- Preserve Visible / Revealable / Hidden, keep Blenny Visible, exclude Hidden
+  from ordinary reveal, and retain Apple system items as read-only observations.
+- Xcode 27 verification passes 285 Debug tests / 30 suites and 254 Release tests /
+  26 suites. Both 0.7.0 app configurations build; installed verification and
+  exact local-state comparison are recorded in the spike.
 
 ## 0.8.0 — Distribution prototype
 

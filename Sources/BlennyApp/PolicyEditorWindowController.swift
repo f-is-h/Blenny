@@ -19,6 +19,7 @@ struct ProductInterfaceActions {
     let openKoFi: () -> Void
     let setLaunchAtLogin: (Bool) -> Void
     let openLoginItemsSettings: () -> Void
+    let showFishPlacementGuide: () -> Void
 }
 
 struct ResolvedPolicyIcon {
@@ -148,6 +149,7 @@ final class ProductInterfaceModel: ObservableObject {
     @Published private(set) var candidateGeneration = UUID()
     @Published private(set) var managementRuntimeState: ManagementLoopState = .unknown
     @Published private(set) var developmentMutationAvailable = false
+    @Published private(set) var nativeOverflowPlacementAvailable = false
 
     private let iconResolver = WorkspacePolicyIconResolver()
     private var assignmentCoordinator = PolicyDraftAssignmentCoordinator()
@@ -260,6 +262,14 @@ final class ProductInterfaceModel: ObservableObject {
 
     func setLaunchAtLoginState(_ state: LaunchAtLoginPresentationState) {
         launchAtLoginState = state
+    }
+
+    func setNativeOverflowPlacement(
+        _ snapshot: NativeOverflowObservationSnapshot
+    ) {
+        nativeOverflowPlacementAvailable = BlennyFishPlacement.guideAvailable(
+            for: snapshot
+        )
     }
 
     func setManagementRuntimeState(
@@ -532,7 +542,8 @@ final class PolicyEditorWindowController: NSWindowController {
         onOpenOneTimeSponsor: @escaping () -> Void,
         onOpenKoFi: @escaping () -> Void,
         onSetLaunchAtLogin: @escaping (Bool) -> Void,
-        onOpenLoginItemsSettings: @escaping () -> Void
+        onOpenLoginItemsSettings: @escaping () -> Void,
+        onShowFishPlacementGuide: @escaping () -> Void
     ) {
         #if DEBUG
         usesPopulatedValidationFixture = ProcessInfo.processInfo.environment[
@@ -593,7 +604,8 @@ final class PolicyEditorWindowController: NSWindowController {
             openOneTimeSponsor: onOpenOneTimeSponsor,
             openKoFi: onOpenKoFi,
             setLaunchAtLogin: onSetLaunchAtLogin,
-            openLoginItemsSettings: onOpenLoginItemsSettings
+            openLoginItemsSettings: onOpenLoginItemsSettings,
+            showFishPlacementGuide: onShowFishPlacementGuide
         )
         let rootView = BlennyRootView(model: interfaceModel, actions: actions)
         let hostingController = NSHostingController(rootView: rootView)
@@ -722,6 +734,12 @@ final class PolicyEditorWindowController: NSWindowController {
 
     func setLaunchAtLoginState(_ state: LaunchAtLoginPresentationState) {
         interfaceModel.setLaunchAtLoginState(state)
+    }
+
+    func setNativeOverflowPlacement(
+        _ snapshot: NativeOverflowObservationSnapshot
+    ) {
+        interfaceModel.setNativeOverflowPlacement(snapshot)
     }
 
     func setApplying(_ applying: Bool) {

@@ -1768,6 +1768,18 @@ private struct SettingsView: View {
                     }
                 }
             }
+
+            ProductPageSection(title: "Menu Bar", systemImage: "menubar.rectangle") {
+                SettingsGridRow {
+                    Text("Place Blenny beside System Arrow")
+                } detail: {
+                    Text(placementDescription)
+                } control: {
+                    Button("Show Steps…", action: actions.showFishPlacementGuide)
+                        .controlSize(.small)
+                        .disabled(!model.nativeOverflowPlacementAvailable)
+                }
+            }
         }
         .frame(maxWidth: 640, alignment: .leading)
         .padding(28)
@@ -1787,6 +1799,13 @@ private struct SettingsView: View {
 
     private var permissionButtonTitle: String {
         model.accessibilityPromptRequested ? "Open Settings" : "Set Up…"
+    }
+
+    private var placementDescription: String {
+        if model.nativeOverflowPlacementAvailable {
+            return "Use macOS Command-drag once. Blenny never moves the pointer or reorders other apps."
+        }
+        return "Available when macOS shows one usable overflow arrow. Refresh after it appears."
     }
 }
 

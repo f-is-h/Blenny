@@ -87,7 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onOpenOneTimeSponsor: { [weak self] in self?.openOneTimeSponsor() },
         onOpenKoFi: { [weak self] in self?.openKoFi() },
         onSetLaunchAtLogin: { [weak self] enabled in self?.setLaunchAtLogin(enabled) },
-        onOpenLoginItemsSettings: { [weak self] in self?.openLoginItemsSettings() }
+        onOpenLoginItemsSettings: { [weak self] in self?.openLoginItemsSettings() },
+        onShowFishPlacementGuide: { [weak self] in self?.showFishPlacementGuide() }
     )
 
     private lazy var statusItemController = StatusItemController(
@@ -541,6 +542,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ordinaryReveal.synchronize(state, hasRevealableBundles: hasRevealable)
         updateNativeOverflowObservation()
         statusItemController.setNativeOverflow(ordinaryReveal.observation)
+        editorWindowController.setNativeOverflowPlacement(ordinaryReveal.observation)
         sessionDiagnostic("management=\(state) entry=\(ordinaryReveal.entryPoint.rawValue)")
         statusItemController.setManagementState(
             state,
@@ -635,9 +637,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             nativeOverflowObserver.stop()
             statusItemController.setNativeOverflow(.unavailable)
+            editorWindowController.setNativeOverflowPlacement(.unavailable)
         } catch {
             nativeOverflowObserver.stop()
             statusItemController.setNativeOverflow(.unavailable)
+            editorWindowController.setNativeOverflowPlacement(.unavailable)
             Self.writeDryRunOutput("DRY-RUN FAILED: \(error)")
         }
         NSApplication.shared.terminate(nil)
@@ -1078,6 +1082,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             nativeObservationStarted = false
             ordinaryReveal.observe(.unavailable)
             statusItemController.setNativeOverflow(.unavailable)
+            editorWindowController.setNativeOverflowPlacement(.unavailable)
             return
         }
         guard !nativeObservationStarted else { return }
@@ -1092,6 +1097,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 self.sessionDiagnostic("native present=\(snapshot.isPresent) observable=\(snapshot.observationAvailable) controls=\(snapshot.controlCount) identity=\(snapshot.controlIdentifier?.uuidString ?? "none") state=\(snapshot.presentationState.rawValue) source=\(self.nativeOverflowObserver.lastUpdateSource.rawValue) failure=\(self.nativeOverflowObserver.unavailabilityReason ?? "none") before={\(previous)} after={\(self.ordinaryReveal.diagnosticSummary)}")
                 self.statusItemController.setNativeOverflow(snapshot)
+                self.editorWindowController.setNativeOverflowPlacement(snapshot)
                 #if DEBUG
                 if self.isReadOnlyValidation {
                     Self.writeDryRunOutput(
@@ -1362,6 +1368,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func openLoginItemsSettings() {
         SMAppService.openSystemSettingsLoginItems()
+    }
+
+    private func showFishPlacementGuide() {
+        let snapshot = ordinaryReveal.observation
+        guard BlennyFishPlacement.guideAvailable(for: snapshot) else {
+            editorWindowController.setStatus(
+                "The system overflow arrow is not currently available. Refresh after it appears.",
+                isError: true
+            )
+            return
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Place Blenny beside the System Arrow"
+        alert.informativeText =
+            "Hold Command and drag the fish immediately to the right of macOS’s "
+                + "double-chevron overflow control, then release it. macOS owns and saves "
+                + "this order. Blenny will not move the pointer or reorder other apps."
+        alert.addButton(withTitle: "Done")
+        alert.runModal()
     }
 
     private func updateLaunchAtLoginPresentation(failureMessage: String? = nil) {

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import BlennyCore
 
@@ -14,6 +15,26 @@ struct ProductInterfacePresentationTests {
         state.navigate(to: .organize)
         #expect(state.section == .organize)
         #expect(ProductInterfaceSection.allCases == [.organize, .settings, .support])
+    }
+
+    @Test("Fish placement guidance requires one usable native overflow control")
+    func fishPlacementGuidance() {
+        let identifier = UUID()
+        let collapsed = NativeOverflowObservationSnapshot.observed(
+            states: [.collapsed], controlIdentifier: identifier
+        )
+        let expanded = NativeOverflowObservationSnapshot.observed(
+            states: [.expanded], controlIdentifier: identifier
+        )
+        let ambiguous = NativeOverflowObservationSnapshot.observed(
+            states: [.collapsed, .expanded], controlIdentifier: nil
+        )
+
+        #expect(BlennyFishPlacement.autosaveName == "Blenny.Fish")
+        #expect(BlennyFishPlacement.guideAvailable(for: collapsed))
+        #expect(BlennyFishPlacement.guideAvailable(for: expanded))
+        #expect(!BlennyFishPlacement.guideAvailable(for: ambiguous))
+        #expect(!BlennyFishPlacement.guideAvailable(for: .unavailable))
     }
 
     @Test("Stopped management enables only its valid recovery controls")

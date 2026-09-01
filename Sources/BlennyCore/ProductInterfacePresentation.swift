@@ -13,6 +13,18 @@ public enum ProductSupportLinks {
     public static let koFi = "https://ko-fi.com/1atte"
 }
 
+public enum BlennyFishPlacement {
+    /// Stable AppKit identity for the fish only. It must not contain a version
+    /// number because macOS owns persistence across Blenny updates.
+    public static let autosaveName = "Blenny.Fish"
+
+    public static func guideAvailable(
+        for snapshot: NativeOverflowObservationSnapshot
+    ) -> Bool {
+        snapshot.isUsable
+    }
+}
+
 public struct ProductInterfaceNavigationState: Equatable, Sendable {
     public private(set) var section: ProductInterfaceSection
 

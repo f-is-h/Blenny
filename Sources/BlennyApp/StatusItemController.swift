@@ -141,7 +141,14 @@ final class StatusItemController: NSObject {
                 "BLENNY_0_0_5 self_position=\(Self.placementValue) "
                     + "autosave=\(Self.placementAutosaveName) persistence=registration_domain"
             )
+        } else if !readOnlyValidation,
+                  DebugSelfPositionValidationDelegate.creationAutosaveName == nil,
+                  DebugAgentPositionValidationDelegate.creationAutosaveName == nil,
+                  DebugManualPositionCalibrationDelegate.creationAutosaveName == nil {
+            statusItem.autosaveName = BlennyFishPlacement.autosaveName
         }
+        #else
+        statusItem.autosaveName = BlennyFishPlacement.autosaveName
         #endif
 
         configureButton()
