@@ -1,5 +1,8 @@
 import AppKit
 import BlennyCore
+#if DEBUG
+import ObjectiveC
+#endif
 
 #if DEBUG
 enum DebugLengthExperimentUpdate {
@@ -66,6 +69,8 @@ final class StatusItemController: NSObject {
     private var revealPrototypeEnabled = false
     private var revealPrototypeContentStack: DebugStatusItemContentStack?
     private var revealPrototypeArrowImageView: NSImageView?
+    private var manualPositionCapture: (() -> Void)?
+    private var manualPositionCaptureItem: NSMenuItem?
     private let revealPrototypeStateItem = NSMenuItem(
         title: "0.0.5 Policy Editing Core validation: inactive",
         action: nil,
@@ -94,6 +99,9 @@ final class StatusItemController: NSObject {
         #if DEBUG
         let readOnlyValidation = ProcessInfo.processInfo.environment["BLENNY_0_6_0_DRY_RUN"] == "YES"
             || ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES"
+            || ProcessInfo.processInfo.environment[DebugSelfPositionValidationDelegate.modeKey] != nil
+            || ProcessInfo.processInfo.environment[DebugAgentPositionValidationDelegate.modeKey] != nil
+            || ProcessInfo.processInfo.environment[DebugManualPositionCalibrationDelegate.modeKey] != nil
         let placementProbeEnabled = !readOnlyValidation && ProcessInfo.processInfo.environment[
             Self.placementEnvironmentKey
         ] == "YES"
@@ -118,6 +126,15 @@ final class StatusItemController: NSObject {
         super.init()
 
         #if DEBUG
+        if let name = DebugSelfPositionValidationDelegate.creationAutosaveName {
+            statusItem.autosaveName = name
+        }
+        if let name = DebugAgentPositionValidationDelegate.creationAutosaveName {
+            statusItem.autosaveName = name
+        }
+        if let name = DebugManualPositionCalibrationDelegate.creationAutosaveName {
+            statusItem.autosaveName = name
+        }
         if placementProbeEnabled {
             statusItem.autosaveName = Self.placementAutosaveName
             Self.debugLog(
@@ -305,6 +322,63 @@ final class StatusItemController: NSObject {
     }
 
     #if DEBUG
+    var debugSelfPositionSummary: String {
+        "fishWidth=\(statusItem.length) arrowWidth=\(revealStatusItem?.length ?? 0) "
+            + "fishAutosave=\(statusItem.autosaveName ?? "none") "
+            + "arrowAutosave=\(revealStatusItem?.autosaveName ?? "none") "
+            + "nativeFallbackGlyph=\(debugOrdinaryRevealButtonVisible)"
+    }
+
+    func debugCurrentFishPreferredPosition() throws -> Double? {
+        let selector = NSSelectorFromString("_currentPreferredPosition")
+        let method = try debugCurrentFishPreferredPositionMethod(selector: selector)
+        typealias Getter = @convention(c) (AnyObject, Selector) -> Float
+        let getter = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+        let value = getter(statusItem, selector)
+        guard value.isFinite else {
+            throw ManualPositionCalibrationError.unexpectedStateChange
+        }
+        return Double(value)
+    }
+
+    func debugValidateCurrentFishPreferredPositionContract() -> Bool {
+        let selector = NSSelectorFromString("_currentPreferredPosition")
+        return (try? debugCurrentFishPreferredPositionMethod(selector: selector)) != nil
+    }
+
+    private func debugCurrentFishPreferredPositionMethod(selector: Selector) throws -> Method {
+        guard let method = class_getInstanceMethod(type(of: statusItem), selector),
+              let encoding = method_getTypeEncoding(method),
+              String(cString: encoding) == "f16@0:8" else {
+            throw ManualPositionCalibrationError.invalidScope
+        }
+        return method
+    }
+
+    func debugInstallManualPositionCapture(_ capture: @escaping () -> Void) {
+        guard manualPositionCaptureItem == nil else { return }
+        manualPositionCapture = capture
+        let item = NSMenuItem(title: "Record Manual Position",
+            action: #selector(debugRecordManualPosition), keyEquivalent: "")
+        item.target = self
+        manualPositionCaptureItem = item
+        menu.insertItem(.separator(), at: 0)
+        menu.insertItem(item, at: 0)
+    }
+
+    @objc private func debugRecordManualPosition() {
+        guard let capture = manualPositionCapture else { return }
+        manualPositionCapture = nil
+        manualPositionCaptureItem?.isEnabled = false
+        capture()
+    }
+
+    func debugRemoveOrdinaryStatusItems() {
+        if let item = revealStatusItem { NSStatusBar.system.removeStatusItem(item) }
+        revealStatusItem = nil
+        NSStatusBar.system.removeStatusItem(statusItem)
+    }
+
     /// Read-only installed validation of the actual AppKit control, not pixels.
     var debugOrdinaryRevealButtonEnabled: Bool { revealStatusItem?.button?.isEnabled == true }
     /// Local AppKit presentation only; this does not prove physical visibility

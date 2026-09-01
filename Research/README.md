@@ -13,4 +13,8 @@ This directory contains source snapshots from bounded engineering experiments. I
 
 Generated applications, executables, logs, screenshots, system-state backups, and build caches belong in ignored `LocalData/`, not here.
 
-The corresponding observations and recovery results are documented in [the 0.0.1 technical spike](../docs/TECH_SPIKE_0.0.1.md).
+Historical observations and recovery results are documented in [the 0.0.1 technical spike](../docs/TECH_SPIKE_0.0.1.md).
+
+[The 0.7.0 read-only probes](0.7.0/README.md) inspect position interfaces and
+scoped AX frames without providing a mutation path. The ordering implementation
+gate did not pass; no position guarantee is added.

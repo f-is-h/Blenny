@@ -10,6 +10,7 @@ Blenny advances by verified exit criteria, not by elapsed time or commit count. 
 - `0.9.x` versions are the first public, open-source release candidates. Source and signed binaries ship together.
 - `1.0.0` begins the stable product contract and published macOS compatibility policy.
 - A version advances only when every required exit criterion is verified and restoration is complete.
+- An explicitly scoped safety-feasibility investigation may close with an evidenced no-go; that does not mean the proposed feature or its implementation gate passed.
 
 ## 0.0.1 — Technical feasibility spike
 
@@ -242,7 +243,51 @@ accepted milestone rather than silently converting untested rows to passes:
 
 ## 0.7.0 — Real menu-bar ordering feasibility
 
-Begin with a separate safety-feasibility investigation, not an implementation promise:
+Status: **Ordering research reopened after local `v0.7.0`; the tag is preserved and no push is authorized. One self-only MenuBarAgent table experiment moved one fish identity but did not achieve close arrow anchoring or bundle-level placement. Native owner Command-drag later produced real adjacency beside Usage4Claude, but known preference surfaces and `_currentPreferredPosition` cannot read back the live host placement. Exact recovery and third-party control remain unproven, so physical ordering is not a product feature.**
+
+The earlier blanket no-go understated the successful 0.0.3 self-position `500`
+experiment beside Usage4Claude. Today's two-item reproduction used the exact
+approved value 500 in two separately authorized runs, after deterministic tests
+and installed no-write preview.
+Usage4Claude and Apple items remained direct-write excluded. The owner confirmed
+the fish beside Wi-Fi. After the second run, AX reverses the Wi-Fi/reference
+relative order despite equal scoped preference/file hashes. This does not prove
+causation or composited order, but prevents a complete physical-restoration claim.
+Fresh online and local research identifies `TrailingItemPreferredPositions` in
+MenuBarAgent as a plausible third-party ordering route. All ten tested preference
+reads return absence; the correctly routed private utilities request is rejected
+for a missing Apple entitlement. No baseline, identity mapping, exact inverse or
+arrow anchor is established. The spike records candidates and attempted reads;
+the later exact self-only write and its restoration are recorded in the spike;
+there is no release closure or third-party write.
+
+The subsequent nonvisual check found different ordinary and sandbox preference
+values for the exact reference key. A fresh native AX root was unavailable and
+the reference item returned no stable AX identifier. Historical negative position
+writes do not rule out a different storage scope; neither these values nor
+an incomplete AX sample supply a safe live ordering baseline. The next attended
+checkpoint then completed: the owner saw the collapsed layout as
+`Bluetooth | Wi-Fi | Usage4Claude | WeChat`, while a new complete AX read matched
+the first three records. This is the second run's after-order rather than its
+pre-order. Physical restoration therefore failed even though scoped preference
+and file hashes were restored. The owner later explicitly accepted this residual
+risk for one exact self-only agent-table run. Apple items and WeChat remained
+observation only; no further write is authorized by that completed receipt.
+
+The owner subsequently made Usage4Claude permanently visible and manually
+Command-dragged Blenny's fish to a six-point gap at its left. A read-only AX sample
+verified the physical adjacency. The agent table and the ordinary fish owner
+preference remained absent, while the layout survived ordinary Blenny restarts;
+this points to unidentified MenuBarAgent live host/scene state rather than a
+documented persistence contract. In an attended Debug calibration, the dedicated
+fish autosave item appeared at that existing location without a new drag, but an
+explicit read found no saved value and `_currentPreferredPosition == 0.0`. A
+second run that required dragging away and back timed out without recording. Both
+runs restored exact policy, preference, agent-table and installation baselines.
+No post-drag numeric value, exact inverse or arbitrary third-party identity mapping
+has therefore been established.
+
+Requested positioning goals and mandatory implementation gates:
 
 - Distinguish application-bundle policy, a status-item instance, and physical menu-bar position.
 - Do not ship ordering that changes only the Blenny Board while leaving the real menu bar unchanged.
@@ -251,6 +296,23 @@ Begin with a separate safety-feasibility investigation, not an implementation pr
 - Keep all ordering design, experiments, and implementation out of `0.5.x` and `0.6.0`.
 - Include the desired Blenny control location at the edge of the always-visible region beside the overflow control as a positioning question, not a guarantee implied by Visible policy.
 - Investigate the owner's clarified goal that revealed Revealable items sit to the arrow's **right**. This is physical ordering, not a lane-order change; Hidden items remain excluded from ordinary reveal.
+
+Original tagged investigation evidence, recorded in `docs/TECH_SPIKE_0.7.0.md`
+(the correction above supersedes its blanket self-placement no-go):
+
+- SDK 27 supplies no public cross-app or arrow-relative position API. Current scoped AX items report non-settable position. Historical third-party preferred-position writes had no meaningful ordering effect despite exact preference restoration.
+- Fresh private runtime metadata/export inspection identifies read/clear, item submission, internal priority and lock surfaces, but no proven exact cross-app snapshot/write/inverse or arrow anchor. No private method is invoked and no new mutation is authorized.
+- The current fish can happen to be observed near the arrow's right edge; an AX frame sample is not fixed-placement, compositor, expanded-group or lifecycle evidence.
+- No-go is the safety decision: keep all product source, tests, artwork, Visible / Revealable / Hidden behavior, native integration and the sole management writer unchanged. No fake Board-only ordering is introduced.
+- Xcode 27 Debug 255 tests / 27 suites and Release 253 tests / 26 suites pass; both 0.7.0 builds pass signature, SDK, deployment, architecture and Release-isolation checks.
+- Installed no-writer preflight prepares the unchanged saved scope, exercises existing fallback fixtures and ordinary read-only native discovery, and exits. Policy/backup bytes, hashes and 0600 modes match; scoped position preferences match with zero restore operations. Incomplete first-run/AX observations remain documented, not counted as passes.
+- No real position or assertion mutation is performed for this version. The 0.6.0 accepted native-cycle evidence is preserved, not repeated or broadened by a dry-run. Lifecycle/display and Release-promotion gates remain open.
+
+Reopen physical ordering only after exact identity, state, write, inverse and
+lifecycle semantics can be proven, followed by deterministic tests, installed
+dry-run and explicit authorization of a bounded experiment through one serial
+writer. Do not substitute global position clearing, synthetic input or automatic
+reconciliation for that missing contract.
 
 ## 0.8.0 — Distribution prototype
 
