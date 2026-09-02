@@ -995,8 +995,8 @@ or MenuBarAgent reconstruction. Automatic pinning remains unsafe because the
 research above never established an exact snapshot/write/inverse contract.
 
 Deterministic availability and identity coverage passes in both configurations.
-The complete Xcode 27 run passes 285 Debug tests in 30 suites and 254 Release
-tests in 26 suites. Both final apps pass strict ad-hoc signature validation and
+The complete Xcode 27 run passes 292 Debug tests in 32 suites and 261 Release
+tests in 28 suites. Both final apps pass strict ad-hoc signature validation and
 are arm64 bundles with version, minimum OS and SDK all at the intended 0.7.0 /
 macOS 27 boundary. Release contains the stable autosave and placement-guide text
 but none of the Debug calibration or private position-validation entry strings.
@@ -1017,3 +1017,80 @@ bundle remain only under ignored `LocalData/0.7.0-final/`.
 The already-created annotated `v0.7.0` points to the earlier no-go closure. It is
 deliberately preserved rather than rewritten; this final resolution is a forward
 commit and no push is authorized.
+
+### Application-launch scope correction
+
+Installed use exposed a separate availability defect: any Workspace launch whose
+bundle identifier was absent from the frozen allowed set immediately revoked the
+writer. That included ordinary applications and helper processes with no menu-bar
+item, so management could become inactive during routine use even though the
+effective menu-bar scope had not changed.
+
+The safety rule is narrowed by evidence, not removed. Managed application launches
+and MenuBarAgent changes still invalidate immediately. Other new processes are
+coalesced for one second and inspected together through the existing privacy-bounded,
+read-only AX inventory. A complete observation proving no attributable menu-bar
+item leaves the current verified assertion untouched. Any attributable menu-bar
+item, failed/missing discovery, lost Accessibility, truncation or timeout fails
+closed through the existing lifecycle restoration path.
+
+This is neither polling nor reconciliation. The assessment runs once per launch
+burst, does not edit policy or admit a bundle to either allow-list, and never
+recreates a writer. A menu-bar owner still requires explicit Refresh/Review and
+Resume. A late-created item after the single assessment remains a limitation of
+the event boundary and must not be claimed as continuously monitored.
+
+The installed launch regression also exposed a second false invalidation. macOS
+27 emitted `NSApplication.didChangeScreenParametersNotification` during ordinary
+Calculator and Chess activation even though the physical display configuration
+was unchanged. The previous observer treated notification delivery itself as
+proof and restored before the launch ownership assessment could finish.
+
+Blenny now snapshots only public `NSScreen` display identifiers, frames and
+backing scale factors. Delivery with the same canonical signature is ignored;
+an added/removed display, changed geometry, resolution or scale still follows the
+existing fail-closed display lifecycle path. This comparison is event-driven and
+read-only. It does not weaken sleep, session, Space, MenuBarAgent or permission
+invalidation.
+
+### Empty fallback-slot correction
+
+The accepted 0.6.0 feedback-loop defense retained the fallback status item's
+22-point allocation after a usable native control appeared. On the owner's exact
+edge case, this produced a blank gap between the native arrow and fish. Showing a
+second chevron was rejected as visually worse.
+
+The correction changes only Blenny's own AppKit status item. Each explicit user
+Reveal permits one bounded ladder. When verified management can use exactly one
+native overflow control, Blenny removes the fallback status item entirely. If
+native overflow then disappears or becomes unusable, Blenny recreates a
+contentless zero-length transition and verifies again. A second failure restores
+the fixed 22-point fallback and latches that reveal attempt. Automatic layout
+events cannot clear the latch; a later explicit Reveal may begin a fresh ladder.
+
+This is user-triggered bounded fallback, not polling or reconciliation. It does
+not change the fish autosave identity, status-item order, policy, allow-list or
+writer, and it never touches an Apple or third-party item. A width-sensitive
+layout may retain the full fallback until the next explicit Reveal. Event-driven
+confirmation may also expose a brief empty transition between MenuBarAgent
+rendering the system control and AX delivering the corresponding layout update.
+Blenny deliberately does not preemptively remove the only reveal control before
+native ownership is confirmed.
+
+The first installed presentation probe used `NSStatusItem.isVisible = false` and
+was rejected because AppKit persisted the status item's visibility in Blenny's
+owner preferences. That single key and the complete owner plist were restored to
+the saved baseline before proceeding. The replacement uses public AppKit removal,
+recreation and length only; later installed dry-runs left the owner plist
+byte-identical.
+
+The corrected installed Debug build preserved management while Calculator
+launched: the unchanged display notification was ignored, the delayed ownership
+assessment completed with zero menu-bar items, and the existing writer remained
+active. Normal Quit restored the assertion. Policy, recovery backup and owner
+preferences then matched their pre-install copies byte-for-byte, and the
+MenuBarAgent trailing-position table remained absent. The owner visually
+confirmed two consecutive reveal/collapse cycles: Blenny's fallback item was
+absent after both native takeovers. A brief empty transition was visible before
+the second removal, matching the event-driven notification limit above. No
+synthetic click was used to manufacture this evidence.

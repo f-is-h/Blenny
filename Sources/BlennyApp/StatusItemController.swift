@@ -38,6 +38,8 @@ final class StatusItemController: NSObject {
     private var currentRecoveryAvailable = false
     private var hasRevealableBundles = false
     private var nativeOverflow = NativeOverflowObservationSnapshot.unavailable
+    private var fallbackSlotCompaction = NativeFallbackSlotCompaction()
+    private var lastFallbackSlotAllocation: NativeFallbackSlotCompaction.Allocation?
     private var blennyImage: NSImage?
     private var normalPresentation = ManagementStatusPresentation(
         state: .unknown, hasRevealableBundles: false, isBusy: false
@@ -51,6 +53,7 @@ final class StatusItemController: NSObject {
     private let onStopManaging: () -> Void
     private let onRestorePreviousPolicy: () -> Void
     private let onQuit: () -> Void
+    private let onVerifyNativeOverflowAfterSlotCompaction: () -> Void
     #if DEBUG
     private static let placementEnvironmentKey = "BLENNY_ENABLE_0_0_5_SELF_POSITION"
     private static let placementAutosaveName = "Blenny0.0.5Validation"
@@ -86,7 +89,8 @@ final class StatusItemController: NSObject {
         onResumeManaging: @escaping () -> Void,
         onStopManaging: @escaping () -> Void,
         onRestorePreviousPolicy: @escaping () -> Void,
-        onQuit: @escaping () -> Void
+        onQuit: @escaping () -> Void,
+        onVerifyNativeOverflowAfterSlotCompaction: @escaping () -> Void = {}
     ) {
         self.onOpenDiagnostics = onOpenDiagnostics
         self.onRefresh = onRefresh
@@ -96,6 +100,8 @@ final class StatusItemController: NSObject {
         self.onStopManaging = onStopManaging
         self.onRestorePreviousPolicy = onRestorePreviousPolicy
         self.onQuit = onQuit
+        self.onVerifyNativeOverflowAfterSlotCompaction =
+            onVerifyNativeOverflowAfterSlotCompaction
         #if DEBUG
         let readOnlyValidation = ProcessInfo.processInfo.environment["BLENNY_0_6_0_DRY_RUN"] == "YES"
             || ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES"
@@ -260,33 +266,51 @@ final class StatusItemController: NSObject {
             isBusy: interactionBusy,
             nativeOverflow: nativeOverflow
         )
+        let slotUpdate = fallbackSlotCompaction.update(
+            nativeOverflowUsable: nativeOverflow.isUsable,
+            mayBeginCompaction: normalPresentation.canToggleReveal
+        )
         // A MenuBarAgent layout notification may result from this presentation
         // itself. Never resubmit unchanged content in response to that event.
-        guard normalPresentation != lastRenderedPresentation else { return }
+        guard normalPresentation != lastRenderedPresentation
+                || slotUpdate.allocation != lastFallbackSlotAllocation else { return }
         lastRenderedPresentation = normalPresentation
+        lastFallbackSlotAllocation = slotUpdate.allocation
         button.image = blennyImage
         button.title = blennyImage == nil ? "B" : ""
         statusItem.length = Self.ordinaryStatusItemLength
         let arrowImage = NSImage(systemSymbolName: normalPresentation.nativeArrowSymbolName, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: ManagementStatusPresentation.arrowPointSize, weight: .medium))
         arrowImage?.isTemplate = true
-        // macOS 27 renders hosted status content in MenuBarAgent. NSView hiding
-        // alone is not a contract that clears its previously submitted image.
-        revealStatusItem?.button?.image = normalPresentation.showsInlineArrow ? arrowImage : nil
-        revealStatusItem?.button?.title = ""
-        // Keep the 22-point status-item allocation stable. Removing the item or
-        // changing its width could remove native overflow, restore our fallback,
-        // and create a layout feedback loop. Clear content and hide the hit target.
-        revealStatusItem?.button?.isHidden = !normalPresentation.showsInlineArrow
-        revealStatusItem?.button?.setAccessibilityElement(normalPresentation.showsInlineArrow)
-        revealStatusItem?.button?.isEnabled = normalPresentation.showsInlineArrow
-            && normalPresentation.canToggleReveal
-        revealStatusItem?.button?.setAccessibilityLabel(normalPresentation.nativeArrowHelp)
-        revealStatusItem?.button?.toolTip = normalPresentation.nativeArrowHelp
+        if slotUpdate.allocation == .absent {
+            if let item = revealStatusItem {
+                NSStatusBar.system.removeStatusItem(item)
+                revealStatusItem = nil
+            }
+        } else {
+            let item = ensureRevealStatusItem()
+            let showsFallbackContent = normalPresentation.showsInlineArrow
+                && slotUpdate.allocation == .reserved
+            // A zero-length transition has no content or hit target. It exists
+            // only as the bounded middle tier between removal and full fallback.
+            item.length = slotUpdate.allocation == .reserved
+                ? Self.ordinaryStatusItemLength : 0
+            item.button?.image = showsFallbackContent ? arrowImage : nil
+            item.button?.title = ""
+            item.button?.isHidden = !showsFallbackContent
+            item.button?.setAccessibilityElement(showsFallbackContent)
+            item.button?.isEnabled = showsFallbackContent
+                && normalPresentation.canToggleReveal
+            item.button?.setAccessibilityLabel(normalPresentation.nativeArrowHelp)
+            item.button?.toolTip = normalPresentation.nativeArrowHelp
+        }
         ordinaryRevealItem.isEnabled = normalPresentation.canToggleReveal
         button.setAccessibilityLabel("Open Blenny")
         button.setAccessibilityHelp("Right-click to open Blenny, stop managing, or restore the previous policy.")
         button.toolTip = "Open Blenny — right-click for menu"
+        if slotUpdate.requestsVerification {
+            onVerifyNativeOverflowAfterSlotCompaction()
+        }
     }
 
     @objc private func handleNormalStatusButton(_ sender: Any?) {
@@ -394,28 +418,68 @@ final class StatusItemController: NSObject {
         revealStatusItem?.isVisible == true && revealStatusItem?.button?.isHidden == false
             && revealStatusItem?.button?.image != nil
     }
-    var debugOrdinaryRevealButtonReservedWidth: CGFloat { revealStatusItem?.length ?? 0 }
+    var debugOrdinaryRevealButtonReservedWidth: CGFloat {
+        revealStatusItem?.length ?? 0
+    }
+    var debugOrdinaryRevealSlotMode: String {
+        guard revealStatusItem != nil else { return "absent" }
+        return revealStatusItem?.length == Self.ordinaryStatusItemLength
+            ? "reserved" : "compact"
+    }
     /// Presentation-only fixtures run in the installed no-writer dry-run. They
     /// prove local AppKit state, not native event delivery or physical placement.
     func debugValidateNativeFallbackPresentation() -> Bool {
-        guard let item = revealStatusItem, let button = item.button else { return false }
         let originalObservation = nativeOverflow
-        defer { setNativeOverflow(originalObservation) }
+        let originalCompaction = fallbackSlotCompaction
+        let originalManagementState = currentManagementState
+        let originalHasRevealableBundles = hasRevealableBundles
+        let originalInteractionBusy = interactionBusy
+        defer {
+            currentManagementState = originalManagementState
+            hasRevealableBundles = originalHasRevealableBundles
+            interactionBusy = originalInteractionBusy
+            fallbackSlotCompaction = originalCompaction
+            lastFallbackSlotAllocation = nil
+            lastRenderedPresentation = nil
+            setNativeOverflow(originalObservation)
+        }
+        currentManagementState = .active("appkit-fixture")
+        hasRevealableBundles = true
+        interactionBusy = false
+        fallbackSlotCompaction = NativeFallbackSlotCompaction()
+        lastFallbackSlotAllocation = nil
+        lastRenderedPresentation = nil
+        setNativeOverflow(.unavailable)
         let native = NativeOverflowObservationSnapshot(
             isPresent: true, presentationState: .collapsed, observationAvailable: true,
             controlIdentifier: UUID()
         )
-        for snapshot in [native, .unavailable, native, .observed(states: [.collapsed, .collapsed], controlIdentifier: nil)] {
+        let fixtures: [(NativeOverflowObservationSnapshot, String)] = [
+            (native, "absent"),
+            (.unavailable, "compact"),
+            (native, "compact"),
+            (.unavailable, "reserved"),
+            (native, "reserved"),
+        ]
+        for (snapshot, expectedMode) in fixtures {
             setNativeOverflow(snapshot)
-            guard button.isHidden == snapshot.isUsable,
-                  (button.image == nil) == snapshot.isUsable,
-                  button.title.isEmpty,
-                  item.length == Self.ordinaryStatusItemLength,
-                  item.isVisible,
-                  button.isEnabled == (!snapshot.isUsable && normalPresentation.canToggleReveal),
+            guard debugOrdinaryRevealSlotMode == expectedMode,
                   ordinaryRevealItem.isEnabled == normalPresentation.canToggleReveal,
                   statusItem.isVisible,
                   statusItem.button?.isHidden == false else { return false }
+            if expectedMode == "absent" {
+                guard revealStatusItem == nil else { return false }
+            } else {
+                guard let item = revealStatusItem, let button = item.button,
+                      item.isVisible,
+                      button.title.isEmpty else { return false }
+                let showsFallback = expectedMode == "reserved"
+                    && normalPresentation.showsInlineArrow
+                guard button.isHidden == !showsFallback,
+                      (button.image != nil) == showsFallback,
+                      button.isEnabled == (showsFallback && normalPresentation.canToggleReveal)
+                    else { return false }
+            }
         }
         return true
     }
@@ -541,10 +605,18 @@ final class StatusItemController: NSObject {
     }
 
     private func configureRevealStatusItem() {
-        // Both native items exist before the first inventory. Do not create or
-        // remove an item on each management transition: that would stale our own
-        // candidate count. Unavailable management leaves this button disabled.
-        let item = NSStatusBar.system.statusItem(withLength: Self.ordinaryStatusItemLength)
+        // Create the fallback before the first inventory. It is removed or
+        // recreated only by the bounded native-overflow fallback tiers, never on
+        // ordinary management transitions.
+        _ = ensureRevealStatusItem()
+        updateNormalButton()
+    }
+
+    private func ensureRevealStatusItem() -> NSStatusItem {
+        if let revealStatusItem { return revealStatusItem }
+        let item = NSStatusBar.system.statusItem(
+            withLength: Self.ordinaryStatusItemLength
+        )
         revealStatusItem = item
         item.button?.target = self
         item.button?.action = #selector(handleRevealStatusButton(_:))
@@ -553,7 +625,7 @@ final class StatusItemController: NSObject {
         item.button?.setAccessibilityCustomActions([
             NSAccessibilityCustomAction(name: "Open Blenny menu", target: self, selector: #selector(openNormalMenu))
         ])
-        updateNormalButton()
+        return item
     }
 
     private func configureMenu() {
@@ -743,6 +815,7 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func toggleOrdinaryReveal() {
+        fallbackSlotCompaction.beginUserRevealAttempt()
         onToggleOrdinaryReveal()
     }
 

@@ -19,11 +19,34 @@ polling, automatic reconciliation, third-party write, Board-only sorting, helper
 Release backend promotion. Full findings and recovery limits are in
 [the 0.7.0 spike](docs/TECH_SPIKE_0.7.0.md).
 
-Version `0.7.0` completed after 285 Debug and 254 Release deterministic tests,
+Version `0.7.0` completed after 292 Debug and 261 Release deterministic tests,
 both app builds, and installed no-writer regression. The existing annotated
 `v0.7.0` tag predates the final placement-guidance follow-up and remains unchanged
 under the repository's no-tag-rewrite boundary. History is forward-only and no
 push is authorized.
+
+An application launch no longer stops management solely because its bundle was
+absent from the frozen startup plan. Blenny coalesces new launches into one
+bounded, delayed, read-only AX ownership check. Applications with no attributable
+menu-bar item leave the verified writer untouched. A managed application, a new
+menu-bar owner, or incomplete ownership evidence still revokes the assertion and
+requires explicit Resume. The check never edits or automatically rebuilds the
+allow-list and does not poll.
+
+macOS 27 may also emit `didChangeScreenParameters` while an ordinary application
+activates even though the displays did not change. Blenny compares a public
+`NSScreen` signature of display identifiers, frames and backing scales. An
+unchanged signature keeps management active; a real display, resolution or scale
+change still restores the writer and requires explicit Resume.
+
+When a usable system overflow control appears after an explicit user Reveal,
+Blenny first removes its fallback status item. If that makes native overflow
+disappear, it tries one contentless zero-length transition; if that also fails,
+it restores the full 22-point fallback. Automatic layout events cannot restart
+the ladder, while a later user Reveal may begin one fresh bounded attempt. This
+avoids a repeating layout loop; it does not move either status item or promise
+that the system control will remain present. Event-driven confirmation may show
+a brief empty transition before the fallback is removed.
 
 The preceding `0.6.0` completed the native-overflow integration investigation, accepted
 by the owner on 2026-08-31 on the exact Debug development boundary: macOS 27.0
@@ -35,8 +58,9 @@ it does not intercept, replace, or modify Apple's button.
 
 Blenny hides its fallback arrow when one known, registered native control is
 usable and restores it when native observation is absent, unavailable or
-ambiguous. The fish, safety-menu action, existing artwork and fixed 22-point
-slots remain. This is not a fixed-position or physical-visibility guarantee.
+ambiguous. The fish, safety-menu action and existing artwork remain. Version
+0.7.0 adds the bounded empty-slot compaction described above. This is not a
+fixed-position or physical-visibility guarantee.
 Transient presentation loss preserves an authorized reveal and its original
 deadline; lifecycle or permission loss still restores through the serial writer.
 Canonical-root topology subscriptions and one coalesced post-activation read

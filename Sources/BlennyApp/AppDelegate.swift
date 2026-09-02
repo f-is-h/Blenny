@@ -43,6 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lifecycleGeneration: UInt64 = 0
     private var lifecycleObservers: [(NotificationCenter, NSObjectProtocol)] = []
     private var lifecycleRestartRequired = false
+    private var displayConfiguration = DisplayConfigurationSignature(displays: [])
+    private var pendingApplicationLaunchAssessments: [pid_t: RunningApplicationDescriptor] = [:]
+    private var applicationLaunchAssessmentTask: Task<Void, Never>?
+    private var fallbackSlotVerificationTask: Task<Void, Never>?
     private lazy var managementLoop: ManagementLoopController = {
         let readOnly = isReadOnlyValidation
         return ManagementLoopController(writerProvider: {
@@ -99,7 +103,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onResumeManaging: { [weak self] in self?.resumeManaging() },
         onStopManaging: { [weak self] in self?.stopManaging() },
         onRestorePreviousPolicy: { [weak self] in self?.restorePreviousPolicy() },
-        onQuit: { NSApplication.shared.terminate(nil) }
+        onQuit: { NSApplication.shared.terminate(nil) },
+        onVerifyNativeOverflowAfterSlotCompaction: { [weak self] in
+            self?.scheduleFallbackSlotVerification()
+        }
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -165,6 +172,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nativeObservationStarted = false
         for (center, token) in lifecycleObservers { center.removeObserver(token) }
         lifecycleObservers.removeAll()
+        applicationLaunchAssessmentTask?.cancel()
+        applicationLaunchAssessmentTask = nil
+        fallbackSlotVerificationTask?.cancel()
+        fallbackSlotVerificationTask = nil
+        pendingApplicationLaunchAssessments.removeAll()
         #if DEBUG
         validationDeadlineTask?.cancel()
         validationDeadlineTask = nil
@@ -1095,8 +1107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.ordinaryReveal.observe(
                     snapshot, source: self.nativeOverflowObserver.lastUpdateSource
                 )
-                self.sessionDiagnostic("native present=\(snapshot.isPresent) observable=\(snapshot.observationAvailable) controls=\(snapshot.controlCount) identity=\(snapshot.controlIdentifier?.uuidString ?? "none") state=\(snapshot.presentationState.rawValue) source=\(self.nativeOverflowObserver.lastUpdateSource.rawValue) failure=\(self.nativeOverflowObserver.unavailabilityReason ?? "none") before={\(previous)} after={\(self.ordinaryReveal.diagnosticSummary)}")
                 self.statusItemController.setNativeOverflow(snapshot)
+                #if DEBUG
+                self.sessionDiagnostic("native present=\(snapshot.isPresent) observable=\(snapshot.observationAvailable) controls=\(snapshot.controlCount) identity=\(snapshot.controlIdentifier?.uuidString ?? "none") state=\(snapshot.presentationState.rawValue) source=\(self.nativeOverflowObserver.lastUpdateSource.rawValue) failure=\(self.nativeOverflowObserver.unavailabilityReason ?? "none") localSlot=\(self.statusItemController.debugOrdinaryRevealSlotMode) localSlotWidth=\(self.statusItemController.debugOrdinaryRevealButtonReservedWidth) before={\(previous)} after={\(self.ordinaryReveal.diagnosticSummary)}")
+                #endif
                 self.editorWindowController.setNativeOverflowPlacement(snapshot)
                 #if DEBUG
                 if self.isReadOnlyValidation {
@@ -1126,7 +1140,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         handleLifecycleEvent(.menuBarAgentChanged)
     }
 
+    private func scheduleFallbackSlotVerification() {
+        guard fallbackSlotVerificationTask == nil else { return }
+        sessionDiagnostic("fallback-slot compaction=started verification=scheduled-once")
+        fallbackSlotVerificationTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            guard let self else { return }
+            self.fallbackSlotVerificationTask = nil
+            self.sessionDiagnostic("fallback-slot verification=sample-once")
+            self.nativeOverflowObserver.sampleCurrentControl()
+        }
+    }
+
     private func installLifecycleObservers() {
+        displayConfiguration = currentDisplayConfiguration()
         let workspace = NSWorkspace.shared.notificationCenter
         let events: [(Notification.Name, ManagementLifecycleEvent)] = [
             (NSWorkspace.willSleepNotification, .willSleep),
@@ -1147,21 +1174,171 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let token = center.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.handleLifecycleEvent(.displayChanged) }
+            MainActor.assumeIsolated { self?.handleDisplayConfigurationNotification() }
         }
         lifecycleObservers.append((center, token))
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             let token = workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
                 guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-                let identifier = application.bundleIdentifier
-                let event: ManagementLifecycleEvent = identifier?.lowercased() == "com.apple.menubaragent"
-                    ? .menuBarAgentChanged
-                    : (name == NSWorkspace.didLaunchApplicationNotification
-                        ? .applicationLaunched(identifier) : .applicationTerminated(identifier))
-                MainActor.assumeIsolated { self?.handleLifecycleEvent(event) }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if name == NSWorkspace.didLaunchApplicationNotification {
+                        self.handleWorkspaceApplicationLaunch(application)
+                    } else {
+                        self.pendingApplicationLaunchAssessments.removeValue(
+                            forKey: application.processIdentifier
+                        )
+                        let identifier = application.bundleIdentifier
+                        self.handleLifecycleEvent(
+                            identifier?.lowercased() == "com.apple.menubaragent"
+                                ? .menuBarAgentChanged
+                                : .applicationTerminated(identifier)
+                        )
+                    }
+                }
             }
             lifecycleObservers.append((workspace, token))
         }
+    }
+
+    private func handleDisplayConfigurationNotification() {
+        let current = currentDisplayConfiguration()
+        guard DisplayConfigurationPolicy.invalidates(
+            previous: displayConfiguration,
+            current: current
+        ) else {
+            sessionDiagnostic("display-notification ignored=unchanged-signature")
+            return
+        }
+        displayConfiguration = current
+        handleLifecycleEvent(.displayChanged)
+    }
+
+    private func currentDisplayConfiguration() -> DisplayConfigurationSignature {
+        DisplayConfigurationSignature(displays: NSScreen.screens.map { screen in
+            let identifier = (screen.deviceDescription[
+                NSDeviceDescriptionKey("NSScreenNumber")
+            ] as? NSNumber)?.uint64Value
+            return DisplayConfigurationRecord(
+                displayIdentifier: identifier,
+                frameX: screen.frame.origin.x,
+                frameY: screen.frame.origin.y,
+                frameWidth: screen.frame.width,
+                frameHeight: screen.frame.height,
+                backingScaleFactor: screen.backingScaleFactor
+            )
+        })
+    }
+
+    private func handleWorkspaceApplicationLaunch(
+        _ application: NSRunningApplication
+    ) {
+        let identifier = application.bundleIdentifier
+        if identifier?.lowercased() == "com.apple.menubaragent" {
+            handleLifecycleEvent(.menuBarAgentChanged)
+            return
+        }
+
+        let normalized = identifier?.lowercased()
+        let blenny = (Bundle.main.bundleIdentifier ?? "xyz.fi5h.blenny").lowercased()
+        if normalized == blenny { return }
+
+        let managed = Set(
+            (editorModel?.validationScope.approvedBundleIdentifiers ?? [])
+                .map { $0.lowercased() }
+        )
+        let allowed = Set(
+            (activeBaselinePlan?.allowedBundleIdentifiers ?? [])
+                .map { $0.lowercased() }
+        )
+        if interactionGate.isBusy || normalized.map(managed.contains) == true {
+            handleLifecycleEvent(.applicationLaunched(identifier))
+            return
+        }
+        if normalized.map(allowed.contains) == true || activeBaselinePlan == nil {
+            return
+        }
+
+        pendingApplicationLaunchAssessments[application.processIdentifier] =
+            RunningApplicationDescriptor(
+                processIdentifier: application.processIdentifier,
+                bundleIdentifier: identifier
+            )
+        scheduleApplicationLaunchAssessment()
+    }
+
+    private func scheduleApplicationLaunchAssessment() {
+        guard applicationLaunchAssessmentTask == nil,
+              !pendingApplicationLaunchAssessments.isEmpty else { return }
+        let generation = lifecycleGeneration
+        applicationLaunchAssessmentTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            await self?.assessPendingApplicationLaunches(generation: generation)
+        }
+    }
+
+    private func assessPendingApplicationLaunches(
+        generation: UInt64
+    ) async {
+        let pending = pendingApplicationLaunchAssessments
+        pendingApplicationLaunchAssessments.removeAll()
+        applicationLaunchAssessmentTask = nil
+        guard generation == lifecycleGeneration,
+              activeBaselinePlan != nil,
+              AccessibilityAuthorization.isTrusted else {
+            scheduleApplicationLaunchAssessment()
+            return
+        }
+
+        let running = pending.values.filter { descriptor in
+            NSRunningApplication(processIdentifier: descriptor.processIdentifier)
+                .map { !$0.isTerminated } == true
+        }
+        guard !running.isEmpty else {
+            scheduleApplicationLaunchAssessment()
+            return
+        }
+
+        let report = await inventory.capture(
+            applications: running,
+            accessibilityTrusted: true
+        )
+        guard generation == lifecycleGeneration,
+              activeBaselinePlan != nil else {
+            scheduleApplicationLaunchAssessment()
+            return
+        }
+        let ownership = MenuBarOwnershipSnapshotBuilder.make(from: report)
+        let captureComplete = !report.elementLimitReached
+            && !report.timeLimitReached
+            && ownership.issues.isEmpty
+
+        for descriptor in running {
+            let discovery = report.applicationDiscoveries.first {
+                $0.processIdentifier == descriptor.processIdentifier
+            }
+            let itemCount = ownership.observations
+                .filter { $0.processIdentifier == descriptor.processIdentifier }
+                .reduce(0) { $0 + $1.menuBarItemCount }
+            let assessment = ManagementLifecyclePolicy.assessApplicationLaunch(
+                discovery: discovery,
+                attributableMenuBarItemCount: itemCount,
+                captureComplete: captureComplete
+            )
+            sessionDiagnostic(
+                "application-launch pid=\(descriptor.processIdentifier)"
+                    + " menuBarAssessment=\(assessment) items=\(itemCount)"
+            )
+            if ManagementLifecyclePolicy.invalidates(
+                applicationLaunchAssessment: assessment
+            ) {
+                handleLifecycleEvent(
+                    .applicationLaunched(descriptor.bundleIdentifier)
+                )
+                break
+            }
+        }
+        scheduleApplicationLaunchAssessment()
     }
 
     private func handleLifecycleEvent(_ event: ManagementLifecycleEvent) {
@@ -1173,6 +1350,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             event, managedBundleIdentifiers: managed, allowedBundleIdentifiers: allowed,
             blennyBundleIdentifier: Bundle.main.bundleIdentifier ?? "xyz.fi5h.blenny"
         ) else { return }
+        applicationLaunchAssessmentTask?.cancel()
+        applicationLaunchAssessmentTask = nil
+        pendingApplicationLaunchAssessments.removeAll()
         lifecycleGeneration &+= 1
         if event == .menuBarAgentChanged { lifecycleRestartRequired = true }
         if event == .menuBarAgentChanged || event == .permissionLost {

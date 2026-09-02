@@ -24,6 +24,35 @@ public enum ManagementLifecycleEvent: Equatable, Sendable {
 /// A safety invalidation policy, not a reconciliation planner. It produces no
 /// new allow-list and never grants authority to a newly observed application.
 public enum ManagementLifecyclePolicy {
+    public enum ApplicationLaunchAssessment: Equatable, Sendable {
+        case noMenuBarItems
+        case menuBarItemsPresent
+        case unavailable
+    }
+
+    public static func assessApplicationLaunch(
+        discovery: ApplicationMenuBarDiscovery?,
+        attributableMenuBarItemCount: Int,
+        captureComplete: Bool
+    ) -> ApplicationLaunchAssessment {
+        guard captureComplete, let discovery else { return .unavailable }
+        switch discovery.outcome {
+        case .noExtrasMenuBar:
+            return .noMenuBarItems
+        case .unavailable:
+            return .unavailable
+        case .observed:
+            return attributableMenuBarItemCount > 0
+                ? .menuBarItemsPresent : .noMenuBarItems
+        }
+    }
+
+    public static func invalidates(
+        applicationLaunchAssessment assessment: ApplicationLaunchAssessment
+    ) -> Bool {
+        assessment != .noMenuBarItems
+    }
+
     public static func invalidates(
         _ event: ManagementLifecycleEvent,
         managedBundleIdentifiers: Set<String>,

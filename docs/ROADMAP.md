@@ -327,8 +327,24 @@ Final product resolution:
   or guarantee that the fish remains adjacent after external layout changes.
 - Preserve Visible / Revealable / Hidden, keep Blenny Visible, exclude Hidden
   from ordinary reveal, and retain Apple system items as read-only observations.
-- Xcode 27 verification passes 285 Debug tests / 30 suites and 254 Release tests /
-  26 suites. Both 0.7.0 app configurations build; installed verification and
+- Do not revoke a verified writer for every Workspace launch notification. A
+  managed launch remains an immediate invalidation. Coalesce unrelated launches
+  into one delayed, bounded, read-only ownership capture: no attributable menu-bar
+  item keeps the frozen plan active; menu-bar ownership or incomplete evidence
+  restores and requires Resume. Never add the new bundle to the allow-list or
+  automatically recreate the writer.
+- Treat `didChangeScreenParameters` as a trigger for comparison, not sufficient
+  proof of a changed display. Compare public display identifiers, frames and
+  backing scales. Preserve management only when that signature is identical;
+  real display, resolution or scale changes still restore and require Resume.
+- On each explicit user Reveal, retire Blenny's fallback through one bounded
+  ladder: remove the status item, try a contentless zero-length transition if
+  native overflow disappears, then restore the full 22-point fallback if needed.
+  Automatic layout events cannot restart the ladder; a later user Reveal may.
+  This is Blenny-owned AppKit presentation only; never loop, reorder or treat the
+  result as an arrow-relative placement guarantee.
+- Xcode 27 verification passes 292 Debug tests / 32 suites and 261 Release tests /
+  28 suites. Both 0.7.0 app configurations build; installed verification and
   exact local-state comparison are recorded in the spike.
 
 ## 0.8.0 — Distribution prototype
