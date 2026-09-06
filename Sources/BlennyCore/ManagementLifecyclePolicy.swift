@@ -14,7 +14,8 @@ public enum ManagementLifecycleEvent: Equatable, Sendable {
         case .displayChanged: "The display configuration changed."
         case .spaceChanged: "The active Space changed."
         case .permissionLost: "Accessibility permission is no longer granted."
-        case .applicationLaunched: "Application launch changed the frozen management scope."
+        case let .applicationLaunched(identifier):
+            "A new application (\(identifier ?? "unidentified")) needs a visibility check. Choose Resume to include it."
         case .applicationTerminated: "A managed application exited."
         case .menuBarAgentChanged: "The MenuBarAgent connection changed. Quit and reopen Blenny."
         }
@@ -35,13 +36,14 @@ public enum ManagementLifecyclePolicy {
         attributableMenuBarItemCount: Int,
         captureComplete: Bool
     ) -> ApplicationLaunchAssessment {
-        guard captureComplete, let discovery else { return .unavailable }
+        guard let discovery else { return .unavailable }
         switch discovery.outcome {
         case .noExtrasMenuBar:
             return .noMenuBarItems
         case .unavailable:
             return .unavailable
         case .observed:
+            guard captureComplete else { return .unavailable }
             return attributableMenuBarItemCount > 0
                 ? .menuBarItemsPresent : .noMenuBarItems
         }
@@ -66,13 +68,31 @@ public enum ManagementLifecyclePolicy {
             guard let identifier else { return true }
             let key = identifier.lowercased()
             if key == blennyBundleIdentifier.lowercased() { return false }
-            return managed.contains(key) || !allowed.contains(key)
-        case let .applicationTerminated(identifier):
-            guard let identifier else { return false }
-            let key = identifier.lowercased()
-            return key != blennyBundleIdentifier.lowercased() && managed.contains(key)
+            // Assertions and accepted policy are bundle-scoped, not PID-scoped.
+            // A known bundle returning does not change either allow/deny plan.
+            return !managed.contains(key) && !allowed.contains(key)
+        case .applicationTerminated:
+            // Retain accepted intent across absence and multi-process churn.
+            // MenuBarAgent loss is classified separately by the caller.
+            return false
         default:
             return true
         }
+    }
+
+    /// Only accepted policy or an existing pass-through allowance can exempt a
+    /// launch. Activation policy alone does not prove absence of a status item.
+    public static func requiresLaunchAssessment(
+        bundleIdentifier: String?,
+        acceptedBundleIdentifiers: Set<String>,
+        allowedBundleIdentifiers: Set<String>,
+        blennyBundleIdentifier: String
+    ) -> Bool {
+        invalidates(
+            .applicationLaunched(bundleIdentifier),
+            managedBundleIdentifiers: acceptedBundleIdentifiers,
+            allowedBundleIdentifiers: allowedBundleIdentifiers,
+            blennyBundleIdentifier: blennyBundleIdentifier
+        )
     }
 }

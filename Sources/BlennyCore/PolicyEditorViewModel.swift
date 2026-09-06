@@ -68,6 +68,8 @@ public struct MenuBarOwnershipSnapshot: Equatable, Sendable {
 }
 
 public struct SystemMenuBarItemObservation: Equatable, Sendable {
+    public static let bluetoothIdentifier = "com.apple.menuextra.bluetooth"
+    public static let clockIdentifier = "com.apple.menuextra.clock"
     public let observationIdentifier: String
     public let ownerBundleIdentifier: String
     public let displayName: String
@@ -109,7 +111,10 @@ public enum MenuBarOwnershipSnapshotBuilder {
                 && item.classification == .manageableCandidate
                 && item.role == "AXMenuBarItem"
                 && item.subrole == "AXMenuExtra"
-                && !isCriticalSystemOwner(item.ownerBundleIdentifier)
+                && (!isCriticalSystemOwner(item.ownerBundleIdentifier)
+                    || ExperimentalAppleBundlePolicyCatalog.contains(
+                        item.ownerBundleIdentifier
+                    ))
         }
         let grouped = Dictionary(grouping: topLevelMenuExtras) { item in
             OwnerKey(
@@ -142,12 +147,15 @@ public enum MenuBarOwnershipSnapshotBuilder {
     ) -> [SystemMenuBarItemObservation] {
         let identifiableItems = records.filter { record in
             (record.source == .menuBarAgent
-                || isCriticalSystemOwner(record.ownerBundleIdentifier))
+                || (isCriticalSystemOwner(record.ownerBundleIdentifier)
+                    && !ExperimentalAppleBundlePolicyCatalog.contains(
+                        record.ownerBundleIdentifier
+                    )))
                 && record.classification != .nativeOverflowPresentationControl
                 && record.role == "AXMenuBarItem"
                 && record.subrole == "AXMenuExtra"
                 && systemItemObservationIdentifier(for: record) != nil
-                && systemItemObservedName(for: record) != nil
+                && hasSystemItemDisplayIdentity(record)
         }
         let grouped = Dictionary(grouping: identifiableItems) {
             systemItemObservationIdentifier(for: $0) ?? ""
@@ -185,24 +193,40 @@ public enum MenuBarOwnershipSnapshotBuilder {
         [record.title, record.itemDescription].compactMap { $0 }.first { !$0.isEmpty }
     }
 
+    private static func hasSystemItemDisplayIdentity(
+        _ record: MenuBarItemRecord
+    ) -> Bool {
+        if systemItemObservedName(for: record) != nil { return true }
+        guard let identifier = systemItemObservationIdentifier(for: record) else {
+            return false
+        }
+        return knownSystemItemDisplayName(identifier: identifier) != nil
+    }
+
     private static func systemItemDisplayName(
         identifier: String,
         records: [MenuBarItemRecord]
     ) -> String {
-        let knownNames = [
-            "com.apple.menuextra.bluetooth": "Bluetooth",
-            "com.apple.menuextra.clock": "Clock",
-            "com.apple.menuextra.controlcenter": "Control Center",
-            "com.apple.menuextra.now-playing": "Now Playing",
-            "com.apple.menuextra.sound": "Sound",
-            "com.apple.menuextra.wifi": "Wi-Fi",
-        ]
-        if let knownName = knownNames[identifier.lowercased()] {
+        if let knownName = knownSystemItemDisplayName(identifier: identifier) {
             return knownName
         }
         let observedName = records.lazy.compactMap(systemItemObservedName(for:)).first
         return observedName ?? identifier.split(separator: ".").last.map(String.init)
             ?? identifier
+    }
+
+    private static func knownSystemItemDisplayName(identifier: String) -> String? {
+        let knownNames = [
+            "com.apple.menuextra.bluetooth": "Bluetooth",
+            "com.apple.menuextra.clock": "Clock",
+            "com.apple.menuextra.controlcenter": "Control Center",
+            "com.apple.menuextra.now-playing": "Now Playing",
+            "com.apple.menuextra.siri": "Siri",
+            "com.apple.menuextra.sound": "Sound",
+            "com.apple.menuextra.timemachine": "Time Machine",
+            "com.apple.menuextra.wifi": "Wi-Fi",
+        ]
+        return knownNames[identifier.lowercased()]
     }
 
     private static func isCriticalSystemOwner(_ bundleIdentifier: String?) -> Bool {
@@ -236,7 +260,26 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
             forBlennyBundleIdentifier: blennyBundleIdentifier
         )
         self.candidateInventory = candidateInventory
-        self.systemItems = systemItems
+        var retainedSystemItems = systemItems
+        let retainedPolicies = Self.acceptedSystemItemPolicies(acceptedPolicy)
+        for (identifier, policy) in retainedPolicies where policy != .visible {
+            guard let item = SystemItemPolicyCatalog.controllableItem(for: identifier),
+                  !retainedSystemItems.contains(where: {
+                      $0.observationIdentifier == item.identifier
+                  }) else { continue }
+            retainedSystemItems.append(
+                SystemMenuBarItemObservation(
+                    observationIdentifier: item.identifier,
+                    ownerBundleIdentifier: "com.apple.MenuBarAgent",
+                    displayName: item.displayName,
+                    observationCount: 0
+                )
+            )
+        }
+        self.systemItems = retainedSystemItems.sorted {
+            ($0.displayName.lowercased(), $0.observationIdentifier)
+                < ($1.displayName.lowercased(), $1.observationIdentifier)
+        }
         self.blennyBundleIdentifier = blennyBundleIdentifier
         let draft = Self.makeDraft(
             acceptedPolicy: acceptedPolicy,
@@ -314,6 +357,62 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
         return .visible
     }
 
+    public func effectiveSystemItemPolicy(
+        for observationIdentifier: String
+    ) -> MenuBarBundlePolicy? {
+        if let item = PersistentSystemItemPolicyCatalog.controllableItem(
+            for: observationIdentifier
+        ) {
+            return draft.systemItemPolicies[item.identifier] ?? .visible
+        }
+        guard let itemIdentifier = SystemItemPolicyCatalog.controllableItem(
+                for: observationIdentifier
+              )?.identifier,
+              systemItems.contains(where: {
+                  $0.observationIdentifier.lowercased() == itemIdentifier.lowercased()
+              }) else { return nil }
+        if itemIdentifier == SystemMenuBarItemObservation.bluetoothIdentifier {
+            return draft.bluetoothPolicy
+        }
+        return draft.systemItemPolicies[itemIdentifier] ?? .visible
+    }
+
+    @discardableResult
+    public mutating func assignBluetooth(
+        to policy: MenuBarBundlePolicy
+    ) -> PolicyEditorAssignmentResult {
+        assignSystemItem(
+            identifier: SystemMenuBarItemObservation.bluetoothIdentifier,
+            to: policy
+        )
+    }
+
+    @discardableResult
+    public mutating func assignSystemItem(
+        identifier: String,
+        to policy: MenuBarBundlePolicy
+    ) -> PolicyEditorAssignmentResult {
+        let persistentIdentifier = PersistentSystemItemPolicyCatalog.controllableItem(
+            for: identifier
+        )?.identifier
+        let itemIdentifier = persistentIdentifier
+            ?? SystemItemPolicyCatalog.controllableItem(for: identifier)?.identifier
+        guard let itemIdentifier else { return .unknownCandidate }
+        if persistentIdentifier == nil,
+           !systemItems.contains(where: {
+               $0.observationIdentifier.lowercased() == itemIdentifier.lowercased()
+           }) {
+            return .unknownCandidate
+        }
+        let current = effectiveSystemItemPolicy(for: itemIdentifier)
+        guard current != policy else { return .unchanged }
+        let updated = itemIdentifier == SystemMenuBarItemObservation.bluetoothIdentifier
+            ? draft.assigningBluetooth(to: policy)
+            : draft.assigningSystemItem(identifier: itemIdentifier, to: policy)
+        draft = Self.sorted(updated)
+        return .changed
+    }
+
     @discardableResult
     public mutating func assign(
         bundleIdentifier: String,
@@ -366,7 +465,17 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
         return BundlePolicyDraft(
             visible: sort(draft.visible),
             revealable: sort(draft.revealable),
-            hidden: sort(draft.hidden)
+            hidden: sort(draft.hidden),
+            bluetoothPolicy: draft.bluetoothPolicy,
+            systemItemPolicies: draft.systemItemPolicies
         )
+    }
+
+    private static func acceptedSystemItemPolicies(
+        _ policy: PersistentBundlePolicyDocument
+    ) -> [String: MenuBarBundlePolicy] {
+        var values = policy.systemItemPolicies
+        values[SystemMenuBarItemObservation.bluetoothIdentifier] = policy.bluetoothPolicy
+        return values
     }
 }

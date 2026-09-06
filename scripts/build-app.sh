@@ -7,6 +7,14 @@ repository_root=${script_directory:h}
 configuration=${1:-debug}
 build_root=${BLENNY_BUILD_ROOT:-"$repository_root/build/$configuration"}
 scratch_directory="$build_root/swift"
+swift_build_options=()
+
+if [[ "${BLENNY_SHARED_SYSTEM_ITEM_TRIAL:-NO}" == "YES" ]]; then
+  swift_build_options+=(
+    -Xswiftc -DBLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    -Xcc -DBLENNY_SHARED_SYSTEM_ITEM_TRIAL=1
+  )
+fi
 
 case "$configuration" in
   debug|release) ;;
@@ -16,8 +24,8 @@ case "$configuration" in
     ;;
 esac
 
-swift build --package-path "$repository_root" --scratch-path "$scratch_directory" --configuration "$configuration" --product Blenny
-binary_directory=$(swift build --package-path "$repository_root" --scratch-path "$scratch_directory" --configuration "$configuration" --show-bin-path)
+swift build --package-path "$repository_root" --scratch-path "$scratch_directory" --configuration "$configuration" --product Blenny "${swift_build_options[@]}"
+binary_directory=$(swift build --package-path "$repository_root" --scratch-path "$scratch_directory" --configuration "$configuration" --show-bin-path "${swift_build_options[@]}")
 
 application_directory="$build_root/Blenny.app"
 contents_directory="$application_directory/Contents"

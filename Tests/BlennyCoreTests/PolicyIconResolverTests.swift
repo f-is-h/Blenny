@@ -25,19 +25,49 @@ struct PolicyIconResolverTests {
             ) == .fallback
         )
         #expect(PolicyIconDescriptor.fallback.symbolName == "questionmark.square.dashed")
+
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #expect(
+            PolicyIconResolver.applicationDescriptor(
+                bundleIdentifier: "com.apple.weather.menu",
+                installedApplicationResolved: true
+            ) == .systemSymbol(name: "cloud.sun")
+        )
+        #expect(
+            PolicyIconResolver.applicationDescriptor(
+                bundleIdentifier: "com.apple.TextInputMenuAgent",
+                installedApplicationResolved: false
+            ) == .systemSymbol(name: "keyboard")
+        )
+        #expect(ExperimentalAppleBundlePolicyCatalog.displayName(
+            for: "COM.APPLE.WEATHER.MENU"
+        ) == "Weather")
+        #expect(ExperimentalAppleBundlePolicyCatalog.displayName(
+            for: "com.apple.TextInputMenuAgent"
+        ) == "Input Menu")
+        #else
+        #expect(ExperimentalAppleBundlePolicyCatalog.displayName(
+            for: "com.apple.weather.menu"
+        ) == nil)
+        #endif
     }
 
     @Test("Known system observation identities map to semantic SF Symbols")
     func knownSystemSymbols() {
         let expected = [
-            "com.apple.menuextra.bluetooth": "antenna.radiowaves.left.and.right",
             "com.apple.menuextra.clock": "clock",
             "com.apple.menuextra.controlcenter": "switch.2",
             "com.apple.menuextra.now-playing": "play.circle",
             "com.apple.menuextra.sound": "speaker.wave.2",
             "com.apple.menuextra.wifi": "wifi",
-            "com.apple.menuextra.siri": "sparkles",
+            "com.apple.menuextra.siri": "siri",
         ]
+
+        #expect(
+            PolicyIconResolver.systemItemDescriptor(
+                observationIdentifier: "COM.APPLE.MENUEXTRA.BLUETOOTH"
+            ) == .namedImage(name: "NSBluetoothTemplate")
+        )
 
         for (identifier, symbolName) in expected {
             #expect(
@@ -59,7 +89,7 @@ struct PolicyIconResolverTests {
         #expect(
             PolicyIconResolver.systemItemDescriptor(
                 observationIdentifier: stableSiriIdentity.stableKey
-            ) == .systemSymbol(name: "sparkles")
+            ) == .systemSymbol(name: "siri")
         )
         let stableInputSourceIdentity = MenuBarItemIdentity(
             ownerBundleIdentifier: "com.apple.textinputmenuagent",

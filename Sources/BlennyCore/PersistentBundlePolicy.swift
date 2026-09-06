@@ -38,18 +38,26 @@ public enum PersistentBundlePolicyDocumentError: Error, Equatable, Sendable {
     case invalidBundleIdentifier(String)
     case duplicateBundleIdentifier(String)
     case missingVisibleBlenny(String)
+    case invalidSystemItemIdentifier(String)
+    case bluetoothMustUseDedicatedPolicy
+    case systemItemPoliciesUnavailable
+    case invalidSystemItemPolicySchema
 }
 
 public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 4
 
     public let schemaVersion: Int
     public let managementEnabled: Bool
     public let policies: [PersistentBundlePolicyEntry]
+    public let bluetoothPolicy: MenuBarBundlePolicy
+    public let systemItemPolicies: [String: MenuBarBundlePolicy]
 
     public init(
         managementEnabled: Bool,
-        policies: [PersistentBundlePolicyEntry]
+        policies: [PersistentBundlePolicyEntry],
+        bluetoothPolicy: MenuBarBundlePolicy = .visible,
+        systemItemPolicies: [String: MenuBarBundlePolicy] = [:]
     ) throws {
         var canonicalIdentifiers = Set<String>()
         for entry in policies {
@@ -67,8 +75,12 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
             }
         }
 
-        self.schemaVersion = Self.currentSchemaVersion
+        try Self.validateSystemItemPolicies(systemItemPolicies)
+
+        self.schemaVersion = systemItemPolicies.isEmpty ? 3 : Self.currentSchemaVersion
         self.managementEnabled = managementEnabled
+        self.bluetoothPolicy = bluetoothPolicy
+        self.systemItemPolicies = systemItemPolicies
         self.policies = policies.sorted {
             ($0.bundleIdentifier.lowercased(), $0.policy.rawValue)
                 < ($1.bundleIdentifier.lowercased(), $1.policy.rawValue)
@@ -95,7 +107,12 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
     }
 
     public func settingManagementEnabled(_ enabled: Bool) throws -> Self {
-        try Self(managementEnabled: enabled, policies: policies)
+        try Self(
+            managementEnabled: enabled,
+            policies: policies,
+            bluetoothPolicy: bluetoothPolicy,
+            systemItemPolicies: systemItemPolicies
+        )
     }
 
     public func replacingBundleIdentifier(
@@ -130,7 +147,9 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
                     bundleIdentifier: newIdentifier,
                     policy: entry.policy
                 )
-            }
+            },
+            bluetoothPolicy: bluetoothPolicy,
+            systemItemPolicies: systemItemPolicies
         )
     }
 
@@ -138,6 +157,8 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
         case schemaVersion
         case managementEnabled
         case policies
+        case bluetoothPolicy
+        case systemItemPolicies
     }
 
     private enum LegacyPolicy: String, Decodable {
@@ -162,7 +183,7 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
-        guard schemaVersion == 1 || schemaVersion == Self.currentSchemaVersion else {
+        guard (1 ... Self.currentSchemaVersion).contains(schemaVersion) else {
             throw PersistentBundlePolicyDocumentError.unsupportedSchemaVersion(schemaVersion)
         }
         let managementEnabled = try container.decode(Bool.self, forKey: .managementEnabled)
@@ -180,10 +201,41 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
                 forKey: .policies
             )
         }
+        let systemItemPolicies = try container.decodeIfPresent(
+            [String: MenuBarBundlePolicy].self,
+            forKey: .systemItemPolicies
+        ) ?? [:]
+        guard (schemaVersion == 4) == !systemItemPolicies.isEmpty else {
+            throw PersistentBundlePolicyDocumentError.invalidSystemItemPolicySchema
+        }
         self = try Self(
             managementEnabled: managementEnabled,
-            policies: policies
+            policies: policies,
+            bluetoothPolicy: schemaVersion >= 3
+                ? try container.decode(MenuBarBundlePolicy.self, forKey: .bluetoothPolicy)
+                : .visible,
+            systemItemPolicies: systemItemPolicies
         )
+    }
+
+    private static func validateSystemItemPolicies(
+        _ policies: [String: MenuBarBundlePolicy]
+    ) throws {
+        guard !policies.keys.contains("com.apple.menuextra.bluetooth") else {
+            throw PersistentBundlePolicyDocumentError.bluetoothMustUseDedicatedPolicy
+        }
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        for identifier in policies.keys {
+            guard SystemItemPolicyCatalog.controllableItem(for: identifier) != nil
+                    || PersistentSystemItemPolicyCatalog.controllableItem(for: identifier) != nil else {
+                throw PersistentBundlePolicyDocumentError.invalidSystemItemIdentifier(identifier)
+            }
+        }
+        #else
+        guard policies.isEmpty else {
+            throw PersistentBundlePolicyDocumentError.systemItemPoliciesUnavailable
+        }
+        #endif
     }
 }
 
@@ -379,6 +431,25 @@ public actor PersistentBundlePolicyStore {
         try save(disabled)
         return disabled
     }
+
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    /// Disables only the isolated manual system-item trial document without
+    /// rotating its reviewed recovery backup.
+    @discardableResult
+    public func disableManualTrialManagementPreservingBackup() throws
+        -> PersistentBundlePolicyDocument? {
+        guard !readOnly else { throw PersistentBundlePolicyStoreError.readOnlyStore }
+        guard let existing = try load() else { return nil }
+        guard existing.managementEnabled else { return existing }
+        let disabled = try existing.settingManagementEnabled(false)
+        try write(Self.makeEncoder().encode(disabled), to: policyURL)
+        guard try load() == disabled,
+              try Self.permissions(of: policyURL) == 0o600 else {
+            throw PersistentBundlePolicyStoreError.interruptedTransactionCorrupt
+        }
+        return disabled
+    }
+    #endif
 
     @discardableResult
     public func restoreBackup() throws -> PersistentBundlePolicyDocument? {

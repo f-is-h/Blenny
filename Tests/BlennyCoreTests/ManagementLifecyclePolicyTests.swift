@@ -25,11 +25,12 @@ struct ManagementLifecyclePolicyTests {
         #expect(!invalidates(.applicationTerminated("com.example.PassThrough")))
     }
 
-    @Test("Managed quit and replacement invalidate while Blenny does not invalidate itself")
+    @Test("Accepted bundle policy survives launch, quit and replacement without a new writer")
     func managedReplacement() {
-        #expect(invalidates(.applicationTerminated("com.example.Revealable")))
-        #expect(invalidates(.applicationLaunched("com.example.Hidden")))
-        #expect(invalidates(.applicationLaunched("COM.EXAMPLE.REVEALABLE")))
+        #expect(!invalidates(.applicationTerminated("com.example.Revealable")))
+        #expect(!invalidates(.applicationLaunched("com.example.Hidden")))
+        #expect(!invalidates(.applicationLaunched("COM.EXAMPLE.REVEALABLE")))
+        #expect(!invalidates(.applicationTerminated("com.example.Hidden")))
         #expect(!invalidates(.applicationLaunched(blenny)))
         #expect(!invalidates(.applicationTerminated(blenny)))
         #expect(!invalidates(.applicationTerminated(nil)))
@@ -65,7 +66,34 @@ struct ManagementLifecyclePolicyTests {
         #expect(invalidates(assessment(emptyRoot, itemCount: 1)))
         #expect(invalidates(assessment(failed, itemCount: 0)))
         #expect(invalidates(assessment(nil, itemCount: 0)))
-        #expect(invalidates(assessment(noRoot, itemCount: 0, complete: false)))
+        #expect(!invalidates(assessment(noRoot, itemCount: 0, complete: false)))
+        #expect(invalidates(assessment(emptyRoot, itemCount: 0, complete: false)))
+    }
+
+    @Test("Draft-only identity does not inherit accepted-policy lifecycle authority")
+    func draftIsNotAcceptedScope() {
+        #expect(invalidates(.applicationLaunched("com.example.DraftOnly")))
+        #expect(!invalidates(.applicationTerminated("com.example.DraftOnly")))
+        // Removing an accepted entry in the unapplied draft cannot revoke it.
+        #expect(!invalidates(.applicationLaunched("com.example.Hidden")))
+    }
+
+    @Test("Only accepted or pass-through identity exempts a launch, never background process status")
+    func launchEligibility() {
+        func assess(_ identifier: String?) -> Bool {
+            ManagementLifecyclePolicy.requiresLaunchAssessment(
+                bundleIdentifier: identifier,
+                acceptedBundleIdentifiers: managed,
+                allowedBundleIdentifiers: allowed,
+                blennyBundleIdentifier: blenny
+            )
+        }
+        #expect(assess("com.example.BackgroundWorker"))
+        #expect(!assess("com.example.Hidden"))
+        #expect(!assess("COM.EXAMPLE.PASSTHROUGH"))
+        #expect(assess("com.example.NewMenuBarApp"))
+        #expect(assess(nil))
+        #expect(assess("com.apple.controlcenter"))
     }
 
     private func invalidates(_ event: ManagementLifecycleEvent) -> Bool {

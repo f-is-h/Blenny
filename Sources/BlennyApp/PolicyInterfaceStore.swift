@@ -33,7 +33,6 @@ actor PolicyInterfaceStore: PersistentBundlePolicyStoring {
 enum PolicyInterfaceWriteError: LocalizedError {
     case installedDryRunRequired
     case interfaceStoreUnavailable
-    case releaseBackendUnavailable
     case applyPreflightUnavailable(String)
 
     var errorDescription: String? {
@@ -42,8 +41,6 @@ enum PolicyInterfaceWriteError: LocalizedError {
             return "This plan requires an installed Debug dry-run and explicit authorization before Blenny may create a macOS 27 assertion."
         case .interfaceStoreUnavailable:
             return "The policy store is unavailable. Refresh the bounded menu bar observation and try again."
-        case .releaseBackendUnavailable:
-            return "Release builds do not contain the development mutation backend."
         case let .applyPreflightUnavailable(detail):
             return "The bounded Apply preflight could not prove the current observation: \(detail)"
         }

@@ -21,6 +21,10 @@ struct PolicyEditorViewModelTests {
             systemItem(identifier: "com.apple.menuextra.bluetooth", description: "Bluetooth"),
             systemItem(identifier: "com.apple.menuextra.wifi", description: "Wi-Fi"),
             systemItem(
+                identifier: "com.apple.menuextra.TimeMachine",
+                description: "Localized Time Machine"
+            ),
+            systemItem(
                 identifier: nil,
                 description: "Siri",
                 ownerBundleIdentifier: "com.apple.systemuiserver",
@@ -36,12 +40,60 @@ struct PolicyEditorViewModelTests {
         #expect(
             inventory.candidates.first { $0.bundleIdentifier == revealable }?.menuBarItemCount == 2
         )
-        #expect(snapshot.systemItems.map(\.displayName) == ["Bluetooth", "Siri", "Wi-Fi"])
+        #expect(snapshot.systemItems.map(\.displayName) == [
+            "Bluetooth", "Siri", "Time Machine", "Wi-Fi",
+        ])
         #expect(snapshot.systemItems.first { $0.displayName == "Wi-Fi" }?.observationCount == 2)
         #expect(
             snapshot.systemItems.first { $0.displayName == "Siri" }?.ownerBundleIdentifier
                 == "com.apple.systemuiserver"
         )
+    }
+
+    @Test("A known Time Machine identifier does not require localized AX text")
+    func timeMachineIdentifierWithoutTextIsVisible() {
+        let snapshot = MenuBarOwnershipSnapshotBuilder.make(from: report(items: [
+            systemItem(
+                identifier: "com.apple.menuextra.TimeMachine",
+                description: nil
+            ),
+        ]))
+
+        #expect(snapshot.systemItems == [
+            SystemMenuBarItemObservation(
+                observationIdentifier: "com.apple.menuextra.TimeMachine",
+                ownerBundleIdentifier: "com.apple.MenuBarAgent",
+                displayName: "Time Machine",
+                observationCount: 1
+            ),
+        ])
+    }
+
+    @Test("Only exact Debug Apple owner candidates leave the read-only system group")
+    func debugAppleOwnerCandidatesAreNarrow() {
+        let weather = "com.apple.weather.menu"
+        let inputMenu = "com.apple.TextInputMenuAgent"
+        let unrelatedApple = "com.apple.systemuiserver"
+        let snapshot = MenuBarOwnershipSnapshotBuilder.make(from: report(items: [
+            item(bundleIdentifier: weather, pid: 41),
+            item(bundleIdentifier: inputMenu, pid: 42),
+            item(bundleIdentifier: unrelatedApple, pid: 43),
+        ]))
+
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #expect(snapshot.observations.compactMap(\.bundleIdentifier) == [
+            inputMenu, weather,
+        ])
+        #expect(snapshot.systemItems.isEmpty)
+        #expect(ExperimentalAppleBundlePolicyCatalog.contains(weather))
+        #expect(ExperimentalAppleBundlePolicyCatalog.contains(inputMenu))
+        #else
+        #expect(snapshot.observations.isEmpty)
+        #expect(snapshot.systemItems.isEmpty)
+        #expect(!ExperimentalAppleBundlePolicyCatalog.contains(weather))
+        #expect(!ExperimentalAppleBundlePolicyCatalog.contains(inputMenu))
+        #endif
+        #expect(!ExperimentalAppleBundlePolicyCatalog.contains(unrelatedApple))
     }
 
     @Test("A truncated or unauthorized scan is explicit and incomplete")
@@ -81,6 +133,148 @@ struct PolicyEditorViewModelTests {
         #expect(accepted.policies.first(where: { $0.bundleIdentifier == revealable })?.policy == .revealable)
         #expect(model.assign(bundleIdentifier: blenny, to: .hidden) == .rejectedBlennyMustRemainVisible)
         #expect(model.candidates(in: .visible).map(\.bundleIdentifier) == [blenny])
+    }
+
+    @Test("Bluetooth is editable and remains recoverable while hidden")
+    func bluetoothDraftAndHiddenRetention() throws {
+        let bluetooth = SystemMenuBarItemObservation(
+            observationIdentifier: SystemMenuBarItemObservation.bluetoothIdentifier,
+            ownerBundleIdentifier: "com.apple.MenuBarAgent",
+            displayName: "Bluetooth",
+            observationCount: 1
+        )
+        var model = try PolicyEditorViewModel(
+            acceptedPolicy: try policy(),
+            candidateInventory: PolicyCandidateInventory(observations: [
+                observation(blenny, pid: 10), observation(revealable, pid: 20),
+                observation(hidden, pid: 30),
+            ]),
+            systemItems: [bluetooth],
+            blennyBundleIdentifier: blenny
+        )
+        #expect(model.effectiveSystemItemPolicy(
+            for: SystemMenuBarItemObservation.bluetoothIdentifier
+        ) == .visible)
+        #expect(model.assignBluetooth(to: .hidden) == .changed)
+        #expect(model.hasDraftChanges)
+        #expect(model.draft.bluetoothPolicy == .hidden)
+
+        let persistedHidden = try PersistentBundlePolicyDocument(
+            managementEnabled: true,
+            policies: model.acceptedPolicy.policies,
+            bluetoothPolicy: .hidden
+        )
+        let relaunched = try PolicyEditorViewModel(
+            acceptedPolicy: persistedHidden,
+            candidateInventory: model.candidateInventory,
+            systemItems: [],
+            blennyBundleIdentifier: blenny
+        )
+        #expect(relaunched.systemItems.map(\.observationIdentifier) == [
+            SystemMenuBarItemObservation.bluetoothIdentifier,
+        ])
+        #expect(relaunched.systemItems.first?.observationCount == 0)
+        #expect(relaunched.effectiveSystemItemPolicy(
+            for: SystemMenuBarItemObservation.bluetoothIdentifier
+        ) == .hidden)
+    }
+
+    @Test("A Debug catalog identity moves by exact AX identifier and retains a missing recovery row")
+    func systemItemDraftAndRecoveryRetention() throws {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        let wifi = "com.apple.menuextra.wifi"
+        let observedWiFi = SystemMenuBarItemObservation(
+            observationIdentifier: wifi,
+            ownerBundleIdentifier: "com.apple.MenuBarAgent",
+            displayName: "Wi-Fi",
+            observationCount: 1
+        )
+        var model = try PolicyEditorViewModel(
+            acceptedPolicy: try policy(),
+            candidateInventory: PolicyCandidateInventory(observations: [
+                observation(blenny, pid: 10), observation(revealable, pid: 20),
+            ]),
+            systemItems: [observedWiFi],
+            blennyBundleIdentifier: blenny
+        )
+
+        #expect(model.assignSystemItem(identifier: wifi, to: .hidden) == .changed)
+        #expect(model.effectiveSystemItemPolicy(for: wifi) == .hidden)
+        #expect(model.draft.systemItemPolicies == [wifi: .hidden])
+
+        let accepted = try PersistentBundlePolicyDocument(
+            managementEnabled: false,
+            policies: model.acceptedPolicy.policies,
+            systemItemPolicies: [wifi: .hidden]
+        )
+        let relaunched = try PolicyEditorViewModel(
+            acceptedPolicy: accepted,
+            candidateInventory: model.candidateInventory,
+            systemItems: [],
+            blennyBundleIdentifier: blenny
+        )
+        #expect(relaunched.systemItems.map(\.observationIdentifier) == [wifi])
+        #expect(relaunched.systemItems.first?.observationCount == 0)
+        #expect(relaunched.effectiveSystemItemPolicy(for: wifi) == .hidden)
+        #endif
+    }
+
+    @Test("Persistent system items expose all three policies without a live AX row")
+    func persistentSystemItemsAreThreeStateCandidates() throws {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        var model = try PolicyEditorViewModel(
+            acceptedPolicy: try policy(),
+            candidateInventory: PolicyCandidateInventory(observations: [
+                observation(blenny, pid: 10), observation(revealable, pid: 20),
+            ]),
+            systemItems: [],
+            blennyBundleIdentifier: blenny
+        )
+
+        for target in SharedSystemItemTrialTarget.allCases {
+            let identifier = target.observationIdentifier
+            #expect(model.effectiveSystemItemPolicy(for: identifier) == .visible)
+            #expect(model.assignSystemItem(identifier: identifier, to: .revealable) == .changed)
+            #expect(model.effectiveSystemItemPolicy(for: identifier) == .revealable)
+            #expect(model.assignSystemItem(identifier: identifier, to: .hidden) == .changed)
+            #expect(model.effectiveSystemItemPolicy(for: identifier) == .hidden)
+            #expect(model.assignSystemItem(identifier: identifier, to: .visible) == .changed)
+            #expect(model.effectiveSystemItemPolicy(for: identifier) == .visible)
+        }
+        #endif
+    }
+
+    @Test("Fixed and unknown Apple observations never acquire a policy control")
+    func fixedAndUnknownSystemItemsStayReadOnly() throws {
+        let clock = SystemMenuBarItemObservation(
+            observationIdentifier: SystemMenuBarItemObservation.clockIdentifier,
+            ownerBundleIdentifier: "com.apple.MenuBarAgent",
+            displayName: "Clock",
+            observationCount: 1
+        )
+        let siri = SystemMenuBarItemObservation(
+            observationIdentifier: "siri",
+            ownerBundleIdentifier: "com.apple.systemuiserver",
+            displayName: "Siri",
+            observationCount: 1
+        )
+        var model = try PolicyEditorViewModel(
+            acceptedPolicy: try policy(),
+            candidateInventory: PolicyCandidateInventory(observations: [
+                observation(blenny, pid: 10), observation(revealable, pid: 20),
+            ]),
+            systemItems: [clock, siri],
+            blennyBundleIdentifier: blenny
+        )
+        #expect(model.effectiveSystemItemPolicy(
+            for: SystemMenuBarItemObservation.clockIdentifier
+        ) == nil)
+        #expect(model.effectiveSystemItemPolicy(for: "siri") == nil)
+        #expect(model.assignSystemItem(
+            identifier: SystemMenuBarItemObservation.clockIdentifier,
+            to: .hidden
+        ) == .unknownCandidate)
+        #expect(model.assignSystemItem(identifier: "siri", to: .hidden) == .unknownCandidate)
     }
 
     @Test("An implicitly Visible bundle enters validation scope only after explicit assignment")
@@ -330,7 +524,7 @@ struct PolicyEditorViewModelTests {
 
     private func systemItem(
         identifier: String?,
-        description: String,
+        description: String?,
         ownerBundleIdentifier: String = "com.apple.MenuBarAgent",
         stableIdentityLabel: String? = nil
     ) -> MenuBarItemRecord {

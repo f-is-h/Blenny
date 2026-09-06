@@ -26,9 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var editorModel: PolicyEditorViewModel?
     private var ownershipSnapshot: MenuBarOwnershipSnapshot?
     private var observedRunningBundleIdentifiers = Set<String>()
+    // Session-only pass-through memory, never a persisted policy assignment.
+    private var admittedPassThroughBundleIdentifiers = Set<String>()
     private var recoveryAvailable = false
     private var developmentMutationAvailable = false
     private var terminationRestoreInProgress = false
+    private var terminateImmediatelyToReleaseConnection = false
     private var activeBaselinePlan: RevealAllowlistPlan?
     private var activeRevealPlan: RevealAllowlistPlan?
     private var ordinaryRevealTimeoutTask: Task<Void, Never>?
@@ -44,24 +47,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lifecycleObservers: [(NotificationCenter, NSObjectProtocol)] = []
     private var lifecycleRestartRequired = false
     private var displayConfiguration = DisplayConfigurationSignature(displays: [])
-    private var pendingApplicationLaunchAssessments: [pid_t: RunningApplicationDescriptor] = [:]
+    private var pendingApplicationLaunchAssessments: [String: RunningApplicationDescriptor] = [:]
     private var applicationLaunchAssessmentTask: Task<Void, Never>?
     private var fallbackSlotVerificationTask: Task<Void, Never>?
     private lazy var managementLoop: ManagementLoopController = {
         let readOnly = isReadOnlyValidation
-        return ManagementLoopController(writerProvider: {
+        return ManagementLoopController(writerProvider: { [unowned self] in
             guard !readOnly else { throw PolicyInterfaceWriteError.installedDryRunRequired }
-            #if DEBUG
             let factory = try ExperimentalMacOS27AssessmentFactory()
+            let assertionWriter: RevealAssertionWriter
+            #if DEBUG
             let trace = DebugSessionTrace.shared
             if trace.enabled {
-                return RevealAssertionWriter(factory: factory, diagnostic: { message in
+                assertionWriter = RevealAssertionWriter(factory: factory, diagnostic: { message in
                     trace.write(message)
                 })
+            } else {
+                assertionWriter = RevealAssertionWriter(factory: factory)
             }
-            return RevealAssertionWriter(factory: factory)
             #else
-            throw PolicyInterfaceWriteError.releaseBackendUnavailable
+            assertionWriter = RevealAssertionWriter(factory: factory)
+            #endif
+            #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+            let persistentWriter = await self.sharedSystemItemTrialWriter
+            return CoordinatedPolicyWriter(
+                assertionWriter: assertionWriter,
+                persistentWriter: persistentWriter
+            )
+            #else
+            return assertionWriter
             #endif
         })
     }()
@@ -76,6 +90,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #if DEBUG
     private var policyCoexistenceController: DebugPolicyCoexistenceController?
     private var validationDeadlineTask: Task<Void, Never>?
+    #endif
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    private lazy var sharedSystemItemTrialWriter = SharedSystemItemManualTrialWriter(
+        backend: DebugSharedSystemItemTrialBackend(),
+        receiptDirectory: FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Blenny")
+            .appendingPathComponent("DebugSharedSystemItemTrials")
+    )
     #endif
 
     private lazy var editorWindowController = PolicyEditorWindowController(
@@ -92,7 +114,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onOpenKoFi: { [weak self] in self?.openKoFi() },
         onSetLaunchAtLogin: { [weak self] enabled in self?.setLaunchAtLogin(enabled) },
         onOpenLoginItemsSettings: { [weak self] in self?.openLoginItemsSettings() },
-        onShowFishPlacementGuide: { [weak self] in self?.showFishPlacementGuide() }
+        onShowFishPlacementGuide: { [weak self] in self?.showFishPlacementGuide() },
+        onHideSharedSystemItem: { [weak self] target in
+            self?.hideSharedSystemItem(target)
+        },
+        onRestoreSharedSystemItem: { [weak self] target in
+            self?.restoreSharedSystemItem(target)
+        }
     )
 
     private lazy var statusItemController = StatusItemController(
@@ -156,11 +184,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Leave both the Swift job and the main dispatch-queue drain
                 // before AppKit enters its terminateLater nested loop, so the
                 // asynchronous restoration job can run inside that loop.
-                RunLoop.main.perform(inModes: [.common]) {
+                DispatchQueue.main.async { @MainActor in
                     NSApplication.shared.terminate(nil)
                 }
             }
         }
+        #endif
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        refreshSharedSystemItemTrialPresentation()
         #endif
         refresh()
     }
@@ -196,6 +227,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateLater
         }
         #endif
+        if terminateImmediatelyToReleaseConnection {
+            return .terminateNow
+        }
         guard !terminationRestoreInProgress else { return .terminateLater }
         terminationRestoreInProgress = true
         ordinaryRevealTimeoutTask?.cancel()
@@ -238,7 +272,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         ordinaryRevealTimeoutTask?.cancel()
         ordinaryRevealTimeoutTask = nil
-        Task { await managementLoop.terminate() }
+        if !terminateImmediatelyToReleaseConnection {
+            Task { await managementLoop.terminate() }
+        }
         #if DEBUG
         statusItemController.restoreDebugStatusItemPlacement()
         #endif
@@ -390,9 +426,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     to: blennyBundleIdentifier
                 )
             }
-            let accepted = try await store.load() ?? initialPolicy(
+            let loadedPolicy = try await store.load()
+            var accepted = try loadedPolicy ?? initialPolicy(
                 blennyBundleIdentifier: blennyBundleIdentifier
             )
+            #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+            // Manual system-item trials use an isolated store and always wait
+            // for an explicit Apply/Resume after launch. Refresh must not stop
+            // an already active owner-operated test.
+            if editorModel == nil {
+                accepted = try accepted.settingManagementEnabled(false)
+                if !isReadOnlyValidation, loadedPolicy != accepted {
+                    if loadedPolicy == nil {
+                        try await store.save(accepted)
+                    } else {
+                        _ = try await store.disableManualTrialManagementPreservingBackup()
+                    }
+                }
+            }
+            #endif
             let candidateInventory = PolicyCandidateInventory(
                 observations: snapshot.observations
             )
@@ -406,7 +458,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 persistentStore: store,
                 initialPolicy: accepted
             )
-            let runningIdentifiers = runningBundleIdentifiers.union([blennyBundleIdentifier])
+            let runningIdentifiers = runningBundleIdentifiers
+                .union(admittedPassThroughBundleIdentifiers).union([blennyBundleIdentifier])
             let backup = try await store.loadBackup()
             let hasBackup = backup != nil
 
@@ -550,7 +603,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) {
         let state = interactionGate.isTerminating ? ManagementLoopState.terminating
             : (connectionInvalidationTask != nil ? .restoring : state)
-        let hasRevealable = editorModel?.acceptedPolicy.policies.contains { $0.policy == .revealable } == true
+        switch state {
+        case .stopped, .failClosedUnrestricted, .restorationFailed,
+             .connectionInvalidated, .unsupportedRuntimeContract, .terminating:
+            admittedPassThroughBundleIdentifiers.removeAll()
+        default:
+            break
+        }
+        let hasRevealable = editorModel.map { model in
+            model.acceptedPolicy.policies.contains { $0.policy == .revealable }
+                || model.acceptedPolicy.bluetoothPolicy == .revealable
+                || model.acceptedPolicy.systemItemPolicies.values.contains(.revealable)
+        } ?? false
         ordinaryReveal.synchronize(state, hasRevealableBundles: hasRevealable)
         updateNativeOverflowObservation()
         statusItemController.setNativeOverflow(ordinaryReveal.observation)
@@ -567,35 +631,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             developmentMutationAvailable: developmentMutationAvailable
         )
         guard !interactionGate.isTerminating else { return }
-        switch state {
-        case .active:
-            editorWindowController.setStatus(
-                "Management is active for the verified policy baseline.",
-                isError: false
-            )
-        case .stopped:
-            editorWindowController.setStatus(
-                "Management is stopped. Draft changes remain local until Apply.",
-                isError: false
-            )
-        case .unsupportedRuntimeContract:
-            editorWindowController.setStatus(
-                "Management is unavailable because this runtime contract is unsupported. No assertion was created.",
-                isError: true
-            )
-        case let .failClosedUnrestricted(detail) where persistedManagementEnabled:
-            editorWindowController.setStatus(
-                "Management is inactive; Blenny's restrictions are removed. \(detail)",
-                isError: true
-            )
-        case let .restorationFailed(detail):
-            editorWindowController.setStatus(
-                "Cleanup could not be confirmed. Blenny will quit to release its connection. \(detail)",
-                isError: true
-            )
-            NSApplication.shared.terminate(nil)
-        default:
-            break
+        if let notice = state.statusNotice(persistedManagementEnabled: persistedManagementEnabled) {
+            editorWindowController.setStatus(notice.message, isError: notice.isError)
+        }
+        if state.requiresImmediateProcessExit {
+            terminateImmediatelyToReleaseConnection = true
+            // Never re-enter termination from the policy transaction that
+            // discovered the failed cleanup. The next run-loop turn exits
+            // immediately so process-connection teardown cannot self-await.
+            RunLoop.main.perform(inModes: [.common]) {
+                MainActor.assumeIsolated { NSApplication.shared.terminate(nil) }
+            }
         }
     }
 
@@ -621,6 +667,111 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
                 candidateGeneration: editorWindowController.candidateGeneration,
                 runtimeContractFingerprint: runtimeContractFingerprint
+            )
+            guard let baseline = preview.0.newBaselinePlan,
+                  let reveal = preview.0.newRevealPlan,
+                  let expansion = try PassThroughExpansion.prepare(
+                    baseline: baseline, reveal: reveal,
+                    acceptedBundleIdentifiers: Set(model.acceptedPolicyScope.approvedBundleIdentifiers),
+                    launchedBundleIdentifiers: ["xyz.fi5h.blenny.validation.passthrough"]
+                  ) else {
+                throw PolicyInterfaceWriteError.applyPreflightUnavailable("Pass-through dry-run plan is unavailable")
+            }
+            try PassThroughExpansion.validateReplacement(
+                from: baseline, to: expansion.baseline,
+                addedBundleIdentifiers: Set(expansion.addedBundleIdentifiers)
+            )
+            try PassThroughExpansion.validateReplacement(
+                from: reveal, to: expansion.reveal,
+                addedBundleIdentifiers: Set(expansion.addedBundleIdentifiers)
+            )
+            Self.writeDryRunOutput(
+                "PASS-THROUGH PREVIEW additions=\(expansion.addedBundleIdentifiers.count)"
+                    + " systemItemsUnchanged=true policyUnchanged=true"
+                    + " writerCreated=false assertionCreated=false persistenceChanged=false"
+            )
+            var manualPlansVerified = 0
+            for item in SystemItemPolicyCatalog.items {
+                for policy in MenuBarBundlePolicy.allCases {
+                    let originalDraft = BundlePolicyDraft(acceptedPolicy: model.acceptedPolicy)
+                    let trialDraft = item.rawValue == RevealAllowlistPlanner.bluetoothSystemItem
+                        ? originalDraft.assigningBluetooth(to: policy)
+                        : originalDraft.assigningSystemItem(identifier: item.identifier, to: policy)
+                    let trial = try PolicyDryRunner.prepare(
+                        oldPolicy: model.acceptedPolicy, draft: trialDraft,
+                        managementEnabled: true, candidates: model.candidateInventory,
+                        observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+                        scope: model.acceptedPolicyScope,
+                        blennyBundleIdentifier: model.blennyBundleIdentifier,
+                        candidateGeneration: editorWindowController.candidateGeneration,
+                        runtimeContractFingerprint: runtimeContractFingerprint
+                    )
+                    guard trial.prepared != nil,
+                          let baseline = trial.report.newBaselinePlan,
+                          let reveal = trial.report.newRevealPlan,
+                          baseline.allowedSystemItems.contains(2),
+                          reveal.allowedSystemItems.contains(2),
+                          baseline.allowedSystemItems.contains(item.rawValue) == (policy == .visible),
+                          reveal.allowedSystemItems.contains(item.rawValue) == (policy != .hidden) else {
+                        throw PolicyInterfaceWriteError.applyPreflightUnavailable(
+                            "Manual system-item policy fixture failed for \(item.displayName)"
+                        )
+                    }
+                    manualPlansVerified += 1
+                }
+            }
+            Self.writeDryRunOutput(
+                "MANUAL SYSTEM-ITEM PREVIEW controls=\(SystemItemPolicyCatalog.items.count)"
+                    + " policyPlans=\(manualPlansVerified) clockAlwaysAllowed=true"
+                    + " startsStopped=\(!model.acceptedPolicy.managementEnabled)"
+                    + " isolatedPolicyStore=true writerCreated=false assertionCreated=false"
+                    + " persistenceChanged=false"
+            )
+            var appleOwnerPlansVerified = 0
+            for catalogIdentifier in ExperimentalAppleBundlePolicyCatalog.bundleIdentifiers.sorted() {
+                guard let currentOwner = model.candidateInventory.candidates.first(where: {
+                    $0.bundleIdentifier.lowercased() == catalogIdentifier
+                }) else {
+                    throw PolicyInterfaceWriteError.applyPreflightUnavailable(
+                        "Experimental Apple owner is not an exact current menu-bar candidate: \(catalogIdentifier)"
+                    )
+                }
+                let bundleIdentifier = currentOwner.bundleIdentifier
+                for policy in MenuBarBundlePolicy.allCases {
+                    let trialDraft = BundlePolicyDraft(acceptedPolicy: model.acceptedPolicy)
+                        .assigning(bundleIdentifier, to: policy)
+                    let trialScope = PolicyValidationScope(
+                        approvedBundleIdentifiers:
+                            trialDraft.visible + trialDraft.revealable + trialDraft.hidden
+                    )
+                    let trial = try PolicyDryRunner.prepare(
+                        oldPolicy: model.acceptedPolicy, draft: trialDraft,
+                        managementEnabled: true, candidates: model.candidateInventory,
+                        observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+                        scope: trialScope,
+                        blennyBundleIdentifier: model.blennyBundleIdentifier,
+                        candidateGeneration: editorWindowController.candidateGeneration,
+                        runtimeContractFingerprint: runtimeContractFingerprint
+                    )
+                    guard trial.prepared != nil,
+                          let baseline = trial.report.newBaselinePlan,
+                          let reveal = trial.report.newRevealPlan,
+                          baseline.allowedBundleIdentifiers.contains(bundleIdentifier)
+                            == (policy == .visible),
+                          reveal.allowedBundleIdentifiers.contains(bundleIdentifier)
+                            == (policy != .hidden) else {
+                        throw PolicyInterfaceWriteError.applyPreflightUnavailable(
+                            "Experimental Apple owner fixture failed for \(bundleIdentifier)"
+                        )
+                    }
+                    appleOwnerPlansVerified += 1
+                }
+            }
+            Self.writeDryRunOutput(
+                "EXPERIMENTAL APPLE-OWNER PREVIEW controls="
+                    + "\(ExperimentalAppleBundlePolicyCatalog.bundleIdentifiers.count)"
+                    + " policyPlans=\(appleOwnerPlansVerified) exactCurrentOwners=true"
+                    + " writerCreated=false assertionCreated=false persistenceChanged=false"
             )
             // The ordinary app already started this observer, independently of
             // management. Do not create a second, dry-run-only observation path.
@@ -665,18 +816,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     #endif
 
+    #if !DEBUG && !BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    private func hideSharedSystemItem(_ target: SharedSystemItemTrialTarget) {}
+    private func restoreSharedSystemItem(_ target: SharedSystemItemTrialTarget) {}
+    #endif
+
     private var runtimeContractFingerprint: String {
-        #if DEBUG
         ExperimentalMacOS27AssessmentFactory.compatibilityFingerprint
-        #else
-        "release-backend-unavailable"
-        #endif
     }
 
     private func developmentCompatibilityAvailable(
         bundleIdentifier: String
     ) -> Bool {
-        #if DEBUG
         guard !isReadOnlyValidation,
               AccessibilityAuthorization.isTrusted,
               Bundle.main.bundleURL.path.hasPrefix("/Applications/"),
@@ -694,9 +845,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             return false
         }
-        #else
-        return false
-        #endif
     }
 
     private func resumeManaging() { performPolicyAction(.resume) }
@@ -725,9 +873,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             else { nativeOverflowObserver.sampleCurrentControl() }
         }
         interactionGate.finish()
+        scheduleApplicationLaunchAssessment()
         if !interactionGate.isTerminating { ordinaryReveal.resume() }
         editorWindowController.setApplying(false)
         statusItemController.setInteractionBusy(interactionGate.isTerminating)
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        refreshSharedSystemItemTrialPresentation()
+        #endif
         #if DEBUG
         sessionDiagnostic("controls arrowEnabled=\(statusItemController.debugOrdinaryRevealButtonEnabled) localGlyphPresent=\(statusItemController.debugOrdinaryRevealButtonVisible) coordinatorEnabled=\(ordinaryReveal.canToggleBlenny) busy=\(interactionGate.isBusy)")
         sessionDiagnostic("resume editorEnabled=\(editorWindowController.debugResumeEnabled) menuEnabled=\(statusItemController.debugResumeEnabled)")
@@ -966,7 +1118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let blennyBundleIdentifier = try currentBundleIdentifier()
         return (
             PolicyCandidateInventory(observations: snapshot.observations),
-            runningBundleIdentifiers.union([blennyBundleIdentifier])
+            runningBundleIdentifiers.union(admittedPassThroughBundleIdentifiers)
+                .union([blennyBundleIdentifier])
         )
     }
 
@@ -1185,9 +1338,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if name == NSWorkspace.didLaunchApplicationNotification {
                         self.handleWorkspaceApplicationLaunch(application)
                     } else {
-                        self.pendingApplicationLaunchAssessments.removeValue(
-                            forKey: application.processIdentifier
-                        )
+                        if application.bundleIdentifier == nil {
+                            self.pendingApplicationLaunchAssessments.removeValue(
+                                forKey: "pid:\(application.processIdentifier)"
+                            )
+                        }
                         let identifier = application.bundleIdentifier
                         self.handleLifecycleEvent(
                             identifier?.lowercased() == "com.apple.menubaragent"
@@ -1239,27 +1394,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let normalized = identifier?.lowercased()
-        let blenny = (Bundle.main.bundleIdentifier ?? "xyz.fi5h.blenny").lowercased()
-        if normalized == blenny { return }
-
-        let managed = Set(
-            (editorModel?.validationScope.approvedBundleIdentifiers ?? [])
-                .map { $0.lowercased() }
-        )
-        let allowed = Set(
-            (activeBaselinePlan?.allowedBundleIdentifiers ?? [])
-                .map { $0.lowercased() }
-        )
-        if interactionGate.isBusy || normalized.map(managed.contains) == true {
+        guard requiresApplicationLaunchAssessment(application),
+              !isReadOnlyValidation, !interactionGate.isTerminating,
+              activeBaselinePlan != nil || interactionGate.isBusy || isRefreshing else { return }
+        let key = identifier.map { "bundle:\($0.lowercased())" }
+            ?? "pid:\(application.processIdentifier)"
+        guard pendingApplicationLaunchAssessments.count < 256
+                || pendingApplicationLaunchAssessments[key] != nil else {
             handleLifecycleEvent(.applicationLaunched(identifier))
             return
         }
-        if normalized.map(allowed.contains) == true || activeBaselinePlan == nil {
-            return
-        }
 
-        pendingApplicationLaunchAssessments[application.processIdentifier] =
+        pendingApplicationLaunchAssessments[key] =
             RunningApplicationDescriptor(
                 processIdentifier: application.processIdentifier,
                 bundleIdentifier: identifier
@@ -1269,10 +1415,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func scheduleApplicationLaunchAssessment() {
         guard applicationLaunchAssessmentTask == nil,
+              !interactionGate.isBusy, !interactionGate.isTerminating, !isRefreshing,
+              connectionInvalidationTask == nil, activeBaselinePlan != nil,
               !pendingApplicationLaunchAssessments.isEmpty else { return }
         let generation = lifecycleGeneration
         applicationLaunchAssessmentTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            // Fixed coalescing window: later arrivals do not postpone this batch.
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             await self?.assessPendingApplicationLaunches(generation: generation)
         }
     }
@@ -1280,34 +1429,123 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func assessPendingApplicationLaunches(
         generation: UInt64
     ) async {
+        applicationLaunchAssessmentTask = nil
+        guard !interactionGate.isBusy, !isRefreshing else { return }
         let pending = pendingApplicationLaunchAssessments
         pendingApplicationLaunchAssessments.removeAll()
-        applicationLaunchAssessmentTask = nil
         guard generation == lifecycleGeneration,
-              activeBaselinePlan != nil,
-              AccessibilityAuthorization.isTrusted else {
-            scheduleApplicationLaunchAssessment()
+              activeBaselinePlan != nil, !interactionGate.isTerminating else { return }
+        guard AccessibilityAuthorization.isTrusted else {
+            handleLifecycleEvent(.permissionLost)
             return
         }
 
-        let running = pending.values.filter { descriptor in
-            NSRunningApplication(processIdentifier: descriptor.processIdentifier)
-                .map { !$0.isTerminated } == true
+        // One cheap Workspace snapshot, not an AX/icon inventory. Coalesce by
+        // bundle so multi-process apps cannot fill the queue with duplicate PIDs.
+        let applications = NSWorkspace.shared.runningApplications.filter { !$0.isTerminated }
+        let running = pending.values.compactMap { descriptor -> RunningApplicationDescriptor? in
+            let current = applications.first { application in
+                if let identifier = descriptor.bundleIdentifier {
+                    return application.bundleIdentifier?.lowercased() == identifier.lowercased()
+                }
+                return application.processIdentifier == descriptor.processIdentifier
+                    && application.bundleIdentifier == nil
+            }
+            guard let current, requiresApplicationLaunchAssessment(current) else { return nil }
+            return RunningApplicationDescriptor(
+                processIdentifier: current.processIdentifier, bundleIdentifier: current.bundleIdentifier
+            )
         }
         guard !running.isEmpty else {
             scheduleApplicationLaunchAssessment()
             return
         }
 
+        guard beginManagementInteraction() else {
+            for descriptor in running {
+                let key = descriptor.bundleIdentifier.map { "bundle:\($0.lowercased())" }
+                    ?? "pid:\(descriptor.processIdentifier)"
+                pendingApplicationLaunchAssessments[key] = descriptor
+            }
+            return
+        }
+        ordinaryReveal.suspendForPassThroughUpdate()
+        managementInteractionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { finishManagementInteraction() }
+            let started = ContinuousClock.now
+            do {
+                // Valid bundle identity is enough for a more permissive allowance.
+                // Only unidentified processes retain the bounded AX fallback.
+                let unidentified = running.filter { $0.bundleIdentifier == nil }
+                if !unidentified.isEmpty {
+                    try await verifyUnidentifiedLaunchesHaveNoExtras(unidentified)
+                }
+                guard generation == lifecycleGeneration,
+                      !interactionGate.isTerminating,
+                      let baseline = activeBaselinePlan, let reveal = activeRevealPlan else { return }
+                guard let expansion = try PassThroughExpansion.prepare(
+                    baseline: baseline, reveal: reveal,
+                    acceptedBundleIdentifiers: Set(editorModel?.acceptedPolicyScope.approvedBundleIdentifiers ?? []),
+                    launchedBundleIdentifiers: Set(running.compactMap(\.bundleIdentifier))
+                ) else { return }
+                guard admittedPassThroughBundleIdentifiers.count
+                    + expansion.addedBundleIdentifiers.count <= 4_096 else {
+                    throw PolicyInterfaceWriteError.applyPreflightUnavailable(
+                        "The active session's pass-through identity capacity was exceeded."
+                    )
+                }
+                let currentState = await managementLoop.state
+                let expected: RevealAllowlistPlan
+                let replacement: RevealAllowlistPlan
+                switch currentState {
+                case .active:
+                    expected = baseline; replacement = expansion.baseline
+                case .ordinaryRevealSession:
+                    expected = reveal; replacement = expansion.reveal
+                default:
+                    return // Never resume a stopped writer from a launch event.
+                }
+                guard generation == lifecycleGeneration, !interactionGate.isTerminating else { return }
+                try await managementLoop.expandPassThrough(
+                    from: expected, to: replacement,
+                    addedBundleIdentifiers: Set(expansion.addedBundleIdentifiers)
+                )
+                guard generation == lifecycleGeneration, !interactionGate.isTerminating else { return }
+                activeBaselinePlan = expansion.baseline
+                activeRevealPlan = expansion.reveal
+                admittedPassThroughBundleIdentifiers.formUnion(expansion.addedBundleIdentifiers)
+                observedRunningBundleIdentifiers.formUnion(expansion.addedBundleIdentifiers)
+                sessionDiagnostic("pass-through added=\(expansion.addedBundleIdentifiers.count) writes=1 retries=0 duration=\(started.duration(to: .now))")
+                // Preserve the existing reveal session and timeout task verbatim.
+                presentManagementState(
+                    await managementLoop.state,
+                    persistedManagementEnabled: editorModel?.acceptedPolicy.managementEnabled == true
+                )
+            } catch {
+                guard generation == lifecycleGeneration, !interactionGate.isTerminating else { return }
+                await managementLoop.failClosed("A new application's visibility could not be verified. Choose Resume to recheck.")
+                activeBaselinePlan = nil
+                activeRevealPlan = nil
+                pendingApplicationLaunchAssessments.removeAll()
+                ordinaryRevealTimeoutTask?.cancel()
+                ordinaryRevealTimeoutTask = nil
+                presentManagementState(
+                    await managementLoop.state,
+                    persistedManagementEnabled: editorModel?.acceptedPolicy.managementEnabled == true
+                )
+                sessionDiagnostic("pass-through failed retries=0 error=\(error)")
+            }
+        }
+    }
+
+    private func verifyUnidentifiedLaunchesHaveNoExtras(
+        _ running: [RunningApplicationDescriptor]
+    ) async throws {
         let report = await inventory.capture(
             applications: running,
             accessibilityTrusted: true
         )
-        guard generation == lifecycleGeneration,
-              activeBaselinePlan != nil else {
-            scheduleApplicationLaunchAssessment()
-            return
-        }
         let ownership = MenuBarOwnershipSnapshotBuilder.make(from: report)
         let captureComplete = !report.elementLimitReached
             && !report.timeLimitReached
@@ -1332,18 +1570,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if ManagementLifecyclePolicy.invalidates(
                 applicationLaunchAssessment: assessment
             ) {
-                handleLifecycleEvent(
-                    .applicationLaunched(descriptor.bundleIdentifier)
+                throw PolicyInterfaceWriteError.applyPreflightUnavailable(
+                    "An unidentified process has menu-bar items or unavailable ownership."
                 )
-                break
             }
         }
-        scheduleApplicationLaunchAssessment()
     }
 
     private func handleLifecycleEvent(_ event: ManagementLifecycleEvent) {
         guard !interactionGate.isTerminating else { return }
-        let managed = Set(editorModel?.validationScope.approvedBundleIdentifiers ?? [])
+        let managed = Set(editorModel?.acceptedPolicyScope.approvedBundleIdentifiers ?? [])
         let allowed = activeBaselinePlan.map { Set($0.allowedBundleIdentifiers) }
             ?? observedRunningBundleIdentifiers
         guard ManagementLifecyclePolicy.invalidates(
@@ -1571,6 +1807,95 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    private func refreshSharedSystemItemTrialPresentation() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for target in SharedSystemItemTrialTarget.allCases {
+                do {
+                    if await sharedSystemItemTrialWriter.hasRecoveryReceipt(for: target) {
+                        editorWindowController.setSharedSystemItemTrial(
+                            target, presentation: .recoveryRequired
+                        )
+                    } else {
+                        let snapshot = try await sharedSystemItemTrialWriter.snapshot(target)
+                        editorWindowController.setSharedSystemItemTrial(
+                            target,
+                            presentation: snapshot.effectiveVisible ? .ready : .hidden
+                        )
+                    }
+                } catch {
+                    editorWindowController.setSharedSystemItemTrial(
+                        target, presentation: .unavailable(String(describing: error))
+                    )
+                }
+            }
+        }
+    }
+
+    private func hideSharedSystemItem(_ target: SharedSystemItemTrialTarget) {
+        editorWindowController.setSharedSystemItemTrial(target, presentation: .busy)
+        editorWindowController.setStatus(
+            "Applying one Debug-only \(target.displayName) visibility change…",
+            isError: false
+        )
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let receipt = try await sharedSystemItemTrialWriter.hide(target)
+                editorWindowController.setSharedSystemItemTrial(target, presentation: .recoveryRequired)
+                editorWindowController.setStatus(
+                    "\(target.displayName) is hidden. Use Restore before changing its macOS setting elsewhere. Receipt \(try receipt.fingerprint.prefix(12)).",
+                    isError: false
+                )
+            } catch {
+                let presentation: SharedSystemItemTrialPresentation
+                if await sharedSystemItemTrialWriter.hasRecoveryReceipt(for: target) {
+                    presentation = .recoveryRequired
+                } else if let snapshot = try? await sharedSystemItemTrialWriter.snapshot(target) {
+                    presentation = snapshot.effectiveVisible ? .ready : .hidden
+                } else {
+                    presentation = .unavailable(String(describing: error))
+                }
+                editorWindowController.setSharedSystemItemTrial(
+                    target, presentation: presentation
+                )
+                editorWindowController.setStatus(
+                    "\(target.displayName) hide did not verify. Its safe state was re-read after the bounded rollback: \(error)",
+                    isError: true
+                )
+            }
+        }
+    }
+
+    private func restoreSharedSystemItem(_ target: SharedSystemItemTrialTarget) {
+        editorWindowController.setSharedSystemItemTrial(target, presentation: .busy)
+        editorWindowController.setStatus(
+            "Restoring the exact saved \(target.displayName) state…",
+            isError: false
+        )
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await sharedSystemItemTrialWriter.restore(target)
+                editorWindowController.setSharedSystemItemTrial(target, presentation: .ready)
+                editorWindowController.setStatus(
+                    "\(target.displayName) exact preference state was restored and verified once.",
+                    isError: false
+                )
+            } catch {
+                editorWindowController.setSharedSystemItemTrial(
+                    target, presentation: .recoveryRequired
+                )
+                editorWindowController.setStatus(
+                    "\(target.displayName) restore stopped without overwriting newer settings: \(error)",
+                    isError: true
+                )
+            }
+        }
+    }
+    #endif
+
     private func updateLaunchAtLoginPresentation(failureMessage: String? = nil) {
         let availability: LaunchAtLoginAvailability
         switch SMAppService.mainApp.status {
@@ -1601,9 +1926,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appropriateFor: nil,
             create: !isReadOnlyValidation
         )
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        let policyDirectoryName = "ManualSystemItemTrial"
+        #else
+        let policyDirectoryName = "PersistentPolicyPrototype"
+        #endif
         let directory = applicationSupport
             .appendingPathComponent("Blenny", isDirectory: true)
-            .appendingPathComponent("PersistentPolicyPrototype", isDirectory: true)
+            .appendingPathComponent(policyDirectoryName, isDirectory: true)
         return try PersistentBundlePolicyStore(
             policyURL: directory.appendingPathComponent("bundle-policies.json"),
             backupURL: directory.appendingPathComponent(
@@ -1616,7 +1946,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func initialPolicy(
         blennyBundleIdentifier: String
     ) throws -> PersistentBundlePolicyDocument {
-        try PersistentBundlePolicyDocument(
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        // Import intent read-only; no test action can write the production
+        // policy or its recovery backup. The trial begins without an assertion.
+        let applicationSupport = try FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask,
+            appropriateFor: nil, create: false
+        )
+        let sourceURL = applicationSupport
+            .appendingPathComponent("Blenny/PersistentPolicyPrototype/bundle-policies.json")
+        if FileManager.default.fileExists(atPath: sourceURL.path) {
+            let original = try JSONDecoder().decode(
+                PersistentBundlePolicyDocument.self, from: Data(contentsOf: sourceURL)
+            )
+            return try original.validated(forBlennyBundleIdentifier: blennyBundleIdentifier)
+                .settingManagementEnabled(false)
+        }
+        #endif
+        return try PersistentBundlePolicyDocument(
             managementEnabled: false,
             policies: [
                 .init(bundleIdentifier: blennyBundleIdentifier, policy: .visible)
@@ -1659,6 +2006,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 bundleIdentifier: application.bundleIdentifier
             )
         }
+    }
+
+    private func requiresApplicationLaunchAssessment(_ application: NSRunningApplication) -> Bool {
+        ManagementLifecyclePolicy.requiresLaunchAssessment(
+            bundleIdentifier: application.bundleIdentifier,
+            acceptedBundleIdentifiers: Set(editorModel?.acceptedPolicyScope.approvedBundleIdentifiers ?? []),
+            allowedBundleIdentifiers: Set(activeBaselinePlan?.allowedBundleIdentifiers ?? []),
+            blennyBundleIdentifier: Bundle.main.bundleIdentifier ?? "xyz.fi5h.blenny"
+        )
     }
 
     private func scanPriority(for application: NSRunningApplication) -> Int {

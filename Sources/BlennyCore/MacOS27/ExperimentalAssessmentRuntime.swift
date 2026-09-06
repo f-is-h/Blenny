@@ -1,4 +1,3 @@
-#if DEBUG
 import Darwin
 import Foundation
 import ObjectiveC.runtime
@@ -26,9 +25,17 @@ public final class ExperimentalMacOS27AssessmentFactory:
     RevealAssertionCandidateFactory,
     @unchecked Sendable
 {
-    public static let supportedOperatingSystemBuild = "26A5416b"
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    public static let supportedOperatingSystemBuilds: Set<String> = [
+        "26A5416b", "26A5425a",
+    ]
     public static let compatibilityFingerprint =
-        "debug-arm64-macos27-26A5416b-assessment-contract-v1"
+        "arm64-macos27-debug-26A5416b-26A5425a-assessment-contract-v3"
+    #else
+    public static let supportedOperatingSystemBuilds: Set<String> = ["26A5416b"]
+    public static let compatibilityFingerprint =
+        "arm64-macos27-release-26A5416b-assessment-contract-v2"
+    #endif
     private static let frameworkPath =
         "/System/Library/PrivateFrameworks/MenuBarClientCore.framework/MenuBarClientCore"
 
@@ -48,9 +55,9 @@ public final class ExperimentalMacOS27AssessmentFactory:
             )
         }
         let operatingSystemBuild = Self.operatingSystemBuild() ?? "unavailable"
-        guard operatingSystemBuild == Self.supportedOperatingSystemBuild else {
+        guard Self.supportedOperatingSystemBuilds.contains(operatingSystemBuild) else {
             throw ExperimentalAssessmentRuntimeError.unsupportedOperatingSystemBuild(
-                expected: Self.supportedOperatingSystemBuild,
+                expected: Self.supportedOperatingSystemBuilds.sorted().joined(separator: " or "),
                 actual: operatingSystemBuild
             )
         }
@@ -407,4 +414,3 @@ private typealias AssertionInvalidator = @convention(c) (
     AnyObject,
     Selector
 ) -> Void
-#endif

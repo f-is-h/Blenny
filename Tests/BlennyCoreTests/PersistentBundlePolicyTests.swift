@@ -10,7 +10,7 @@ struct PersistentBundlePolicyTests {
     private let revealable = "xyz.fi5h.Usage4Claude"
     private let hidden = "pl.maketheweb.cleanshotx"
 
-    @Test("Document encoding is deterministic and preserves three policies")
+    @Test("Document encoding is deterministic and preserves app and Bluetooth policy")
     func deterministicRoundTrip() throws {
         let document = try makeDocument()
         let encoder = JSONEncoder()
@@ -22,7 +22,8 @@ struct PersistentBundlePolicyTests {
         )
 
         #expect(decoded == document)
-        #expect(decoded.schemaVersion == 2)
+        #expect(decoded.schemaVersion == 3)
+        #expect(decoded.bluetoothPolicy == .visible)
         #expect(decoded.policies.map(\.bundleIdentifier) == [
             hidden,
             blenny,
@@ -33,7 +34,7 @@ struct PersistentBundlePolicyTests {
         #expect(!encodedText.contains("\"policy\":\"pinned\""))
     }
 
-    @Test("Schema 1 policy terminology migrates into the unified schema 2 model")
+    @Test("Schema 1 policy terminology migrates with safe visible Bluetooth intent")
     func legacyTerminologyMigration() throws {
         let json = """
         {
@@ -50,12 +51,56 @@ struct PersistentBundlePolicyTests {
             from: Data(json.utf8)
         )
 
-        #expect(document.schemaVersion == 2)
+        #expect(document.schemaVersion == 3)
+        #expect(document.bluetoothPolicy == .visible)
         #expect(document.policies.first?.policy == .visible)
         let encoded = try JSONEncoder().encode(document)
         let encodedText = try #require(String(data: encoded, encoding: .utf8))
         #expect(encodedText.contains("\"policy\":\"visible\""))
         #expect(!encodedText.contains("\"policy\":\"pinned\""))
+    }
+
+    @Test("Schema 2 policy migrates with safe visible Bluetooth intent")
+    func schemaTwoMigration() throws {
+        let json = """
+        {
+          "schemaVersion": 2,
+          "managementEnabled": true,
+          "policies": [
+            {"bundleIdentifier": "xyz.fi5h.blenny", "policy": "visible"}
+          ]
+        }
+        """
+        let document = try JSONDecoder().decode(
+            PersistentBundlePolicyDocument.self,
+            from: Data(json.utf8)
+        )
+        #expect(document.schemaVersion == 3)
+        #expect(document.bluetoothPolicy == .visible)
+    }
+
+    @Test("Persistent system-item three-state intent round-trips canonically")
+    func persistentSystemItemRoundTrip() throws {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        let policies = Dictionary(uniqueKeysWithValues:
+            zip(
+                SharedSystemItemTrialTarget.allCases.map(\.observationIdentifier),
+                [MenuBarBundlePolicy.visible, .revealable, .hidden]
+            )
+        )
+        let document = try PersistentBundlePolicyDocument(
+            managementEnabled: true,
+            policies: [.init(bundleIdentifier: blenny, policy: .visible)],
+            systemItemPolicies: policies
+        )
+        let decoded = try JSONDecoder().decode(
+            PersistentBundlePolicyDocument.self,
+            from: JSONEncoder().encode(document)
+        )
+        #expect(decoded == document)
+        #expect(decoded.schemaVersion == 4)
+        #expect(decoded.systemItemPolicies == policies)
+        #endif
     }
 
     @Test("Invalid and case-colliding bundle identifiers fail closed")
@@ -190,6 +235,51 @@ struct PersistentBundlePolicyTests {
                 .count == 1
         )
     }
+
+    #if DEBUG
+    @Test("Manual system-item trial disable preserves its recovery backup exactly")
+    func manualTrialDisablePreservesBackup() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BlennyManualTrial-(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let policyURL = directory.appendingPathComponent("bundle-policies.json")
+        let backupURL = directory.appendingPathComponent("previous.blenny-backup.json")
+        let store = try PersistentBundlePolicyStore(policyURL: policyURL, backupURL: backupURL)
+        let enabled = try PersistentBundlePolicyDocument(
+            managementEnabled: true,
+            policies: [.init(bundleIdentifier: blenny, policy: .visible)],
+            systemItemPolicies: ["com.apple.menuextra.sound": .hidden]
+        )
+        let previous = try enabled.settingManagementEnabled(false)
+        try await store.save(previous)
+        try await store.save(enabled)
+        let backupBytes = try Data(contentsOf: backupURL)
+
+        let disabled = try #require(
+            try await store.disableManualTrialManagementPreservingBackup()
+        )
+        #expect(!disabled.managementEnabled)
+        #expect(disabled.systemItemPolicies == enabled.systemItemPolicies)
+        #expect(try await store.load() == disabled)
+        #expect(try Data(contentsOf: backupURL) == backupBytes)
+        let policyBytes = try Data(contentsOf: policyURL)
+        #expect(
+            try await store.disableManualTrialManagementPreservingBackup() == disabled
+        )
+        #expect(try Data(contentsOf: policyURL) == policyBytes)
+        let restored = try #require(try await store.restoreBackup())
+        #expect(restored == previous)
+        #expect(restored.systemItemPolicies == previous.systemItemPolicies)
+        #expect(try await store.load() == previous)
+
+        let readOnly = try PersistentBundlePolicyStore(
+            policyURL: policyURL, backupURL: backupURL, readOnly: true
+        )
+        await #expect(throws: PersistentBundlePolicyStoreError.readOnlyStore) {
+            try await readOnly.disableManualTrialManagementPreservingBackup()
+        }
+    }
+    #endif
 
     @Test("Store migration updates accepted policy and backup once without rotating recovery")
     func storeBundleIdentifierMigration() async throws {

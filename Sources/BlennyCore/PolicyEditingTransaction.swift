@@ -16,6 +16,7 @@ public protocol PolicyAssertionWriting: Sendable {
     func restoreAndStop() async
     func connectionInvalidated() async
     func activePlanSnapshot() async -> RevealAllowlistPlan?
+    func finalizeCommittedPlan(_ plan: RevealAllowlistPlan) async
 }
 
 public extension PolicyAssertionWriting {
@@ -26,6 +27,8 @@ public extension PolicyAssertionWriting {
     func verifyActivePlan(_ expected: RevealAllowlistPlan) async throws -> Bool {
         await activePlanSnapshot() == expected
     }
+
+    func finalizeCommittedPlan(_ plan: RevealAllowlistPlan) async {}
 }
 
 extension RevealAssertionWriter: PolicyAssertionWriting {}
@@ -191,6 +194,7 @@ public actor PolicyEditingTransactionCoordinator {
 
         do {
             try await persist(prepared)
+            await writer.finalizeCommittedPlan(newBaseline)
             return .committed(prepared.newPolicy)
         } catch {
             if prepared.oldPolicy.managementEnabled {
@@ -586,6 +590,9 @@ public actor PolicyEditingCore {
         guard (try? backup.previousPolicy.validated(forBlennyBundleIdentifier: blennyBundleIdentifier)) != nil,
               !backup.previousPolicy.policies.contains(where: {
                   $0.bundleIdentifier.lowercased().hasPrefix("com.apple.")
+                      && !ExperimentalAppleBundlePolicyCatalog.contains(
+                          $0.bundleIdentifier
+                      )
               }) else {
             throw PolicyEditingCoreError.previousPolicyBackupIncompatible
         }

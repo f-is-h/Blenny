@@ -51,19 +51,31 @@ public enum RevealSessionPresentation: String, Sendable {
     case revealed
 }
 
+public enum PersistentSystemItemPresentation: String, Codable, Equatable, Sendable {
+    /// Restore the exact pre-management value and relinquish the receipt after commit.
+    case restored
+    /// Restore the exact pre-management value temporarily while retaining the receipt.
+    case revealed
+    /// Apply the item-scoped hidden value and retain the receipt.
+    case hidden
+}
+
 public struct RevealAllowlistPlan: Equatable, Sendable {
     public let presentation: RevealSessionPresentation
     public let allowedSystemItems: [Int]
     public let allowedBundleIdentifiers: [String]
+    public let persistentSystemItems: [String: PersistentSystemItemPresentation]
 
     public init(
         presentation: RevealSessionPresentation,
         allowedSystemItems: [Int],
-        allowedBundleIdentifiers: [String]
+        allowedBundleIdentifiers: [String],
+        persistentSystemItems: [String: PersistentSystemItemPresentation] = [:]
     ) {
         self.presentation = presentation
         self.allowedSystemItems = allowedSystemItems
         self.allowedBundleIdentifiers = allowedBundleIdentifiers
+        self.persistentSystemItems = persistentSystemItems
     }
 
     public var fingerprint: String {
@@ -71,6 +83,7 @@ public struct RevealAllowlistPlan: Equatable, Sendable {
             "presentation=\(presentation.rawValue)",
             "system=\(allowedSystemItems.sorted().map(String.init).joined(separator: ","))",
             "bundles=\(allowedBundleIdentifiers.sorted().joined(separator: "\n"))",
+            "persistent=\(persistentSystemItems.keys.sorted().map { "\($0)|\(persistentSystemItems[$0]!.rawValue)" }.joined(separator: "\n"))",
         ].joined(separator: "\n")
         return Self.sha256(canonical)
     }
@@ -88,6 +101,7 @@ public struct RevealAllowlistPlan: Equatable, Sendable {
         let canonical = [
             "presentation=\(presentation.rawValue)",
             "system=\(allowedSystemItems.sorted().map(String.init).joined(separator: ","))",
+            "persistent=\(persistentSystemItems.keys.sorted().map { "\($0)|\(persistentSystemItems[$0]!.rawValue)" }.joined(separator: "\n"))",
             "authorized=\(authorizedStates.joined(separator: "\n"))",
         ].joined(separator: "\n")
         return Self.sha256(canonical)
@@ -116,6 +130,7 @@ public struct RevealAllowlistPlan: Equatable, Sendable {
         let canonical = [
             "presentation=\(presentation.rawValue)",
             "system=\(allowedSystemItems.sorted().map(String.init).joined(separator: ","))",
+            "persistent=\(persistentSystemItems.keys.sorted().map { "\($0)|\(persistentSystemItems[$0]!.rawValue)" }.joined(separator: "\n"))",
             "managed=\(managedStates.joined(separator: "\n"))",
         ].joined(separator: "\n")
         return Self.sha256(canonical)
@@ -130,16 +145,21 @@ public struct RevealAllowlistPlan: Equatable, Sendable {
 
 public enum RevealAllowlistPlannerError: Error, Equatable, Sendable {
     case invalidBlennyBundleIdentifier
+    case invalidSystemItemPolicy(String)
+    case systemItemPoliciesUnavailable
 }
 
 public enum RevealAllowlistPlanner {
     public static let allKnownSystemItems = Array(0 ..< 9)
+    public static let bluetoothSystemItem = 1
 
     public static func plan(
         presentation: RevealSessionPresentation,
         assignments: BundlePolicyAssignments,
         observedRunningBundleIdentifiers: Set<String>,
-        blennyBundleIdentifier: String
+        blennyBundleIdentifier: String,
+        bluetoothPolicy: MenuBarBundlePolicy = .visible,
+        systemItemPolicies: [String: MenuBarBundlePolicy] = [:]
     ) throws -> RevealAllowlistPlan {
         guard !blennyBundleIdentifier
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -164,10 +184,61 @@ public enum RevealAllowlistPlanner {
         // user policies; this final insertion protects the system safety invariant.
         allowed.insert(blennyBundleIdentifier)
 
+        var allowedSystemItems = allKnownSystemItems
+        let bluetoothAllowed: Bool
+        switch (presentation, bluetoothPolicy) {
+        case (_, .visible), (.revealed, .revealable):
+            bluetoothAllowed = true
+        case (.baseline, .revealable), (_, .hidden):
+            bluetoothAllowed = false
+        }
+        if !bluetoothAllowed {
+            allowedSystemItems.removeAll { $0 == bluetoothSystemItem }
+        }
+
+        var persistentSystemItems: [String: PersistentSystemItemPresentation] = [:]
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        for identifier in systemItemPolicies.keys.sorted() {
+            guard identifier != "com.apple.menuextra.bluetooth",
+                  let policy = systemItemPolicies[identifier] else {
+                throw RevealAllowlistPlannerError.invalidSystemItemPolicy(identifier)
+            }
+            if PersistentSystemItemPolicyCatalog.controllableItem(for: identifier) != nil {
+                switch (presentation, policy) {
+                case (_, .visible):
+                    persistentSystemItems[identifier] = .restored
+                case (.revealed, .revealable):
+                    persistentSystemItems[identifier] = .revealed
+                case (.baseline, .revealable), (_, .hidden):
+                    persistentSystemItems[identifier] = .hidden
+                }
+                continue
+            }
+            guard let item = SystemItemPolicyCatalog.controllableItem(for: identifier) else {
+                throw RevealAllowlistPlannerError.invalidSystemItemPolicy(identifier)
+            }
+            let itemAllowed: Bool
+            switch (presentation, policy) {
+            case (_, .visible), (.revealed, .revealable):
+                itemAllowed = true
+            case (.baseline, .revealable), (_, .hidden):
+                itemAllowed = false
+            }
+            if !itemAllowed {
+                allowedSystemItems.removeAll { $0 == item.rawValue }
+            }
+        }
+        #else
+        guard systemItemPolicies.isEmpty else {
+            throw RevealAllowlistPlannerError.systemItemPoliciesUnavailable
+        }
+        #endif
+
         return RevealAllowlistPlan(
             presentation: presentation,
-            allowedSystemItems: allKnownSystemItems,
-            allowedBundleIdentifiers: allowed.sorted()
+            allowedSystemItems: allowedSystemItems,
+            allowedBundleIdentifiers: allowed.sorted(),
+            persistentSystemItems: persistentSystemItems
         )
     }
 }

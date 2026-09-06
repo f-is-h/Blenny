@@ -554,7 +554,7 @@ public final class NativeOverflowObserver {
                 in: root,
                 withinDeadline: { ContinuousClock.now < deadline },
                 sameElement: { CFEqual($0, $1) },
-                describe: { [self] element in
+                describe: { element in
                     let role = try copyNativeDiscoveryString(element, attribute: kAXRoleAttribute as CFString)
                     guard AccessibilityTraversalPolicy.shouldInclude(role: role, in: .extrasMenuBar) else {
                         return .init(role: role, isOverflowControl: false)

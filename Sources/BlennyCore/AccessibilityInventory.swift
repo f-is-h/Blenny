@@ -24,6 +24,7 @@ public actor AccessibilityInventory {
     public func capture(
         applications: [RunningApplicationDescriptor],
         accessibilityTrusted: Bool,
+        includeMenuBarAgentPresentationRoots: Bool = true,
         environment: RuntimeEnvironment = .current()
     ) -> DiagnosticReport {
         let startedAt = DispatchTime.now().uptimeNanoseconds
@@ -113,7 +114,7 @@ public actor AccessibilityInventory {
                 observationCount: observations.count - observationStart
             ))
 
-            guard isMenuBarAgent else { continue }
+            guard isMenuBarAgent, includeMenuBarAgentPresentationRoots else { continue }
 
             let childResult = copyAttribute(applicationElement, name: kAXChildrenAttribute as CFString)
             if childResult.error == .success {

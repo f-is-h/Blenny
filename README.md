@@ -1,8 +1,127 @@
 # Blenny
 
+Development follow-up (2026-09-04): accepted application launch/quit no longer
+invalidates unchanged bundle policy in the local implementation. Confirmed
+cleanup is a neutral pause rather than a danger banner. Both test/build
+configurations pass; its installed no-writer dry-run also passes. Live launch
+latency and visual reflow remain unmeasured. The owner
+has now authorized additions-only pass-through updates for newly launched bundles.
+The local implementation coalesces those events for 250 ms and reuses the existing
+serial writer without changing Hidden/Revealable policy or system-item allowances.
+Known identities do not write; no polling, retry loop, or full icon refresh occurs.
+Unidentified ownership and actual writer failures still require safe handling. See the
+[0.8.0 spike](docs/TECH_SPIKE_0.8.0.md) for current verification boundaries.
+
+Debug trial follow-up (2026-09-05): Weather and Input Menu are now exposed as
+exact owning-bundle candidates in the manual Board. This exception is limited to
+`com.apple.weather.menu` and `com.apple.TextInputMenuAgent`; all other Apple
+bundles remain rejected. The machine updated to macOS build `26A5425a`, so the
+new build was admitted only to Debug after a read-only six-method encoding check,
+unchanged framework UUID and in-memory configuration round trip. Release retains
+the previously validated `26A5416b` gate. The installed dry-run observed both
+owners and prepared six policy plans without creating a writer or assertion.
+The owner then confirmed that both items hide and reappear normally. Their
+application-level control identity no longer determines their artwork: the exact
+Apple owners now use semantic monochrome Weather and Input Menu symbols instead
+of Weather's full-color application icon or the generic fallback.
+
+Siri and Time Machine are not safe owning-bundle candidates: a current bounded
+AX sample places both in the shared `com.apple.systemuiserver` host, so excluding
+that bundle would hide multiple unrelated items. Read-only current-build evidence
+instead identifies per-item preference routes. Siri uses the exact
+`com.apple.Siri` `StatusMenuVisible`/stash pair and a distributed notification;
+Time Machine is represented by one exact path in `com.apple.systemuiserver`'s
+ordered `menuExtras` array. Pure snapshot/inverse models pass in unoptimized and
+optimized builds. A later Debug-only manual panel implements the exact per-item
+route with one serial writer, mode-0600 recovery receipts, one verification and
+compare-before-restore. At the owner's request, an optimized Release-configuration
+trial flavor is used for manual validation. The current implementation promotes
+Siri, Time Machine and Now Playing from separate buttons into the ordinary
+Visible / Revealable / Hidden Draft flow. Their item-scoped persistent writer is
+coordinated with the process-owned assertion writer: Revealable hides at baseline,
+restores the exact captured visible state while expanded, and hides again when
+collapsed. Stop, Quit or invalidation restores every exact receipt. Clock,
+native overflow, unknown identities and incomplete capability descriptors remain
+read-only. Normal Release remains unchanged: Bluetooth alone is promoted, and
+the wider trial route is stripped.
+
+The final optimized trial executable is installed at `/Applications/Blenny.app`
+with SHA-256 `8795e401166f8efb5ab7e19a19d25aeff420340db1fe4e49f07ee55262e37768`.
+It starts stopped, creates no recovery receipt and leaves the isolated and
+production policy/backup files plus Siri, Time Machine and Now Playing preference
+baselines unchanged. No system-item Apply occurs on startup.
+The first attended Siri Revealable Apply was rolled back by an older Time Machine
+receipt whose target-owned preferences normalized again after the original write.
+The restore guard now accepts only descriptor-proven hidden normalization: Siri
+and Now Playing remain exact, while Time Machine must preserve every unrelated
+menu-extra entry and order. Unknown drift is still rejected. The corrected trial
+was installed only after its one-shot read-only PREVIEW validated the sole Time
+Machine receipt. The same serial writer restored the exact path, visibility and
+position baseline once and removed the receipt; Siri and all policy/backup hashes
+remained unchanged. The owner later confirmed the hidden state for Siri, Time
+Machine and Now Playing and manually restored all three. The final read-only
+comparison found no receipt, an absent Now Playing key, the exact Time Machine
+path, `VisibleCC = true` and preferred position 86. Ordinary Release still strips
+this trial recovery route.
+
 Blenny is a minimal, native menu bar organizer designed exclusively for macOS 27 and later.
 
 Project website: <https://blenny.fi5h.xyz>. The application uses the stable reverse-DNS bundle identifier `xyz.fi5h.blenny`.
+
+Version `0.8.0` completed the bounded Apple system-item visibility feasibility
+spike and promotes only the verified Bluetooth path. Read-only runtime inspection
+maps Bluetooth to private raw
+value `1` and AX identity `com.apple.menuextra.bluetooth`. Bluetooth is the only
+promoted target in Release. At the owner's request, the Debug Board also exposes
+manual Visible / Revealable / Hidden controls for Battery, Display, Keyboard
+Brightness, Sound, Wi-Fi, Screen Mirroring and Control Center when observed.
+These are experimental controls, not ordinary Release promotion.
+Clock and native overflow stay read-only. In the optimized owner trial, Now
+Playing, Siri and Time Machine use exact item-scoped routes, while Weather and
+Input Menu use their dedicated owners. All expose the same three policy states;
+this is not ordinary Release promotion.
+
+In the optimized owner trial, Weather and Input Menu are visually grouped with
+macOS items and use the natural-aspect system-symbol renderer, although their
+writer identity remains the exact owning bundle. After owner validation, Siri
+and Time Machine use the ordinary Board lanes while remaining outside bundle
+assertion policy. Now Playing uses a third capability that preserves every
+non-visibility bit in the current-host packed preference and restores key absence
+exactly. The
+footer's unreadable count can be opened to inspect exact bundle IDs and AX results;
+these failures are not treated as missing or manageable menu-bar icons.
+
+Debug manual-test policy is isolated from the ordinary policy and recovery
+backup. Each launch starts stopped; Apply/Resume is an explicit owner action.
+There is no timed trial rollback: the owner chooses Visible, Stop or Quit.
+Stop/Quit releases Blenny's process-owned restrictions without changing system
+preferences. Recovery rows remain available for hidden experimental items.
+
+Installed Bluetooth PREVIEW receipts used only
+MenuBarAgent's canonical `AXExtrasMenuBar` root and bound AX identities, semantic
+scoped preferences, exact file hashes and a non-expanding application allow-list.
+Owner-observed validation proved that excluding Bluetooth raw value `1` hides
+Bluetooth without changing Wi-Fi, Clock or Control Center. The native overflow
+control disappeared only while the active application's menu bar fit and returned
+when another application activated; the owner confirmed this as normal macOS
+reflow rather than loss of the protected control. Independent RECOVER matched AX
+state, semantic preferences and exact file hashes. Bluetooth therefore joins the
+formal Visible / Revealable / Hidden policy in Release. All other Apple items
+remain read-only in Release.
+The installed follow-up confirmed normal Bluetooth adjustment. Blenny presents
+Bluetooth with AppKit's native Bluetooth template and Siri with macOS 27's
+dedicated `siri` symbol; these are presentation-only corrections.
+See [the 0.8.0 spike](docs/TECH_SPIKE_0.8.0.md).
+
+The same milestone corrects an over-strict startup preflight. A previously
+approved bundle may be dormant or temporarily lack an ownership observation
+without forcing management inactive; its exact bundle-level policy remains in the
+frozen plan. Multiple processes for the same approved bundle consolidate at bundle
+scope. Unknown ownership or an unknown bundle still fails closed. A bounded installed run reproduced
+the old missing-Usage4Claude case, reached active management and restored on Quit.
+
+The distribution prototype moves unchanged to `0.9.0`, and the first public
+release-candidate line moves to `0.10.x`.
 
 Version `0.7.0` closes the real menu-bar ordering investigation with a deliberately
 manual product boundary. Blenny does not reorder third-party or Apple items. When

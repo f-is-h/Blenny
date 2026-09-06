@@ -71,6 +71,25 @@ struct PolicyEditingCoreTests {
         ])
     }
 
+    @Test("Bluetooth intent is bound into diff, dry-run and exact plans")
+    func bluetoothPolicyIsReviewed() throws {
+        let old = try document(enabled: true, revealable: usage, hidden: cleanShot)
+        let draft = BundlePolicyDraft(acceptedPolicy: old).assigningBluetooth(to: .hidden)
+        let prepared = try PolicyDryRunner.prepare(
+            oldPolicy: old,
+            draft: draft,
+            managementEnabled: true,
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
+            scope: approvedScope,
+            blennyBundleIdentifier: blenny
+        )
+        #expect(prepared.0.text.contains("MOVE Bluetooth visible -> hidden"))
+        #expect(prepared.0.newBaselinePlan?.allowedSystemItems == [0, 2, 3, 4, 5, 6, 7, 8])
+        #expect(prepared.0.newRevealPlan?.allowedSystemItems == [0, 2, 3, 4, 5, 6, 7, 8])
+        #expect(prepared.1?.newPolicy.bluetoothPolicy == .hidden)
+    }
+
     @Test("Dry-run text is stable and cannot create a writer, factory, or assertion")
     func stableDryRunHasNoMutationObjects() async throws {
         let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)
@@ -209,8 +228,8 @@ struct PolicyEditingCoreTests {
         #expect(result.report.issues.contains(.missingVisibleBlenny(blenny)))
     }
 
-    @Test("An approved bundle missing from current ownership observation is explicit")
-    func missingCurrentOwnershipFailsClosed() throws {
+    @Test("Approved running bundles tolerate a missing ownership observation")
+    func missingCurrentOwnershipRemainsApplicable() throws {
         let old = try document(enabled: false, revealable: usage, hidden: cleanShot)
         let candidates = PolicyCandidateInventory(observations: observations(
             order: [blenny, usage]
@@ -220,17 +239,51 @@ struct PolicyEditingCoreTests {
             draft: BundlePolicyDraft(acceptedPolicy: old),
             managementEnabled: true,
             candidates: candidates,
-            observedRunningBundleIdentifiers: [blenny, usage],
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot],
             scope: approvedScope,
             blennyBundleIdentifier: blenny
         )
 
-        #expect(result.prepared == nil)
-        #expect(result.report.issues.contains(.missingCurrentOwnership(cleanShot)))
+        #expect(result.prepared != nil)
+        #expect(result.report.issues.isEmpty)
     }
 
-    @Test("Unknown ownership and multi-process ambiguity fail closed")
-    func ownershipIssuesFailClosed() throws {
+    @Test("Approved dormant bundles keep their exact policy without live ownership")
+    func dormantApprovedBundlesRemainApplicable() throws {
+        let revealable = "com.example.Revealable"
+        let accepted = try PersistentBundlePolicyDocument(
+            managementEnabled: true,
+            policies: [
+                .init(bundleIdentifier: blenny, policy: .visible),
+                .init(bundleIdentifier: usage, policy: .visible),
+                .init(bundleIdentifier: revealable, policy: .revealable),
+                .init(bundleIdentifier: cleanShot, policy: .hidden),
+            ]
+        )
+        let result = try PolicyDryRunner.prepare(
+            oldPolicy: accepted,
+            draft: BundlePolicyDraft(acceptedPolicy: accepted),
+            managementEnabled: true,
+            candidates: PolicyCandidateInventory(observations: observations(order: [blenny])),
+            observedRunningBundleIdentifiers: [blenny],
+            scope: PolicyValidationScope(approvedBundleIdentifiers: [
+                blenny, usage, revealable, cleanShot,
+            ]),
+            blennyBundleIdentifier: blenny
+        )
+
+        #expect(result.prepared != nil)
+        #expect(result.report.issues.isEmpty)
+        #expect(result.report.newBaselinePlan?.allowedBundleIdentifiers.contains(usage) == true)
+        #expect(result.report.newBaselinePlan?.allowedBundleIdentifiers.contains(revealable) == false)
+        #expect(result.report.newBaselinePlan?.allowedBundleIdentifiers.contains(cleanShot) == false)
+        #expect(result.report.newRevealPlan?.allowedBundleIdentifiers.contains(usage) == true)
+        #expect(result.report.newRevealPlan?.allowedBundleIdentifiers.contains(revealable) == true)
+        #expect(result.report.newRevealPlan?.allowedBundleIdentifiers.contains(cleanShot) == false)
+    }
+
+    @Test("Unknown ownership fails closed while multiple PIDs consolidate")
+    func ownershipIssuesAreScopedToRealAmbiguity() throws {
         let observations = observations(order: [blenny, usage, cleanShot]) + [
             MenuBarPolicyOwnershipObservation(
                 bundleIdentifier: nil,
@@ -261,7 +314,10 @@ struct PolicyEditingCoreTests {
         #expect(result.prepared == nil)
         let issueText = result.report.issues.map(\.description).joined(separator: "\n")
         #expect(issueText.contains("unknown bundle ownership"))
-        #expect(issueText.contains("ambiguous owner PIDs [20, 88]"))
+        #expect(!issueText.contains("ambiguous owner PIDs"))
+        #expect(inventory.candidates.first {
+            $0.bundleIdentifier == usage
+        }?.processIdentifiers == [20, 88])
     }
 
     @Test("Blenny stays visible and Hidden stays excluded from ordinary reveal")
@@ -401,6 +457,52 @@ struct PolicyEditingCoreTests {
 
         #expect(result.prepared == nil)
         #expect(result.report.issues.contains(.mutableAppleSystemBundle(apple)))
+    }
+
+    @Test("Exact experimental Apple owners are mutable only in Debug")
+    func experimentalAppleOwnersAreDebugOnly() throws {
+        let weather = "com.apple.weather.menu"
+        let inputMenu = "com.apple.TextInputMenuAgent"
+        let candidates = PolicyCandidateInventory(observations: [
+            MenuBarPolicyOwnershipObservation(
+                bundleIdentifier: blenny, processIdentifier: 10, menuBarItemCount: 1
+            ),
+            MenuBarPolicyOwnershipObservation(
+                bundleIdentifier: weather, processIdentifier: 20, menuBarItemCount: 1
+            ),
+            MenuBarPolicyOwnershipObservation(
+                bundleIdentifier: inputMenu, processIdentifier: 30, menuBarItemCount: 1
+            ),
+        ])
+        let result = try PolicyDryRunner.prepare(
+            oldPolicy: try PersistentBundlePolicyDocument(
+                managementEnabled: false,
+                policies: [.init(bundleIdentifier: blenny, policy: .visible)]
+            ),
+            draft: BundlePolicyDraft(
+                visible: [blenny], revealable: [inputMenu], hidden: [weather]
+            ),
+            managementEnabled: true,
+            candidates: candidates,
+            observedRunningBundleIdentifiers: [blenny, weather, inputMenu],
+            scope: PolicyValidationScope(
+                approvedBundleIdentifiers: [blenny, weather, inputMenu]
+            ),
+            blennyBundleIdentifier: blenny
+        )
+
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #expect(result.prepared != nil)
+        #expect(result.report.issues.isEmpty)
+        #expect(result.report.newBaselinePlan?.allowedBundleIdentifiers == [blenny])
+        #expect(result.report.newRevealPlan?.allowedBundleIdentifiers == [
+            inputMenu, blenny,
+        ])
+        #else
+        #expect(result.prepared == nil)
+        #expect(result.report.issues.contains(.mutableAppleSystemBundle(weather)))
+        #expect(result.report.issues.contains(.mutableAppleSystemBundle(inputMenu)))
+        #endif
     }
 
     private var approvedScope: PolicyValidationScope {

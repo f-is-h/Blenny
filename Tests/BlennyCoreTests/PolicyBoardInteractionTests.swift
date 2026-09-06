@@ -45,6 +45,90 @@ struct PolicyBoardInteractionTests {
         #expect(editor.effectivePolicy(for: revealable) == .hidden)
     }
 
+    @Test("Bluetooth uses the same bounded drag path and selects the system item")
+    func bluetoothDragPath() throws {
+        let generation = UUID()
+        let token = UUID()
+        var editor = try makeEditor()
+        var coordinator = PolicyDraftAssignmentCoordinator(
+            candidateGeneration: generation
+        )
+        let bluetooth = SystemMenuBarItemObservation.bluetoothIdentifier
+        let drag = PolicyDragPayload(
+            bundleIdentifier: bluetooth,
+            sourcePolicy: .visible,
+            candidateGeneration: generation,
+            dragToken: token
+        )
+        #expect(coordinator.assign(
+            payload: drag, destination: .hidden, editor: &editor
+        ) == .changed)
+        #expect(editor.effectiveSystemItemPolicy(for: bluetooth) == .hidden)
+
+        var interaction = PolicyBoardInteractionState()
+        interaction.completeDrop(
+            payload: drag, destination: .hidden, outcome: .changed
+        )
+        #expect(interaction.selectedItem == .systemItem(bluetooth))
+    }
+
+    @Test("Persistent system items use the ordinary three-state drag path")
+    func persistentSystemItemDragPath() throws {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        let generation = UUID()
+        var editor = try makeEditor()
+        var coordinator = PolicyDraftAssignmentCoordinator(
+            candidateGeneration: generation
+        )
+        for target in SharedSystemItemTrialTarget.allCases {
+            let identifier = target.observationIdentifier
+            let drag = PolicyDragPayload(
+                bundleIdentifier: identifier,
+                sourcePolicy: .visible,
+                candidateGeneration: generation
+            )
+            #expect(coordinator.assign(
+                payload: drag, destination: .revealable, editor: &editor
+            ) == .changed)
+            #expect(editor.effectiveSystemItemPolicy(for: identifier) == .revealable)
+
+            var interaction = PolicyBoardInteractionState()
+            interaction.completeDrop(
+                payload: drag, destination: .revealable, outcome: .changed
+            )
+            #expect(interaction.selectedItem == .systemItem(identifier))
+        }
+        #endif
+    }
+
+    @Test("A catalog system item uses the same drag path without label matching")
+    func genericSystemItemDragPath() throws {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        let generation = UUID()
+        let wifi = "com.apple.menuextra.wifi"
+        var editor = try makeEditor(systemItems: [
+            SystemMenuBarItemObservation(
+                observationIdentifier: wifi,
+                ownerBundleIdentifier: "com.apple.MenuBarAgent",
+                displayName: "not used for identity",
+                observationCount: 1
+            ),
+        ])
+        var coordinator = PolicyDraftAssignmentCoordinator(
+            candidateGeneration: generation
+        )
+        let drag = PolicyDragPayload(
+            bundleIdentifier: wifi,
+            sourcePolicy: .visible,
+            candidateGeneration: generation
+        )
+        #expect(coordinator.assign(
+            payload: drag, destination: .revealable, editor: &editor
+        ) == .changed)
+        #expect(editor.effectiveSystemItemPolicy(for: wifi) == .revealable)
+        #endif
+    }
+
     @Test("Stale, same-lane, locked, and unknown assignments fail closed")
     func invalidAssignments() throws {
         let generation = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
@@ -360,7 +444,16 @@ struct PolicyBoardInteractionTests {
         )
     }
 
-    private func makeEditor() throws -> PolicyEditorViewModel {
+    private func makeEditor(
+        systemItems: [SystemMenuBarItemObservation] = [
+            SystemMenuBarItemObservation(
+                observationIdentifier: SystemMenuBarItemObservation.bluetoothIdentifier,
+                ownerBundleIdentifier: "com.apple.MenuBarAgent",
+                displayName: "Bluetooth",
+                observationCount: 1
+            ),
+        ]
+    ) throws -> PolicyEditorViewModel {
         let policy = try PersistentBundlePolicyDocument(
             managementEnabled: false,
             policies: [
@@ -378,6 +471,7 @@ struct PolicyBoardInteractionTests {
                 observation(revealable, pid: 30),
                 observation(hidden, pid: 40),
             ]),
+            systemItems: systemItems,
             blennyBundleIdentifier: blenny
         )
     }

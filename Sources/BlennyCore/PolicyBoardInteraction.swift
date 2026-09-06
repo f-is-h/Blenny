@@ -80,15 +80,15 @@ public enum PolicyDraftAssignmentRejection: String, Equatable, Sendable {
         case .duplicateDelivery:
             "This drop was already handled."
         case .staleCandidateGeneration:
-            "Refresh changed the available applications. Start a new drag."
+            "Refresh changed the available items. Start a new drag."
         case .staleSourcePolicy:
-            "This application moved after the drag began. Start a new drag."
+            "This item moved after the drag began. Start a new drag."
         case .samePolicy:
-            "The application is already in this group."
+            "This item is already in this group."
         case .blennyMustRemainVisible:
             "Blenny must remain Visible."
         case .unknownCandidate:
-            "This application is no longer available in the current observation."
+            "This item is no longer available in the current observation."
         }
     }
 }
@@ -128,15 +128,24 @@ public struct PolicyDraftAssignmentCoordinator: Equatable, Sendable {
         guard payload.candidateGeneration == candidateGeneration else {
             return .rejected(.staleCandidateGeneration)
         }
-        guard editor.effectivePolicy(for: payload.bundleIdentifier) != nil else {
+        let isSystemItem = SystemItemPolicyCatalog.controllableItem(
+            for: payload.bundleIdentifier
+        ) != nil || PersistentSystemItemPolicyCatalog.controllableItem(
+            for: payload.bundleIdentifier
+        ) != nil
+        let effectivePolicy = isSystemItem
+            ? editor.effectiveSystemItemPolicy(for: payload.bundleIdentifier)
+            : editor.effectivePolicy(for: payload.bundleIdentifier)
+        guard effectivePolicy != nil else {
             return .rejected(.unknownCandidate)
         }
-        if BundlePolicyIdentity.canonicalKey(for: payload.bundleIdentifier)
+        if !isSystemItem,
+           BundlePolicyIdentity.canonicalKey(for: payload.bundleIdentifier)
             == BundlePolicyIdentity.canonicalKey(for: editor.blennyBundleIdentifier),
            destination != .visible {
             return .rejected(.blennyMustRemainVisible)
         }
-        guard editor.effectivePolicy(for: payload.bundleIdentifier) == payload.sourcePolicy else {
+        guard effectivePolicy == payload.sourcePolicy else {
             return .rejected(.staleSourcePolicy)
         }
         guard payload.sourcePolicy != destination else {
@@ -158,10 +167,13 @@ public struct PolicyDraftAssignmentCoordinator: Equatable, Sendable {
         )
         guard validation == .changed else { return validation }
 
-        let assignment = editor.assign(
-            bundleIdentifier: payload.bundleIdentifier,
-            to: destination
-        )
+        let assignment = SystemItemPolicyCatalog.controllableItem(
+            for: payload.bundleIdentifier
+        ) != nil || PersistentSystemItemPolicyCatalog.controllableItem(
+            for: payload.bundleIdentifier
+        ) != nil
+            ? editor.assignSystemItem(identifier: payload.bundleIdentifier, to: destination)
+            : editor.assign(bundleIdentifier: payload.bundleIdentifier, to: destination)
         switch assignment {
         case .changed:
             consumedDragTokens.insert(payload.dragToken)
@@ -351,7 +363,13 @@ public struct PolicyBoardInteractionState: Equatable, Sendable {
             settleState = nil
             return
         }
-        selectedItem = .application(payload.bundleIdentifier)
+        selectedItem = SystemItemPolicyCatalog.controllableItem(
+            for: payload.bundleIdentifier
+        ) != nil || SharedSystemItemTrialTarget.matchingSystemItem(
+            observationIdentifier: payload.bundleIdentifier
+        ) != nil
+            ? .systemItem(payload.bundleIdentifier)
+            : .application(payload.bundleIdentifier)
         settleState = PolicyBoardSettleState(
             bundleIdentifier: payload.bundleIdentifier,
             destination: destination,

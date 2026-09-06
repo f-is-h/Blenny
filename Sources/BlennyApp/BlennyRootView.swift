@@ -265,6 +265,9 @@ private struct OrganizeView: View {
         VStack(spacing: 0) {
             VStack(spacing: 6) {
                 managementStrip
+                #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+                debugSystemItemTrialNotice
+                #endif
                 OrganizationBoard(
                     model: model,
                     actions: actions,
@@ -273,6 +276,7 @@ private struct OrganizeView: View {
                 SelectionDetailRail(
                     model: model,
                     interaction: $interaction,
+                    actions: actions,
                     onMove: performMove
                 )
                 if model.statusIsError {
@@ -333,6 +337,20 @@ private struct OrganizeView: View {
         .accessibilityLabel("Management and recovery")
     }
 
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    private var debugSystemItemTrialNotice: some View {
+        Label(
+            "Debug manual system-item testing: policies are isolated and start stopped. Apply or Resume is required; Stop or Quit releases restrictions. This is not a timed rollback.",
+            systemImage: "exclamationmark.triangle"
+        )
+        .font(.system(size: 10.5, weight: .medium))
+        .foregroundStyle(.orange)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Debug manual system-item testing warning")
+    }
+    #endif
+
     private var statusMessage: some View {
         HStack(spacing: 7) {
             Image(systemName: "xmark.circle.fill")
@@ -349,6 +367,14 @@ private struct OrganizeView: View {
         bundleIdentifier: String,
         destination: MenuBarBundlePolicy
     ) {
+        if model.isControllableSystemItem(bundleIdentifier) {
+            let outcome = model.assignSystemItem(
+                identifier: bundleIdentifier,
+                destination: destination
+            )
+            handleAssignmentOutcome(outcome)
+            return
+        }
         guard let source = model.model?.effectivePolicy(for: bundleIdentifier) else { return }
         let payload = model.dragPayload(
             bundleIdentifier: bundleIdentifier,
@@ -656,18 +682,30 @@ private struct PolicyLaneRow: View {
 
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 2) {
-                    let candidates = model.candidates(in: policy)
+                    let candidates = model.applicationCandidates(in: policy)
+                    let appleSystemCandidates = model.appleSystemCandidates(in: policy)
+                    let systemItems = model.systemItems(in: policy)
+                    let applicationLandingPreview = landingPreview(
+                        among: candidates,
+                        systemPresentation: false
+                    )
+                    let appleSystemLandingPreview = landingPreview(
+                        among: appleSystemCandidates,
+                        systemPresentation: true
+                    )
                     if candidates.isEmpty
-                        && landingPreview == nil
-                        && (policy != .visible || model.systemItems.isEmpty) {
+                        && appleSystemCandidates.isEmpty
+                        && applicationLandingPreview == nil
+                        && appleSystemLandingPreview == nil
+                        && systemItems.isEmpty {
                         emptyState
                     } else {
                         ForEach(
                             Array(candidates.enumerated()),
                             id: \.element.bundleIdentifier
                         ) { index, candidate in
-                            if landingPreview?.index == index {
-                                landingPreviewView
+                            if applicationLandingPreview?.index == index {
+                                landingPreviewView(applicationLandingPreview)
                             }
                             ApplicationBoardItem(
                                 candidate: candidate,
@@ -677,15 +715,16 @@ private struct PolicyLaneRow: View {
                                 iconNamespace: iconNamespace,
                                 reduceMotion: reduceMotion,
                                 contrast: contrast,
+                                presentsAsSystemItem: false,
                                 onMove: performMove
                             )
                         }
 
-                        if landingPreview?.index == candidates.endIndex {
-                            landingPreviewView
+                        if applicationLandingPreview?.index == candidates.endIndex {
+                            landingPreviewView(applicationLandingPreview)
                         }
 
-                        if policy == .visible, !model.systemItems.isEmpty {
+                        if !appleSystemCandidates.isEmpty || !systemItems.isEmpty {
                             Rectangle()
                                 .fill(Color(nsColor: .separatorColor))
                                 .frame(width: 1, height: 34)
@@ -697,20 +736,53 @@ private struct PolicyLaneRow: View {
                                     .font(.system(size: 13, weight: .regular))
                                 Text("macOS")
                                     .font(.caption)
-                                Text("Read only")
+                                Text(systemItems.contains(where: {
+                                    model.isInteractiveSystemItem(
+                                        $0.observationIdentifier
+                                    )
+                                }) ? systemControlLabel : "Read only")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
+                                    .help(systemControlHelp)
                             }
                             .frame(width: 54)
                             .accessibilityElement(children: .combine)
-                            .accessibilityLabel("macOS system items, read only")
+                            .accessibilityLabel("macOS system items")
 
-                            ForEach(model.systemItems, id: \.observationIdentifier) { item in
-                                SystemBoardItem(
-                                    observation: item,
+                            ForEach(
+                                Array(appleSystemCandidates.enumerated()),
+                                id: \.element.bundleIdentifier
+                            ) { index, candidate in
+                                if appleSystemLandingPreview?.index == index {
+                                    landingPreviewView(appleSystemLandingPreview)
+                                }
+                                ApplicationBoardItem(
+                                    candidate: candidate,
+                                    policy: policy,
                                     model: model,
                                     interaction: $interaction,
-                                    contrast: contrast
+                                    iconNamespace: iconNamespace,
+                                    reduceMotion: reduceMotion,
+                                    contrast: contrast,
+                                    presentsAsSystemItem: true,
+                                    onMove: performMove
+                                )
+                            }
+
+                            if appleSystemLandingPreview?.index
+                                == appleSystemCandidates.endIndex {
+                                landingPreviewView(appleSystemLandingPreview)
+                            }
+
+                            ForEach(systemItems, id: \.observationIdentifier) { item in
+                                SystemBoardItem(
+                                    observation: item,
+                                    policy: policy,
+                                    model: model,
+                                    interaction: $interaction,
+                                    contrast: contrast,
+                                    actions: actions,
+                                    onMove: performMove
                                 )
                             }
                         }
@@ -753,6 +825,22 @@ private struct PolicyLaneRow: View {
         .accessibilityHint(policy.interfaceDetail)
     }
 
+    private var systemControlLabel: String {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        "Experimental controls"
+        #else
+        "Bluetooth enabled"
+        #endif
+    }
+
+    private var systemControlHelp: String {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        "Experimental Debug-only system-item policy controls. Unsupported identities remain read only."
+        #else
+        "Bluetooth is the only supported system-item policy control."
+        #endif
+    }
+
     private var laneHeader: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
@@ -788,7 +876,7 @@ private struct PolicyLaneRow: View {
     }
 
     private var applicationCount: Int {
-        model.candidates(in: policy).count
+        model.applicationCandidates(in: policy).count
     }
 
     private var activeTarget: PolicyBoardDropTarget? {
@@ -803,14 +891,18 @@ private struct PolicyLaneRow: View {
         let presentation: ResolvedPolicyIcon
     }
 
-    private var landingPreview: LandingPreview? {
+    private func landingPreview(
+        among candidates: [PolicyCandidate],
+        systemPresentation: Bool
+    ) -> LandingPreview? {
         guard isValidTarget,
               let bundleIdentifier = interaction.draggedBundleIdentifier,
               interaction.draggedSourcePolicy != policy,
-              model.candidate(bundleIdentifier: bundleIdentifier) != nil else {
+              model.candidate(bundleIdentifier: bundleIdentifier) != nil,
+              ExperimentalAppleBundlePolicyCatalog.contains(bundleIdentifier)
+                == systemPresentation else {
             return nil
         }
-        let candidates = model.candidates(in: policy)
         return LandingPreview(
             index: PolicyBoardLandingProjection.automaticIndex(
                 for: bundleIdentifier,
@@ -821,8 +913,8 @@ private struct PolicyLaneRow: View {
     }
 
     @ViewBuilder
-    private var landingPreviewView: some View {
-        if let preview = landingPreview {
+    private func landingPreviewView(_ preview: LandingPreview?) -> some View {
+        if let preview {
             PolicyLaneLandingPreview(
                 presentation: preview.presentation,
                 reduceMotion: reduceMotion,
@@ -935,6 +1027,18 @@ private struct PolicyLaneRow: View {
         bundleIdentifier: String,
         destination: MenuBarBundlePolicy
     ) {
+        if model.isControllableSystemItem(bundleIdentifier) {
+            let outcome = model.assignSystemItem(
+                identifier: bundleIdentifier,
+                destination: destination
+            )
+            if outcome.changedDraft, let editor = model.model {
+                actions.draftDidChange(editor)
+            } else if case .rejected(let reason) = outcome {
+                model.setStatus(reason.interfaceReason, isError: false)
+            }
+            return
+        }
         guard let source = model.model?.effectivePolicy(for: bundleIdentifier) else { return }
         onDrop(
             model.dragPayload(bundleIdentifier: bundleIdentifier, sourcePolicy: source),
@@ -962,11 +1066,14 @@ private struct PolicyLaneLandingPreview: View {
                             )
                         )
                 }
-            Image(nsImage: presentation.image)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(width: BlennyDesign.iconFrame, height: BlennyDesign.iconFrame)
+            NaturalAspectSystemIcon(
+                presentation: presentation,
+                pointSize: 21,
+                frame: CGSize(
+                    width: BlennyDesign.iconFrame,
+                    height: BlennyDesign.iconFrame
+                )
+            )
                 .opacity(contrast == .increased ? 0.48 : 0.32)
         }
         .frame(
@@ -992,6 +1099,7 @@ private struct ApplicationBoardItem: View {
     let iconNamespace: Namespace.ID
     let reduceMotion: Bool
     let contrast: ColorSchemeContrast
+    let presentsAsSystemItem: Bool
     let onMove: (String, MenuBarBundlePolicy) -> Void
     @FocusState private var isFocused: Bool
 
@@ -1122,6 +1230,12 @@ private struct ApplicationBoardItem: View {
                     .foregroundStyle(BlennyDesign.coral)
                     .padding(3)
                     .accessibilityHidden(true)
+            } else if presentsAsSystemItem {
+                Image(systemName: "checkmark.shield")
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(3)
+                    .accessibilityHidden(true)
             }
         }
         .overlay(alignment: .bottom) {
@@ -1164,11 +1278,14 @@ private struct ApplicationBoardItem: View {
 
     @ViewBuilder
     private func policyIcon(presentation: ResolvedPolicyIcon) -> some View {
-        let image = Image(nsImage: presentation.image)
-            .resizable()
-            .interpolation(.high)
-            .scaledToFit()
-            .frame(width: BlennyDesign.iconFrame, height: BlennyDesign.iconFrame)
+        let image = NaturalAspectSystemIcon(
+            presentation: presentation,
+            pointSize: 21,
+            frame: CGSize(
+                width: BlennyDesign.iconFrame,
+                height: BlennyDesign.iconFrame
+            )
+        )
         if effectiveReduceMotion {
             image
         } else {
@@ -1232,9 +1349,11 @@ private struct ApplicationBoardItem: View {
     ) -> String {
         let count = candidate.menuBarItemCount
         let itemWord = count == 1 ? "item" : "items"
-        let iconSource = presentation.descriptor.usesFallback
-            ? "Fallback icon"
-            : "Installed application icon"
+        let iconSource = presentation.descriptor.symbolName != nil
+            ? "System symbol"
+            : presentation.descriptor.usesFallback
+                ? "Fallback icon"
+                : "Installed application icon"
         let editability = blenny
             ? "Locked, required recovery control"
             : "Editable application item"
@@ -1305,9 +1424,12 @@ private struct NaturalAspectSystemIcon: View {
 
 private struct SystemBoardItem: View {
     let observation: SystemMenuBarItemObservation
+    let policy: MenuBarBundlePolicy
     @ObservedObject var model: ProductInterfaceModel
     @Binding var interaction: PolicyBoardInteractionState
     let contrast: ColorSchemeContrast
+    let actions: ProductInterfaceActions
+    let onMove: (String, MenuBarBundlePolicy) -> Void
     @FocusState private var isFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1318,6 +1440,25 @@ private struct SystemBoardItem: View {
     var body: some View {
         let presentation = model.systemIcon(for: observation)
         systemItemSurface(presentation: presentation)
+            .contextMenu {
+                contextMenuContent
+            }
+            .accessibilityActions {
+                if isControllable {
+                    ForEach(MenuBarBundlePolicy.allCases, id: \.self) { destination in
+                        if destination != policy {
+                            Button("Move to \(destination.interfaceTitle)") {
+                                onMove(observation.observationIdentifier, destination)
+                            }
+                        }
+                    }
+                }
+                #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+                if let target = sharedTrialTarget {
+                    sharedTrialButton(target)
+                }
+                #endif
+            }
             .zIndex(showsName ? 20 : isSelected ? 10 : 0)
     }
 
@@ -1354,7 +1495,9 @@ private struct SystemBoardItem: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(accessibilityLabel(for: presentation))
                 .accessibilityHint(
-                    "Select for details. This macOS item is read only."
+                    isControllable || hasSharedTrialControl
+                        ? "Select for details and use a Move to action."
+                        : "Select for details. This macOS item is read only."
                 )
                 .accessibilityValue(isSelected ? "Selected" : "Not selected")
                 .accessibilityAddTraits(.isButton)
@@ -1379,16 +1522,36 @@ private struct SystemBoardItem: View {
                     RoundedRectangle(cornerRadius: 9)
                         .stroke(itemOutline, lineWidth: itemOutlineWidth)
                 }
-            NaturalAspectSystemIcon(
-                presentation: presentation,
-                pointSize: 21,
-                frame: CGSize(width: 29, height: 25)
-            )
+            if isControllable {
+                NaturalAspectSystemIcon(
+                    presentation: presentation,
+                    pointSize: 21,
+                    frame: CGSize(width: 29, height: 25)
+                )
+                .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 8))
+                .draggable(
+                    item: model.dragPayload(
+                        bundleIdentifier: observation.observationIdentifier,
+                        sourcePolicy: policy
+                    )
+                )
+                .dragConfiguration(DragConfiguration(allowMove: true))
+            } else {
+                NaturalAspectSystemIcon(
+                    presentation: presentation,
+                    pointSize: 21,
+                    frame: CGSize(width: 29, height: 25)
+                )
+            }
         }
         .frame(width: BlennyDesign.itemFrame.width, height: BlennyDesign.itemFrame.height)
         .contentShape(RoundedRectangle(cornerRadius: 9))
         .overlay(alignment: .topTrailing) {
-            Image(systemName: "lock.fill")
+            Image(
+                systemName: isControllable || hasSharedTrialControl
+                    ? "checkmark.shield"
+                    : "lock.fill"
+            )
                 .font(.system(size: 7.5, weight: .bold))
                 .foregroundStyle(.secondary)
                 .padding(3)
@@ -1415,6 +1578,74 @@ private struct SystemBoardItem: View {
     }
 
     private var isSelected: Bool { interaction.selectedItem == itemID }
+    private var isControllable: Bool {
+        model.isControllableSystemItem(observation.observationIdentifier)
+    }
+
+    private var hasSharedTrialControl: Bool {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        guard let target = sharedTrialTarget else { return false }
+        switch model.sharedSystemItemTrialPresentation(for: target) {
+        case .ready, .busy, .recoveryRequired:
+            return true
+        case .checking, .hidden, .unavailable:
+            return false
+        }
+        #else
+        return false
+        #endif
+    }
+
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    private var sharedTrialTarget: SharedSystemItemTrialTarget? {
+        model.sharedSystemItemTrialTarget(
+            for: observation.observationIdentifier
+        )
+    }
+
+    @ViewBuilder
+    private func sharedTrialButton(_ target: SharedSystemItemTrialTarget) -> some View {
+        switch model.sharedSystemItemTrialPresentation(for: target) {
+        case .ready:
+            Button("Hide (target.displayName)") {
+                actions.hideSharedSystemItem(target)
+            }
+        case .recoveryRequired:
+            Button("Restore (target.displayName)") {
+                actions.restoreSharedSystemItem(target)
+            }
+        case .busy:
+            Text("(target.displayName) operation in progress")
+        case .checking:
+            Text("Checking (target.displayName) state")
+        case .hidden:
+            Text("(target.displayName) is already hidden outside this trial")
+        case .unavailable:
+            Text("(target.displayName) control is unavailable")
+        }
+    }
+    #endif
+
+    @ViewBuilder
+    private var contextMenuContent: some View {
+        if isControllable {
+            MoveToCommands(
+                bundleIdentifier: observation.observationIdentifier,
+                currentPolicy: policy,
+                onMove: onMove
+            )
+        } else {
+            #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+            if let target = sharedTrialTarget {
+                sharedTrialButton(target)
+            } else {
+                Text("This macOS item is read only")
+            }
+            #else
+            Text("This macOS item is read only")
+            #endif
+        }
+    }
     private var showsName: Bool { interaction.namePresentationItem == itemID }
 
     private var itemBackground: Color {
@@ -1456,28 +1687,38 @@ private struct SystemBoardItem: View {
         let iconSource = presentation.descriptor.usesFallback
             ? "Fallback icon"
             : "System symbol"
-        return "\(presentation.displayName), macOS system item, Owner: \(observation.ownerBundleIdentifier), Identifier: \(observation.observationIdentifier), \(count) \(occurrence), Read only, \(iconSource)"
+        let access = controllabilityDescription
+        return "\(presentation.displayName), macOS system item, Owner: \(observation.ownerBundleIdentifier), Identifier: \(observation.observationIdentifier), \(count) \(occurrence), \(access), \(iconSource)"
+    }
+
+    private var controllabilityDescription: String {
+        guard isControllable || hasSharedTrialControl else {
+            if observation.observationIdentifier == SystemMenuBarItemObservation.clockIdentifier {
+                return "Read only; Clock is fixed by macOS"
+            }
+            return "Read only; no verified policy interface"
+        }
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        return isControllable
+            ? "Experimental policy control"
+            : "Experimental manual hide and exact restore control"
+        #else
+        return "Policy control enabled"
+        #endif
     }
 }
 
 private struct SelectionDetailRail: View {
     @ObservedObject var model: ProductInterfaceModel
     @Binding var interaction: PolicyBoardInteractionState
+    let actions: ProductInterfaceActions
     let onMove: (String, MenuBarBundlePolicy) -> Void
 
     var body: some View {
         HStack(spacing: 9) {
             selectionContent
             Spacer(minLength: 8)
-            if case .application(let bundleIdentifier) = interaction.selectedItem,
-               let policy = model.model?.effectivePolicy(for: bundleIdentifier),
-               !model.isBlenny(bundleIdentifier) {
-                MoveToMenu(
-                    bundleIdentifier: bundleIdentifier,
-                    currentPolicy: policy,
-                    onMove: onMove
-                )
-            }
+            selectionAction
         }
         .padding(.horizontal, 10)
         .frame(height: 42)
@@ -1492,10 +1733,11 @@ private struct SelectionDetailRail: View {
             if let candidate = model.candidate(bundleIdentifier: bundleIdentifier),
                let policy = model.model?.effectivePolicy(for: bundleIdentifier) {
                 let presentation = model.applicationIcon(for: bundleIdentifier)
-                Image(nsImage: presentation.image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 24, height: 24)
+                NaturalAspectSystemIcon(
+                    presentation: presentation,
+                    pointSize: 17,
+                    frame: CGSize(width: 24, height: 24)
+                )
                 VStack(alignment: .leading, spacing: 1) {
                     Text(presentation.displayName)
                         .font(.system(.subheadline, weight: .medium))
@@ -1525,14 +1767,26 @@ private struct SelectionDetailRail: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(presentation.displayName)
                         .font(.system(.subheadline, weight: .medium))
-                    Text("\(observation.ownerBundleIdentifier) · \(observation.observationCount) observed · macOS group")
+                    Text(systemItemDetail(observation))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Label("Read only", systemImage: "lock.fill")
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.secondary)
+                if let policy = model.model?.effectiveSystemItemPolicy(
+                    for: observationIdentifier
+                ) {
+                    Label(policy.interfaceTitle, systemImage: "checkmark.shield")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(BlennyDesign.coral)
+                } else if hasSharedTrialControl(for: observationIdentifier) {
+                    Label("Manual control", systemImage: "checkmark.shield")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(BlennyDesign.coral)
+                } else {
+                    Label("Read only", systemImage: "lock.fill")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 unavailableSelection
             }
@@ -1544,6 +1798,73 @@ private struct SelectionDetailRail: View {
                 .foregroundStyle(.secondary)
         }
     }
+
+    @ViewBuilder
+    private var selectionAction: some View {
+        switch interaction.selectedItem {
+        case .application(let bundleIdentifier):
+            if let policy = model.model?.effectivePolicy(for: bundleIdentifier),
+               !model.isBlenny(bundleIdentifier) {
+                MoveToMenu(
+                    bundleIdentifier: bundleIdentifier,
+                    currentPolicy: policy,
+                    onMove: onMove
+                )
+            }
+        case .systemItem(let identifier):
+            if let policy = model.model?.effectiveSystemItemPolicy(for: identifier) {
+                MoveToMenu(
+                    bundleIdentifier: identifier,
+                    currentPolicy: policy,
+                    onMove: onMove
+                )
+            } else {
+                #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+                if let target = model.sharedSystemItemTrialTarget(for: identifier) {
+                    sharedTrialButton(target)
+                }
+                #endif
+            }
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private func hasSharedTrialControl(for identifier: String) -> Bool {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        guard let target = model.sharedSystemItemTrialTarget(for: identifier) else {
+            return false
+        }
+        switch model.sharedSystemItemTrialPresentation(for: target) {
+        case .ready, .busy, .recoveryRequired:
+            return true
+        case .checking, .hidden, .unavailable:
+            return false
+        }
+        #else
+        return false
+        #endif
+    }
+
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    @ViewBuilder
+    private func sharedTrialButton(_ target: SharedSystemItemTrialTarget) -> some View {
+        switch model.sharedSystemItemTrialPresentation(for: target) {
+        case .ready:
+            Button("Hide", action: { actions.hideSharedSystemItem(target) })
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        case .recoveryRequired:
+            Button("Restore", action: { actions.restoreSharedSystemItem(target) })
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        case .busy:
+            ProgressView().controlSize(.small)
+        case .checking, .hidden, .unavailable:
+            EmptyView()
+        }
+    }
+    #endif
 
     private var unavailableSelection: some View {
         Label("The selected item is no longer in this observation.", systemImage: "questionmark.circle")
@@ -1559,6 +1880,13 @@ private struct SelectionDetailRail: View {
         let itemWord = candidate.menuBarItemCount == 1 ? "item" : "items"
         let fallback = presentation.descriptor.usesFallback ? " · fallback icon" : ""
         return "\(candidate.bundleIdentifier) · \(candidate.menuBarItemCount) menu bar \(itemWord) · \(policy.interfaceTitle)\(fallback)"
+    }
+
+    private func systemItemDetail(_ observation: SystemMenuBarItemObservation) -> String {
+        let source = observation.observationCount == 0
+            ? "verified system state"
+            : "\(observation.observationCount) observed"
+        return "\(observation.ownerBundleIdentifier) · \(source) · macOS group"
     }
 }
 
@@ -1608,16 +1936,11 @@ private struct ObservationAndDraftFooter: View {
     let actions: ProductInterfaceActions
     @Binding var interaction: PolicyBoardInteractionState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showingDiscoveryWarnings = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Label(observationSummary, systemImage: model.hasDraftChanges ? "pencil.line" : "eye")
-                .font(.system(size: 10.5))
-                .foregroundStyle(model.hasDraftChanges ? Color.primary : Color.secondary)
-                .lineLimit(1)
-                .help(model.discoveryWarnings.isEmpty
-                    ? "Only successfully attributed menu-bar applications are candidates."
-                    : model.discoveryWarnings.joined(separator: "\n"))
+            observationStatus
 
             Spacer(minLength: 10)
 
@@ -1660,6 +1983,57 @@ private struct ObservationAndDraftFooter: View {
         .background(.bar)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Draft and manual observation controls")
+    }
+
+    @ViewBuilder
+    private var observationStatus: some View {
+        if model.discoveryWarnings.isEmpty {
+            Label(
+                observationSummary,
+                systemImage: model.hasDraftChanges ? "pencil.line" : "eye"
+            )
+            .font(.system(size: 10.5))
+            .foregroundStyle(model.hasDraftChanges ? Color.primary : Color.secondary)
+            .lineLimit(1)
+            .help("Only successfully attributed menu-bar applications are candidates.")
+        } else {
+            Button {
+                showingDiscoveryWarnings.toggle()
+            } label: {
+                Label(observationSummary, systemImage: "exclamationmark.circle")
+                    .font(.system(size: 10.5))
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Show the exact applications whose menu-bar roots were unreadable.")
+            .popover(isPresented: $showingDiscoveryWarnings, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Unreadable menu-bar roots")
+                        .font(.system(.headline, weight: .medium))
+                    Text("These processes returned an Accessibility read error. They are not counted as manageable menu-bar items.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Divider()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 7) {
+                            ForEach(
+                                Array(model.discoveryWarnings.enumerated()),
+                                id: \.offset
+                            ) { _, warning in
+                                Text(warning)
+                                    .font(.system(size: 10.5, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 260)
+                }
+                .padding(16)
+                .frame(width: 510)
+            }
+        }
     }
 
     private var observationSummary: String {
@@ -1707,11 +2081,12 @@ private struct SettingsView: View {
     let actions: ProductInterfaceActions
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            ProductPageHeader(
-                title: "Settings",
-                subtitle: "A small set of explicit system integrations."
-            )
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                ProductPageHeader(
+                    title: "Settings",
+                    subtitle: "A small set of explicit system integrations."
+                )
 
             ProductPageSection(title: "Permission", systemImage: "hand.raised") {
                 SettingsGridRow {
@@ -1780,9 +2155,30 @@ private struct SettingsView: View {
                         .disabled(!model.nativeOverflowPlacementAvailable)
                 }
             }
+
+            #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+            ProductPageSection(
+                title: "Shared Apple Items (Debug)",
+                systemImage: "wrench.and.screwdriver"
+            ) {
+                VStack(spacing: 12) {
+                    ForEach(SharedSystemItemTrialTarget.allCases, id: \.self) { target in
+                        SettingsGridRow {
+                            Label(target.displayName, systemImage: trialSymbol(target))
+                        } detail: {
+                            Text(trialDescription(target))
+                                .foregroundStyle(trialDescriptionColor(target))
+                        } control: {
+                            trialControl(target)
+                        }
+                    }
+                }
+            }
+            #endif
+            }
+            .frame(maxWidth: 640, alignment: .leading)
+            .padding(28)
         }
-        .frame(maxWidth: 640, alignment: .leading)
-        .padding(28)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -1807,6 +2203,62 @@ private struct SettingsView: View {
         }
         return "Available when macOS shows one usable overflow arrow. Refresh after it appears."
     }
+
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    @ViewBuilder
+    private func trialControl(_ target: SharedSystemItemTrialTarget) -> some View {
+        switch model.sharedSystemItemTrials[target] ?? .checking {
+        case .ready:
+            EmptyView()
+        case .recoveryRequired:
+            if model.managementEnabled == false {
+                Button("Restore", action: { actions.restoreSharedSystemItem(target) })
+                    .controlSize(.small)
+            }
+        case .busy:
+            ProgressView().controlSize(.small)
+        case .checking, .hidden, .unavailable:
+            EmptyView()
+        }
+    }
+
+    private func trialDescription(_ target: SharedSystemItemTrialTarget) -> String {
+        switch model.sharedSystemItemTrials[target] ?? .checking {
+        case .checking:
+            "Reading the exact current-user state."
+        case .ready:
+            "Available for Visible, Revealable, and Hidden policy on the Board."
+        case .hidden:
+            "Already hidden outside this trial; no recovery receipt was created."
+        case .busy:
+            "One serial operation is running; verification is bounded to one read."
+        case .recoveryRequired:
+            model.managementEnabled == true
+                ? "Managed policy receipt is active. Stop restores the exact original state."
+                : "Recovery is pending. Restore compares current state before writing."
+        case .unavailable(let detail):
+            "Unavailable on this runtime: \(detail)"
+        }
+    }
+
+    private func trialDescriptionColor(
+        _ target: SharedSystemItemTrialTarget
+    ) -> Color {
+        switch model.sharedSystemItemTrials[target] ?? .checking {
+        case .unavailable: .red
+        case .recoveryRequired: .orange
+        default: .secondary
+        }
+    }
+
+    private func trialSymbol(_ target: SharedSystemItemTrialTarget) -> String {
+        switch target {
+        case .nowPlaying: "play.circle"
+        case .siri: "siri"
+        case .timeMachine: "externaldrive.badge.timemachine"
+        }
+    }
+    #endif
 }
 
 private struct SupportView: View {

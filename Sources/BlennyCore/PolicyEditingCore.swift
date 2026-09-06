@@ -19,15 +19,21 @@ public struct BundlePolicyDraft: Equatable, Sendable {
     public let visible: [String]
     public let revealable: [String]
     public let hidden: [String]
+    public let bluetoothPolicy: MenuBarBundlePolicy
+    public let systemItemPolicies: [String: MenuBarBundlePolicy]
 
     public init(
         visible: [String],
         revealable: [String],
-        hidden: [String]
+        hidden: [String],
+        bluetoothPolicy: MenuBarBundlePolicy = .visible,
+        systemItemPolicies: [String: MenuBarBundlePolicy] = [:]
     ) {
         self.visible = visible
         self.revealable = revealable
         self.hidden = hidden
+        self.bluetoothPolicy = bluetoothPolicy
+        self.systemItemPolicies = systemItemPolicies
     }
 
     public init(acceptedPolicy: PersistentBundlePolicyDocument) {
@@ -40,7 +46,9 @@ public struct BundlePolicyDraft: Equatable, Sendable {
                 .map(\.bundleIdentifier),
             hidden: acceptedPolicy.policies
                 .filter { $0.policy == .hidden }
-                .map(\.bundleIdentifier)
+                .map(\.bundleIdentifier),
+            bluetoothPolicy: acceptedPolicy.bluetoothPolicy,
+            systemItemPolicies: acceptedPolicy.systemItemPolicies
         )
     }
 
@@ -64,7 +72,38 @@ public struct BundlePolicyDraft: Equatable, Sendable {
         case .hidden:
             hidden.append(bundleIdentifier)
         }
-        return Self(visible: visible, revealable: revealable, hidden: hidden)
+        return Self(
+            visible: visible,
+            revealable: revealable,
+            hidden: hidden,
+            bluetoothPolicy: bluetoothPolicy,
+            systemItemPolicies: systemItemPolicies
+        )
+    }
+
+    public func assigningBluetooth(to policy: MenuBarBundlePolicy) -> Self {
+        Self(
+            visible: visible,
+            revealable: revealable,
+            hidden: hidden,
+            bluetoothPolicy: policy,
+            systemItemPolicies: systemItemPolicies
+        )
+    }
+
+    public func assigningSystemItem(
+        identifier: String,
+        to policy: MenuBarBundlePolicy
+    ) -> Self {
+        var systemItemPolicies = systemItemPolicies
+        systemItemPolicies[identifier] = policy
+        return Self(
+            visible: visible,
+            revealable: revealable,
+            hidden: hidden,
+            bluetoothPolicy: bluetoothPolicy,
+            systemItemPolicies: systemItemPolicies
+        )
     }
 
     public var fingerprint: String {
@@ -72,7 +111,10 @@ public struct BundlePolicyDraft: Equatable, Sendable {
             "visible=\(visible.sortedByBundleIdentifier().joined(separator: ","))",
             "revealable=\(revealable.sortedByBundleIdentifier().joined(separator: ","))",
             "hidden=\(hidden.sortedByBundleIdentifier().joined(separator: ","))",
-        ])
+            "bluetooth=\(bluetoothPolicy.rawValue)",
+        ] + systemItemPolicies.keys.sorted().map { identifier in
+            "system=\(identifier)|\(systemItemPolicies[identifier]!.rawValue)"
+        })
     }
 }
 
@@ -96,7 +138,6 @@ public enum PolicyCandidateIssue: Error, Equatable, Hashable, Sendable {
     case unknownOwner(processIdentifier: Int32)
     case invalidBundleIdentifier(String)
     case caseConflictingIdentifiers([String])
-    case ambiguousOwnership(bundleIdentifier: String, processIdentifiers: [Int32])
 }
 
 extension PolicyCandidateIssue: CustomStringConvertible {
@@ -108,8 +149,6 @@ extension PolicyCandidateIssue: CustomStringConvertible {
             return "menu-bar owner has invalid bundle identifier \(bundleIdentifier)"
         case let .caseConflictingIdentifiers(identifiers):
             return "menu-bar observations contain case-conflicting identifiers \(identifiers)"
-        case let .ambiguousOwnership(bundleIdentifier, processIdentifiers):
-            return "bundle \(bundleIdentifier) has ambiguous owner PIDs \(processIdentifiers)"
         }
     }
 }
@@ -144,15 +183,6 @@ public struct PolicyCandidateInventory: Equatable, Sendable {
             }
             guard let bundleIdentifier = spellings.first else { continue }
             let processIdentifiers = Array(Set(matching.map(\.processIdentifier))).sorted()
-            if processIdentifiers.count != 1 {
-                issues.append(
-                    .ambiguousOwnership(
-                        bundleIdentifier: bundleIdentifier,
-                        processIdentifiers: processIdentifiers
-                    )
-                )
-                continue
-            }
             candidates.append(
                 PolicyCandidate(
                     bundleIdentifier: bundleIdentifier,
@@ -230,11 +260,11 @@ public enum PolicyEditIssue: Error, Equatable, Hashable, Sendable {
     case caseConflictingBundleIdentifiers([String])
     case overlappingPolicies(bundleIdentifier: String, policies: [MenuBarBundlePolicy])
     case unknownBundleIdentifier(String)
-    case missingCurrentOwnership(String)
     case missingApprovedBundle(String)
     case unapprovedBundle(String)
     case mutableAppleSystemBundle(String)
     case missingVisibleBlenny(String)
+    case invalidSystemItemPolicy(String)
 }
 
 extension PolicyEditIssue: CustomStringConvertible {
@@ -252,8 +282,6 @@ extension PolicyEditIssue: CustomStringConvertible {
             return "bundle \(bundleIdentifier) overlaps policies \(policies.map(\.rawValue))"
         case let .unknownBundleIdentifier(bundleIdentifier):
             return "draft bundle \(bundleIdentifier) is not a current menu-bar ownership candidate"
-        case let .missingCurrentOwnership(bundleIdentifier):
-            return "approved bundle \(bundleIdentifier) has no current attributable menu-bar owner"
         case let .missingApprovedBundle(bundleIdentifier):
             return "approved bundle \(bundleIdentifier) is missing from the draft"
         case let .unapprovedBundle(bundleIdentifier):
@@ -262,6 +290,8 @@ extension PolicyEditIssue: CustomStringConvertible {
             return "Apple system bundle \(bundleIdentifier) is read-only and cannot be managed"
         case let .missingVisibleBlenny(bundleIdentifier):
             return "Blenny bundle \(bundleIdentifier) must remain visible"
+        case let .invalidSystemItemPolicy(identifier):
+            return "system item \(identifier) is not a writable Debug-only catalog item"
         }
     }
 }
@@ -283,6 +313,7 @@ public enum PolicyDraftValidator {
         draft: BundlePolicyDraft,
         managementEnabled: Bool,
         candidates: PolicyCandidateInventory,
+        observedRunningBundleIdentifiers: Set<String>,
         scope: PolicyValidationScope,
         blennyBundleIdentifier: String
     ) -> ValidatedPolicyDraft {
@@ -336,9 +367,7 @@ public enum PolicyDraftValidator {
         })
         for canonical in occurrences.keys.sorted() where candidateMap[canonical] == nil {
             let spelling = occurrences[canonical]?.map(\.spelling).sorted().first ?? canonical
-            if approved[canonical] != nil {
-                issues.append(.missingCurrentOwnership(spelling))
-            } else {
+            if approved[canonical] == nil {
                 issues.append(.unknownBundleIdentifier(spelling))
             }
         }
@@ -352,7 +381,9 @@ public enum PolicyDraftValidator {
             let spelling = occurrences[canonical]?.map(\.spelling).sorted().first ?? canonical
             issues.append(.unapprovedBundle(spelling))
         }
-        for canonical in occurrences.keys.sorted() where canonical.hasPrefix("com.apple.") {
+        for canonical in occurrences.keys.sorted()
+        where canonical.hasPrefix("com.apple.")
+            && !ExperimentalAppleBundlePolicyCatalog.contains(canonical) {
             let spelling = occurrences[canonical]?.map(\.spelling).sorted().first ?? canonical
             issues.append(.mutableAppleSystemBundle(spelling))
         }
@@ -378,11 +409,12 @@ public enum PolicyDraftValidator {
         let entries = groups.flatMap { policy, values in
             values.compactMap { value -> PersistentBundlePolicyEntry? in
                 guard let canonical = BundlePolicyIdentity.canonicalKey(for: value),
-                      let candidate = candidateMap[canonical] else {
+                      let resolvedIdentifier = candidateMap[canonical]?.bundleIdentifier
+                        ?? approved[canonical] else {
                     return nil
                 }
                 return PersistentBundlePolicyEntry(
-                    bundleIdentifier: candidate.bundleIdentifier,
+                    bundleIdentifier: resolvedIdentifier,
                     policy: policy
                 )
             }
@@ -390,9 +422,30 @@ public enum PolicyDraftValidator {
         do {
             let document = try PersistentBundlePolicyDocument(
                 managementEnabled: managementEnabled,
-                policies: entries
+                policies: entries,
+                bluetoothPolicy: draft.bluetoothPolicy,
+                systemItemPolicies: draft.systemItemPolicies
             ).validated(forBlennyBundleIdentifier: blennyBundleIdentifier)
             return ValidatedPolicyDraft(document: document, issues: [])
+        } catch let error as PersistentBundlePolicyDocumentError {
+            switch error {
+            case let .invalidSystemItemIdentifier(identifier):
+                return ValidatedPolicyDraft(
+                    document: nil, issues: [.invalidSystemItemPolicy(identifier)]
+                )
+            case .bluetoothMustUseDedicatedPolicy:
+                return ValidatedPolicyDraft(
+                    document: nil,
+                    issues: [.invalidSystemItemPolicy("com.apple.menuextra.bluetooth")]
+                )
+            case .systemItemPoliciesUnavailable, .invalidSystemItemPolicySchema:
+                return ValidatedPolicyDraft(document: nil, issues: [.invalidSystemItemPolicy("<unavailable>")])
+            default:
+                return ValidatedPolicyDraft(
+                    document: nil,
+                    issues: [.missingVisibleBlenny(blennyBundleIdentifier)]
+                )
+            }
         } catch {
             return ValidatedPolicyDraft(
                 document: nil,
@@ -454,6 +507,45 @@ public struct BundlePolicyDiff: Equatable, Sendable {
             )
         }
 
+        if old.bluetoothPolicy != new.bluetoothPolicy {
+            changes.append(
+                PolicyDiffChange(
+                    bundleIdentifier: "Bluetooth",
+                    operation: .moved(
+                        from: old.bluetoothPolicy,
+                        to: new.bluetoothPolicy
+                    )
+                )
+            )
+        }
+
+        for identifier in Set(old.systemItemPolicies.keys)
+            .union(new.systemItemPolicies.keys).sorted() {
+            let oldPolicy = old.systemItemPolicies[identifier]
+            let newPolicy = new.systemItemPolicies[identifier]
+            let displayName = SystemItemPolicyCatalog.controllableItem(for: identifier)?
+                .displayName
+                ?? PersistentSystemItemPolicyCatalog.controllableItem(for: identifier)?.displayName
+                ?? identifier
+            switch (oldPolicy, newPolicy) {
+            case let (nil, newPolicy?):
+                changes.append(PolicyDiffChange(
+                    bundleIdentifier: displayName, operation: .added(policy: newPolicy)
+                ))
+            case let (oldPolicy?, nil):
+                changes.append(PolicyDiffChange(
+                    bundleIdentifier: displayName, operation: .removed(policy: oldPolicy)
+                ))
+            case let (oldPolicy?, newPolicy?) where oldPolicy != newPolicy:
+                changes.append(PolicyDiffChange(
+                    bundleIdentifier: displayName,
+                    operation: .moved(from: oldPolicy, to: newPolicy)
+                ))
+            default:
+                break
+            }
+        }
+
         for canonical in Set(oldEntries.keys).union(newEntries.keys).sorted() {
             let oldEntry = oldEntries[canonical]
             let newEntry = newEntries[canonical]
@@ -510,7 +602,10 @@ public extension PersistentBundlePolicyDocument {
             [
                 "schema=\(schemaVersion)",
                 "managementEnabled=\(managementEnabled)",
-            ] + policies.map {
+                "bluetooth=\(bluetoothPolicy.rawValue)",
+            ] + systemItemPolicies.keys.sorted().map { identifier in
+                "system=\(identifier)|\(systemItemPolicies[identifier]!.rawValue)"
+            } + policies.map {
                 "policy=\($0.bundleIdentifier.lowercased())|\($0.policy.rawValue)"
             }
         )
@@ -702,7 +797,12 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
     private static func policyLines(
         _ document: PersistentBundlePolicyDocument
     ) -> [String] {
-        ["managementEnabled=\(document.managementEnabled)"] + MenuBarBundlePolicy.allCases.map {
+        [
+            "managementEnabled=\(document.managementEnabled)",
+            "bluetooth=\(document.bluetoothPolicy.rawValue)",
+        ] + document.systemItemPolicies.keys.sorted().map { identifier in
+            "system=\(identifier)|\(document.systemItemPolicies[identifier]!.rawValue)"
+        } + MenuBarBundlePolicy.allCases.map {
             policy in
             let identifiers = document.policies
                 .filter { $0.policy == policy }
@@ -717,7 +817,10 @@ public struct PolicyDryRunImpactReport: Equatable, Sendable {
             "visible=\(draft.visible.joined(separator: ","))",
             "revealable=\(draft.revealable.joined(separator: ","))",
             "hidden=\(draft.hidden.joined(separator: ","))",
-        ]
+            "bluetooth=\(draft.bluetoothPolicy.rawValue)",
+        ] + draft.systemItemPolicies.keys.sorted().map { identifier in
+            "system=\(identifier)|\(draft.systemItemPolicies[identifier]!.rawValue)"
+        }
     }
 
     private static func allowedBundleLines(
@@ -767,7 +870,7 @@ public extension PolicyDryRunImpactReport {
     var validationFailureSummary: String {
         let missing = Set(issues.compactMap { issue -> String? in
             switch issue {
-            case let .unknownBundleIdentifier(identifier), let .missingCurrentOwnership(identifier):
+            case let .unknownBundleIdentifier(identifier):
                 identifier
             default:
                 nil
@@ -815,6 +918,7 @@ public enum PolicyDryRunner {
             draft: draft,
             managementEnabled: managementEnabled,
             candidates: candidates,
+            observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
             scope: scope,
             blennyBundleIdentifier: blennyBundleIdentifier
         )
@@ -824,7 +928,9 @@ public enum PolicyDryRunner {
             presentation: .baseline,
             assignments: oldAssignments,
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-            blennyBundleIdentifier: blennyBundleIdentifier
+            blennyBundleIdentifier: blennyBundleIdentifier,
+            bluetoothPolicy: oldPolicy.bluetoothPolicy,
+            systemItemPolicies: oldPolicy.systemItemPolicies
         )
 
         var diff: BundlePolicyDiff?
@@ -837,13 +943,17 @@ public enum PolicyDryRunner {
                 presentation: .baseline,
                 assignments: assignments,
                 observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-                blennyBundleIdentifier: blennyBundleIdentifier
+                blennyBundleIdentifier: blennyBundleIdentifier,
+                bluetoothPolicy: proposed.bluetoothPolicy,
+                systemItemPolicies: proposed.systemItemPolicies
             )
             newReveal = try RevealAllowlistPlanner.plan(
                 presentation: .revealed,
                 assignments: assignments,
                 observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-                blennyBundleIdentifier: blennyBundleIdentifier
+                blennyBundleIdentifier: blennyBundleIdentifier,
+                bluetoothPolicy: proposed.bluetoothPolicy,
+                systemItemPolicies: proposed.systemItemPolicies
             )
         }
 

@@ -4,6 +4,34 @@ import Testing
 
 @Suite("Ordinary native and fallback integration")
 struct OrdinaryRevealCoordinatorTests {
+    @Test("Pass-through update preserves an existing reveal and its already-fired timeout")
+    func passThroughPreservesDeadline() throws {
+        var control = activeControl()
+        control.requestBlennyToggle()
+        _ = control.takePendingTransition()
+        control.synchronize(.ordinaryRevealSession("original"), hasRevealableBundles: true)
+        let session = try #require(control.sessionIdentifier)
+        control.requestTimeout(session: session)
+        control.suspendForPassThroughUpdate()
+        control.observe(.unavailable, source: .layout)
+        control.synchronize(.ordinaryRevealSession("expanded-allowance"), hasRevealableBundles: true)
+        #expect(control.sessionIdentifier == session)
+        #expect(control.presentation == .revealed)
+        control.resume()
+        #expect(control.takePendingTransition()?.presentation == .baseline)
+    }
+
+    @Test("Pass-through update consumes native reflow without an extra write")
+    func passThroughIgnoresReflow() {
+        var control = activeControl()
+        control.observe(collapsed, source: .valueChange)
+        control.observe(expanded, source: .valueChange)
+        control.suspendForPassThroughUpdate()
+        control.observe(collapsed, source: .layout)
+        control.synchronize(.active("expanded-allowance"), hasRevealableBundles: true)
+        control.resume()
+        #expect(control.takePendingTransition() == nil)
+    }
     private let collapsed = NativeOverflowObservationSnapshot(
         isPresent: true, presentationState: .collapsed, observationAvailable: true,
         controlIdentifier: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!

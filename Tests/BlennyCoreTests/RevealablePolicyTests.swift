@@ -40,6 +40,74 @@ struct RevealablePolicyTests {
         }
     }
 
+    @Test("Bluetooth follows Visible, Revealable and Hidden intent")
+    func bluetoothPolicyPlanning() throws {
+        let assignments = try BundlePolicyAssignments(
+            visible: [visible], revealable: [revealable], hidden: [hidden]
+        )
+        func plan(
+            _ presentation: RevealSessionPresentation,
+            _ policy: MenuBarBundlePolicy
+        ) throws -> RevealAllowlistPlan {
+            try RevealAllowlistPlanner.plan(
+                presentation: presentation,
+                assignments: assignments,
+                observedRunningBundleIdentifiers: [visible, revealable, hidden],
+                blennyBundleIdentifier: blenny,
+                bluetoothPolicy: policy
+            )
+        }
+
+        #expect(try plan(.baseline, .visible).allowedSystemItems.contains(1))
+        #expect(try plan(.revealed, .visible).allowedSystemItems.contains(1))
+        #expect(!((try plan(.baseline, .revealable)).allowedSystemItems.contains(1)))
+        #expect(try plan(.revealed, .revealable).allowedSystemItems.contains(1))
+        #expect(!((try plan(.baseline, .hidden)).allowedSystemItems.contains(1)))
+        #expect(!((try plan(.revealed, .hidden)).allowedSystemItems.contains(1)))
+        for protected in [0, 2, 6, 8] {
+            #expect(try plan(.baseline, .hidden).allowedSystemItems.contains(protected))
+        }
+    }
+
+    @Test("Persistent system items map all three policies across reveal sessions")
+    func persistentSystemItemPolicyPlanning() throws {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        let assignments = try BundlePolicyAssignments(
+            visible: [visible], revealable: [revealable], hidden: [hidden]
+        )
+        let policies: [String: MenuBarBundlePolicy] = [
+            SharedSystemItemTrialTarget.siri.observationIdentifier: .visible,
+            SharedSystemItemTrialTarget.timeMachine.observationIdentifier: .revealable,
+            SharedSystemItemTrialTarget.nowPlaying.observationIdentifier: .hidden,
+        ]
+        let baseline = try RevealAllowlistPlanner.plan(
+            presentation: .baseline,
+            assignments: assignments,
+            observedRunningBundleIdentifiers: [],
+            blennyBundleIdentifier: blenny,
+            systemItemPolicies: policies
+        )
+        let revealed = try RevealAllowlistPlanner.plan(
+            presentation: .revealed,
+            assignments: assignments,
+            observedRunningBundleIdentifiers: [],
+            blennyBundleIdentifier: blenny,
+            systemItemPolicies: policies
+        )
+
+        #expect(baseline.persistentSystemItems == [
+            SharedSystemItemTrialTarget.siri.observationIdentifier: .restored,
+            SharedSystemItemTrialTarget.timeMachine.observationIdentifier: .hidden,
+            SharedSystemItemTrialTarget.nowPlaying.observationIdentifier: .hidden,
+        ])
+        #expect(revealed.persistentSystemItems == [
+            SharedSystemItemTrialTarget.siri.observationIdentifier: .restored,
+            SharedSystemItemTrialTarget.timeMachine.observationIdentifier: .revealed,
+            SharedSystemItemTrialTarget.nowPlaying.observationIdentifier: .hidden,
+        ])
+        #endif
+    }
+
     @Test("Overlapping bundle policies fail closed")
     func overlappingPoliciesAreRejected() {
         #expect(throws: BundlePolicyAssignmentsError.self) {
@@ -254,6 +322,34 @@ struct RevealablePolicyTests {
             allowedBundleIdentifiers: [visible, revealable]
         )
         #expect(baseline.fingerprint != revealed.fingerprint)
+    }
+
+    @Test("Persistent system-item state participates in every plan fingerprint")
+    func persistentStateChangesFingerprint() {
+        let identifier = SharedSystemItemTrialTarget.nowPlaying.observationIdentifier
+        let visiblePlan = RevealAllowlistPlan(
+            presentation: .baseline,
+            allowedSystemItems: [0, 1, 2],
+            allowedBundleIdentifiers: [visible],
+            persistentSystemItems: [identifier: .restored]
+        )
+        let hiddenPlan = RevealAllowlistPlan(
+            presentation: .baseline,
+            allowedSystemItems: [0, 1, 2],
+            allowedBundleIdentifiers: [visible],
+            persistentSystemItems: [identifier: .hidden]
+        )
+        #expect(visiblePlan.fingerprint != hiddenPlan.fingerprint)
+        #expect(visiblePlan.authorizationFingerprint(for: [])
+            != hiddenPlan.authorizationFingerprint(for: []))
+        let assignments = try? BundlePolicyAssignments(
+            visible: [visible], revealable: [], hidden: []
+        )
+        #expect(assignments != nil)
+        if let assignments {
+            #expect(visiblePlan.managedPolicyFingerprint(assignments: assignments)
+                != hiddenPlan.managedPolicyFingerprint(assignments: assignments))
+        }
     }
 
     @Test("Managed policy fingerprint ignores unrelated running bundles")

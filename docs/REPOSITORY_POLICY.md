@@ -1,6 +1,6 @@
 # Repository policy
 
-Blenny uses one canonical repository. It remains private during the `0.0.x` engineering milestones and is intended to become public with the first `0.9.x` release candidate.
+Blenny uses one canonical repository. It remains private during the engineering milestones and is intended to become public with the first `0.10.x` release candidate.
 
 ## History
 

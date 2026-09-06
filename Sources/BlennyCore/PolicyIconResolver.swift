@@ -4,6 +4,7 @@ import Foundation
 /// any policy, draft, report, or assertion model.
 public enum PolicyIconDescriptor: Equatable, Sendable {
     case installedApplication
+    case namedImage(name: String)
     case systemSymbol(name: String)
     case fallback
 
@@ -18,11 +19,18 @@ public enum PolicyIconDescriptor: Equatable, Sendable {
         switch self {
         case .installedApplication:
             nil
+        case .namedImage:
+            nil
         case let .systemSymbol(name):
             name
         case .fallback:
             Self.fallbackSymbolName
         }
+    }
+
+    public var namedImageName: String? {
+        if case let .namedImage(name) = self { return name }
+        return nil
     }
 }
 
@@ -31,6 +39,9 @@ public enum PolicyIconResolver {
         bundleIdentifier: String,
         installedApplicationResolved: Bool
     ) -> PolicyIconDescriptor {
+        if ExperimentalAppleBundlePolicyCatalog.contains(bundleIdentifier) {
+            return systemItemDescriptor(observationIdentifier: bundleIdentifier)
+        }
         guard BundlePolicyIdentity.canonicalKey(for: bundleIdentifier) != nil,
               installedApplicationResolved else {
             return .fallback
@@ -64,14 +75,24 @@ public enum PolicyIconResolver {
     ) -> PolicyIconDescriptor {
         let normalized = MenuBarItemIdentityResolver.normalize(observationIdentifier) ?? ""
         for mapping in systemMappings where mapping.matches(normalized) {
-            return .systemSymbol(name: mapping.symbolName)
+            return mapping.image
         }
         return .fallback
     }
 
     private struct SystemMapping {
         let stableIdentityTokens: [String]
-        let symbolName: String
+        let image: PolicyIconDescriptor
+
+        init(stableIdentityTokens: [String], symbolName: String) {
+            self.stableIdentityTokens = stableIdentityTokens
+            image = .systemSymbol(name: symbolName)
+        }
+
+        init(stableIdentityTokens: [String], image: PolicyIconDescriptor) {
+            self.stableIdentityTokens = stableIdentityTokens
+            self.image = image
+        }
 
         func matches(_ normalizedIdentifier: String) -> Bool {
             stableIdentityTokens.contains { normalizedIdentifier.contains($0) }
@@ -83,7 +104,7 @@ public enum PolicyIconResolver {
     private static let systemMappings: [SystemMapping] = [
         .init(
             stableIdentityTokens: ["com.apple.menuextra.bluetooth", ":bluetooth|"],
-            symbolName: "antenna.radiowaves.left.and.right"
+            image: .namedImage(name: "NSBluetoothTemplate")
         ),
         .init(
             stableIdentityTokens: ["com.apple.menuextra.clock", ":clock|"],
@@ -107,7 +128,7 @@ public enum PolicyIconResolver {
         ),
         .init(
             stableIdentityTokens: ["com.apple.menuextra.siri", ":siri|"],
-            symbolName: "sparkles"
+            image: .systemSymbol(name: "siri")
         ),
         .init(
             stableIdentityTokens: ["com.apple.weather.menu", ":weather|"],

@@ -18,3 +18,13 @@ Historical observations and recovery results are documented in [the 0.0.1 techni
 [The 0.7.0 read-only probes](0.7.0/README.md) inspect position interfaces and
 scoped AX frames without providing a mutation path. The ordering implementation
 gate did not pass; no position guarantee is added.
+
+[The 0.8.0 research](0.8.0/README.md) enumerates the exact macOS 27 private
+system-item identifier catalog, validates dedicated Weather/Input Menu owners,
+and models the separate Siri, Time Machine and Now Playing preference inverses.
+Its shared-item probe has snapshot and pure-test modes only; it performs no
+assertion activation, preference write, synchronization or notification.
+The later product trial uses those reviewed inverses behind a current-build gate
+to give Siri, Time Machine and Now Playing the same three policy states as the
+assertion-backed items. The research executables remain read-only and are not
+linked into the app.

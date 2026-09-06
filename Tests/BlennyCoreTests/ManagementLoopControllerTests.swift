@@ -9,6 +9,181 @@ struct ManagementLoopControllerTests {
     private let usage = "xyz.fi5h.Usage4Claude"
     private let hidden = "pl.maketheweb.cleanshotx"
 
+    @Test("One additions-only expansion reuses the writer and retains both policy plans")
+    func passThroughExpansion() async throws {
+        let writer = ManagementTestWriter()
+        let loop = ManagementLoopController(writerProvider: { writer })
+        _ = await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline)
+        let expansion = try #require(try PassThroughExpansion.prepare(
+            baseline: baseline, reveal: revealed,
+            acceptedBundleIdentifiers: [blenny, usage, hidden],
+            launchedBundleIdentifiers: ["com.example.New", hidden, usage]
+        ))
+        try await loop.expandPassThrough(
+            from: baseline, to: expansion.baseline,
+            addedBundleIdentifiers: Set(expansion.addedBundleIdentifiers)
+        )
+        #expect(await writer.appliedPlans == [baseline, expansion.baseline])
+        #expect(await writer.verificationCount == 2)
+        #expect(await loop.state == .active(expansion.baseline.fingerprint))
+        #expect(await writer.restoreCount == 0)
+        #expect(try PassThroughExpansion.prepare(
+            baseline: expansion.baseline, reveal: expansion.reveal,
+            acceptedBundleIdentifiers: [blenny, usage, hidden],
+            launchedBundleIdentifiers: ["com.example.New"]
+        ) == nil)
+        try await loop.beginOrdinaryReveal(expansion.reveal)
+        #expect(!expansion.reveal.allowedBundleIdentifiers.contains(hidden))
+        try await loop.endOrdinaryReveal(expansion.baseline)
+        await loop.terminate()
+        #expect(await writer.restoreCount == 1)
+    }
+
+    @Test("Expansion during Reveal retains presentation and returns to the expanded baseline")
+    func passThroughDuringReveal() async throws {
+        let writer = ManagementTestWriter()
+        let loop = ManagementLoopController(writerProvider: { writer })
+        _ = await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline)
+        try await loop.beginOrdinaryReveal(revealed)
+        let expansion = try #require(try PassThroughExpansion.prepare(
+            baseline: baseline, reveal: revealed,
+            acceptedBundleIdentifiers: [blenny, usage, hidden],
+            launchedBundleIdentifiers: ["com.example.New"]
+        ))
+        try await loop.expandPassThrough(
+            from: revealed, to: expansion.reveal,
+            addedBundleIdentifiers: Set(expansion.addedBundleIdentifiers)
+        )
+        #expect(await loop.state == .ordinaryRevealSession(expansion.reveal.fingerprint))
+        #expect(await writer.restoreCount == 0)
+        try await loop.endOrdinaryReveal(expansion.baseline)
+        #expect(await loop.activePlanSnapshot() == expansion.baseline)
+        #expect(!expansion.baseline.allowedBundleIdentifiers.contains(usage))
+        #expect(!expansion.baseline.allowedBundleIdentifiers.contains(hidden))
+    }
+
+    @Test("Expansion verification failure stops once without retry or writer recreation")
+    func passThroughVerificationFailure() async throws {
+        let writer = ManagementTestWriter(verificationResults: [true, false])
+        let loop = ManagementLoopController(writerProvider: { writer })
+        _ = await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline)
+        let expanded = RevealAllowlistPlan(
+            presentation: .baseline, allowedSystemItems: baseline.allowedSystemItems,
+            allowedBundleIdentifiers: baseline.allowedBundleIdentifiers + ["com.example.New"]
+        )
+        await #expect(throws: ManagementLoopError.activationCouldNotBeVerified) {
+            try await loop.expandPassThrough(
+                from: baseline, to: expanded, addedBundleIdentifiers: ["com.example.New"]
+            )
+        }
+        #expect(await writer.appliedPlans == [baseline, expanded])
+        #expect(await writer.verificationCount == 2)
+        #expect(await writer.restoreCount == 1)
+        #expect(await loop.activePlanSnapshot() == nil)
+        await #expect(throws: ManagementLoopError.managementIsNotActive) {
+            try await loop.expandPassThrough(
+                from: baseline, to: expanded, addedBundleIdentifiers: ["com.example.New"]
+            )
+        }
+        #expect(await writer.appliedPlans.count == 2)
+    }
+
+    @Test("Late expansion verification cannot resurrect a stopped writer")
+    func passThroughStopRace() async throws {
+        let barrier = VerificationBarrier()
+        let writer = ManagementTestWriter(verificationBarrier: barrier)
+        let loop = ManagementLoopController(writerProvider: { writer })
+        _ = await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline)
+        let expanded = RevealAllowlistPlan(
+            presentation: .baseline, allowedSystemItems: baseline.allowedSystemItems,
+            allowedBundleIdentifiers: baseline.allowedBundleIdentifiers + ["com.example.New"]
+        )
+        let update = Task {
+            try await loop.expandPassThrough(
+                from: baseline, to: expanded, addedBundleIdentifiers: ["com.example.New"]
+            )
+        }
+        await barrier.waitUntilEntered()
+        await #expect(throws: ManagementLoopError.managementIsNotActive) {
+            try await loop.beginOrdinaryReveal(revealed)
+        }
+        await loop.stop()
+        await barrier.release()
+        await #expect(throws: ManagementLoopError.staleLifecycleGeneration) { try await update.value }
+        #expect(await loop.state == .stopped)
+        #expect(await writer.restoreCount == 1)
+        #expect(await loop.activePlanSnapshot() == nil)
+    }
+
+    @Test("Stopped management cannot acquire a writer from an additions-only event")
+    func passThroughDoesNotResume() async throws {
+        let provider = ManagementWriterProvider()
+        let loop = ManagementLoopController(writerProvider: { await provider.makeWriter() })
+        _ = await loop.recover(acceptedPolicy: try policy(enabled: false), baseline: nil)
+        let expanded = RevealAllowlistPlan(
+            presentation: .baseline, allowedSystemItems: baseline.allowedSystemItems,
+            allowedBundleIdentifiers: baseline.allowedBundleIdentifiers + ["com.example.New"]
+        )
+        await #expect(throws: ManagementLoopError.managementIsNotActive) {
+            try await loop.expandPassThrough(
+                from: baseline, to: expanded, addedBundleIdentifiers: ["com.example.New"]
+            )
+        }
+        #expect(await provider.creationCount == 0)
+    }
+
+    @Test("Confirmed unrestricted pause is truthful and non-alarming; cleanup failure remains an error")
+    func statusSeverity() throws {
+        let pause = try #require(ManagementLoopState.failClosedUnrestricted(
+            ManagementLifecycleEvent.applicationLaunched("com.example.New").reason
+        ).statusNotice(persistedManagementEnabled: true))
+        #expect(!pause.isError)
+        #expect(pause.message.contains("paused"))
+        #expect(pause.message.contains("restrictions are removed"))
+        #expect(pause.message.contains("com.example.New"))
+        #expect(pause.message.contains("Resume"))
+        #expect(!pause.message.contains("frozen management scope"))
+        #expect(ManagementLoopState.failClosedUnrestricted("stopped").statusNotice(
+            persistedManagementEnabled: false
+        ) == nil)
+        #expect(ManagementLoopState.unsupportedRuntimeContract("unknown").statusNotice(
+            persistedManagementEnabled: true
+        )?.isError == false)
+        #expect(ManagementLoopState.restorationFailed("writer retained").statusNotice(
+            persistedManagementEnabled: true
+        )?.isError == true)
+        #expect(ManagementLoopState.restorationFailed("writer retained")
+            .requiresImmediateProcessExit)
+        #expect(!ManagementLoopState.failClosedUnrestricted("stopped")
+            .requiresImmediateProcessExit)
+    }
+
+    @Test("Accepted app churn leaves the exact active assertion intact")
+    func acceptedAppLifecycleIsNonMutating() async throws {
+        let writer = ManagementTestWriter()
+        let loop = ManagementLoopController(writerProvider: { writer })
+        _ = await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline)
+        for event in [
+            ManagementLifecycleEvent.applicationLaunched(usage),
+            .applicationTerminated(usage), .applicationLaunched(hidden),
+            .applicationTerminated(hidden),
+        ] {
+            if ManagementLifecyclePolicy.invalidates(
+                event, managedBundleIdentifiers: [blenny, usage, hidden],
+                allowedBundleIdentifiers: Set(baseline.allowedBundleIdentifiers),
+                blennyBundleIdentifier: blenny
+            ) {
+                await loop.failClosed(event.reason)
+            }
+        }
+        #expect(await loop.state == .active(baseline.fingerprint))
+        #expect(await writer.appliedPlans == [baseline])
+        #expect(await writer.restoreCount == 0)
+        #expect(await loop.activePlanSnapshot() == baseline)
+        await loop.terminate()
+        #expect(await writer.restoreCount == 1)
+    }
+
     @Test("Stopped startup never creates a writer")
     func stoppedStartupIsPure() async throws {
         let provider = ManagementWriterProvider()
@@ -391,7 +566,7 @@ private actor ManagementTestWriter: PolicyAssertionWriting {
     private var verificationResults: [Bool]
     private let failReveal: Bool
     private let throwVerificationOnCall: Int?
-    private var verificationCount = 0
+    private(set) var verificationCount = 0
     private let verificationBarrier: VerificationBarrier?
     private let retainOnRestore: Bool
 

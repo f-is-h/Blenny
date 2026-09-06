@@ -21,7 +21,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "BlennyApp",
-            dependencies: ["BlennyCore"]
+            dependencies: ["BlennyCore", "BlennyPrivateABIShim"]
+        ),
+        .target(
+            name: "BlennyPrivateABIShim",
+            publicHeadersPath: "include"
         ),
         .executableTarget(
             name: "BlennyLayoutProbe",

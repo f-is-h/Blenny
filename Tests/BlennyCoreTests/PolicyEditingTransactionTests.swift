@@ -685,7 +685,7 @@ struct PolicyEditingTransactionTests {
         #expect(await store.saveCount == 0)
     }
 
-    @Test("Resume still rejects missing backup and missing targets before writer access")
+    @Test("Resume rejects a missing backup but permits absent approved targets")
     func resumePreflightFailures() async throws {
         let accepted = try document(enabled: true, revealable: usage, hidden: cleanShot)
         let provider = TransactionWriterProvider()
@@ -702,11 +702,54 @@ struct PolicyEditingTransactionTests {
         let core = PolicyEditingCore(store: store, blennyBundleIdentifier: blenny, scope: scope,
                                      writerProvider: { try await provider.makeWriter() })
         let preview = try await core.previewResumeManaging(
-            candidates: PolicyCandidateInventory(observations: []), observedRunningBundleIdentifiers: []
+            candidates: PolicyCandidateInventory(observations: []),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot]
         )
-        #expect(preview.1 == nil)
-        #expect(preview.0.validationFailureSummary.contains(usage))
-        #expect(preview.0.validationFailureSummary.contains("then choose Resume"))
+        #expect(preview.1 != nil)
+        #expect(preview.0.issues.isEmpty)
+        #expect(await provider.creationCount == 0)
+    }
+
+    @Test("Resume backup permits only the exact Debug Apple owner catalog")
+    func experimentalAppleOwnerResumeBackupIsDebugOnly() async throws {
+        let weather = "com.apple.weather.menu"
+        let accepted = try PersistentBundlePolicyDocument(
+            managementEnabled: true,
+            policies: [
+                .init(bundleIdentifier: blenny, policy: .visible),
+                .init(bundleIdentifier: weather, policy: .hidden),
+            ]
+        )
+        let provider = TransactionWriterProvider()
+        let core = PolicyEditingCore(
+            store: MemoryPolicyStore(
+                document: accepted,
+                backup: PersistentBundlePolicyBackup(previousPolicy: accepted)
+            ),
+            blennyBundleIdentifier: blenny,
+            scope: PolicyValidationScope(approvedBundleIdentifiers: [blenny, weather]),
+            writerProvider: { try await provider.makeWriter() }
+        )
+        let candidates = PolicyCandidateInventory(observations: [
+            .init(bundleIdentifier: blenny, processIdentifier: 10, menuBarItemCount: 1),
+            .init(bundleIdentifier: weather, processIdentifier: 20, menuBarItemCount: 1),
+        ])
+
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        let preview = try await core.previewResumeManaging(
+            candidates: candidates,
+            observedRunningBundleIdentifiers: [blenny, weather]
+        )
+        #expect(preview.1 != nil)
+        #expect(preview.0.newBaselinePlan?.allowedBundleIdentifiers == [blenny])
+        #else
+        await #expect(throws: PolicyEditingCoreError.previousPolicyBackupIncompatible) {
+            _ = try await core.previewResumeManaging(
+                candidates: candidates,
+                observedRunningBundleIdentifiers: [blenny, weather]
+            )
+        }
+        #endif
         #expect(await provider.creationCount == 0)
     }
 

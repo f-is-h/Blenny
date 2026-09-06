@@ -35,6 +35,50 @@ public enum ManagementLoopError: Error, Equatable, Sendable {
     case staleLifecycleGeneration
 }
 
+/// Status severity describes the remaining risk, not how cautious the stop was.
+/// Confirmed cleanup is a recoverable pause; unconfirmed cleanup is an error.
+public struct ManagementStatusNotice: Equatable, Sendable {
+    public let message: String
+    public let isError: Bool
+}
+
+extension ManagementLoopState {
+    public var requiresImmediateProcessExit: Bool {
+        if case .restorationFailed = self { return true }
+        return false
+    }
+
+    public func statusNotice(persistedManagementEnabled: Bool) -> ManagementStatusNotice? {
+        switch self {
+        case .active:
+            ManagementStatusNotice(
+                message: "Management is active for the verified policy baseline.", isError: false
+            )
+        case .stopped:
+            ManagementStatusNotice(
+                message: "Management is stopped. Draft changes remain local until Apply.", isError: false
+            )
+        case .unsupportedRuntimeContract:
+            ManagementStatusNotice(
+                message: "This macOS build is not supported for management. No restrictions were applied.",
+                isError: false
+            )
+        case let .failClosedUnrestricted(detail) where persistedManagementEnabled:
+            ManagementStatusNotice(
+                message: "Management is paused. Your policy is saved and Blenny's restrictions are removed. \(detail)",
+                isError: false
+            )
+        case let .restorationFailed(detail):
+            ManagementStatusNotice(
+                message: "Cleanup could not be confirmed. Blenny will quit to release its connection. \(detail)",
+                isError: true
+            )
+        default:
+            nil
+        }
+    }
+}
+
 extension ManagementLoopError: LocalizedError {
     public var errorDescription: String? {
         switch self {
@@ -60,6 +104,7 @@ public actor ManagementLoopController {
     private var lifecycleGeneration: UInt64 = 0
     private var restartRequired = false
     private var terminationCleanupAttempted = false
+    private var passThroughUpdateInProgress = false
     public private(set) var state: ManagementLoopState = .unknown
 
     public init(writerProvider: @escaping WriterProvider) {
@@ -173,8 +218,64 @@ public actor ManagementLoopController {
         }
     }
 
+    /// Owner-authorized lifecycle maintenance: only widen the current allowance.
+    /// Reuse the existing writer; never acquire one, resume stopped management,
+    /// change presentation, or retry. On failure remove restrictions instead of
+    /// retaining a plan that could conceal the newly launched application.
+    public func expandPassThrough(
+        from expected: RevealAllowlistPlan,
+        to replacement: RevealAllowlistPlan,
+        addedBundleIdentifiers: Set<String>
+    ) async throws {
+        guard !restartRequired, !passThroughUpdateInProgress, let writer else {
+            throw ManagementLoopError.managementIsNotActive
+        }
+        let currentFingerprint: String
+        switch state {
+        case let .active(fingerprint), let .ordinaryRevealSession(fingerprint):
+            currentFingerprint = fingerprint
+        default:
+            throw ManagementLoopError.managementIsNotActive
+        }
+        guard currentFingerprint == expected.fingerprint else {
+            throw ManagementLoopError.staleLifecycleGeneration
+        }
+        try PassThroughExpansion.validateReplacement(
+            from: expected, to: replacement,
+            addedBundleIdentifiers: addedBundleIdentifiers
+        )
+        passThroughUpdateInProgress = true
+        defer { passThroughUpdateInProgress = false }
+        let generation = lifecycleGeneration
+        do {
+            let snapshot = await writer.activePlanSnapshot()
+            guard generation == lifecycleGeneration, snapshot == expected else {
+                throw ManagementLoopError.staleLifecycleGeneration
+            }
+            try await writer.applySessionTransition(with: replacement)
+            guard generation == lifecycleGeneration else {
+                throw ManagementLoopError.staleLifecycleGeneration
+            }
+            guard try await writer.verifyActivePlan(replacement) else {
+                throw ManagementLoopError.activationCouldNotBeVerified
+            }
+            guard generation == lifecycleGeneration else {
+                throw ManagementLoopError.staleLifecycleGeneration
+            }
+            state = replacement.presentation == .baseline
+                ? .active(replacement.fingerprint)
+                : .ordinaryRevealSession(replacement.fingerprint)
+        } catch {
+            // Preserve a concurrent Stop/termination/connection-loss result.
+            if generation == lifecycleGeneration {
+                await restoreAndStop(detail: "A new application's visibility could not be verified. Choose Resume to recheck.")
+            }
+            throw error
+        }
+    }
+
     public func beginOrdinaryReveal(_ plan: RevealAllowlistPlan) async throws {
-        guard case .active = state, let writer else {
+        guard !passThroughUpdateInProgress, case .active = state, let writer else {
             throw ManagementLoopError.managementIsNotActive
         }
         let generation = lifecycleGeneration
@@ -204,7 +305,7 @@ public actor ManagementLoopController {
     }
 
     public func endOrdinaryReveal(_ baseline: RevealAllowlistPlan) async throws {
-        guard case .ordinaryRevealSession = state, let writer else {
+        guard !passThroughUpdateInProgress, case .ordinaryRevealSession = state, let writer else {
             throw ManagementLoopError.managementIsNotActive
         }
         let generation = lifecycleGeneration

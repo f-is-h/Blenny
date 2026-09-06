@@ -20,7 +20,20 @@ struct ProductInterfaceActions {
     let setLaunchAtLogin: (Bool) -> Void
     let openLoginItemsSettings: () -> Void
     let showFishPlacementGuide: () -> Void
+    let hideSharedSystemItem: (SharedSystemItemTrialTarget) -> Void
+    let restoreSharedSystemItem: (SharedSystemItemTrialTarget) -> Void
 }
+
+#if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+enum SharedSystemItemTrialPresentation: Equatable {
+    case checking
+    case ready
+    case hidden
+    case busy
+    case recoveryRequired
+    case unavailable(String)
+}
+#endif
 
 struct ResolvedPolicyIcon {
     let descriptor: PolicyIconDescriptor
@@ -37,6 +50,23 @@ final class WorkspacePolicyIconResolver {
     }
 
     func applicationIcon(bundleIdentifier: String) -> ResolvedPolicyIcon {
+        let semanticDescriptor = PolicyIconResolver.applicationDescriptor(
+            bundleIdentifier: bundleIdentifier,
+            installedApplicationResolved: false
+        )
+        if let displayName = ExperimentalAppleBundlePolicyCatalog.displayName(
+            for: bundleIdentifier
+        ), let symbolName = semanticDescriptor.symbolName,
+           let image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: displayName
+           ) {
+            return ResolvedPolicyIcon(
+                descriptor: semanticDescriptor,
+                displayName: displayName,
+                image: sizedCopy(of: image)
+            )
+        }
         guard let applicationURL = workspace.urlForApplication(
             withBundleIdentifier: bundleIdentifier
         ) else {
@@ -73,11 +103,18 @@ final class WorkspacePolicyIconResolver {
         let descriptor = PolicyIconResolver.systemItemDescriptor(
             observationIdentifier: observation.observationIdentifier
         )
-        guard let symbolName = descriptor.symbolName,
-              let image = NSImage(
+        let image: NSImage?
+        if let symbolName = descriptor.symbolName {
+            image = NSImage(
                 systemSymbolName: symbolName,
                 accessibilityDescription: observation.displayName
-              ) else {
+            )
+        } else if let namedImageName = descriptor.namedImageName {
+            image = NSImage(named: NSImage.Name(namedImageName))
+        } else {
+            image = nil
+        }
+        guard let image else {
             return fallback(displayName: observation.displayName)
         }
         return ResolvedPolicyIcon(
@@ -150,6 +187,13 @@ final class ProductInterfaceModel: ObservableObject {
     @Published private(set) var managementRuntimeState: ManagementLoopState = .unknown
     @Published private(set) var developmentMutationAvailable = false
     @Published private(set) var nativeOverflowPlacementAvailable = false
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    @Published private(set) var sharedSystemItemTrials = Dictionary(
+        uniqueKeysWithValues: SharedSystemItemTrialTarget.allCases.map {
+            ($0, SharedSystemItemTrialPresentation.checking)
+        }
+    )
+    #endif
 
     private let iconResolver = WorkspacePolicyIconResolver()
     private var assignmentCoordinator = PolicyDraftAssignmentCoordinator()
@@ -179,7 +223,70 @@ final class ProductInterfaceModel: ObservableObject {
         }
     }
     var hasDraftChanges: Bool { model?.hasDraftChanges == true }
-    var systemItems: [SystemMenuBarItemObservation] { model?.systemItems ?? [] }
+    var systemItems: [SystemMenuBarItemObservation] {
+        var items = model?.systemItems ?? []
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        for target in SharedSystemItemTrialTarget.allCases {
+            let presentation = sharedSystemItemTrialPresentation(for: target)
+            guard presentation == .ready || presentation == .recoveryRequired,
+                  !items.contains(where: {
+                      sharedSystemItemTrialTarget(for: $0.observationIdentifier) == target
+                  }) else {
+                continue
+            }
+            items.append(
+                SystemMenuBarItemObservation(
+                    observationIdentifier: target.observationIdentifier,
+                    ownerBundleIdentifier: target.ownerBundleIdentifier,
+                    displayName: target.displayName,
+                    observationCount: 0
+                )
+            )
+        }
+        #endif
+        return items.sorted {
+            ($0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending)
+        }
+    }
+
+    func systemItems(in policy: MenuBarBundlePolicy) -> [SystemMenuBarItemObservation] {
+        systemItems.filter { observation in
+            if isControllableSystemItem(observation.observationIdentifier) {
+                return model?.effectiveSystemItemPolicy(
+                    for: observation.observationIdentifier
+                ) == policy
+            }
+            return policy == .visible
+        }
+    }
+
+    func isControllableSystemItem(_ observationIdentifier: String) -> Bool {
+        SystemItemPolicyCatalog.controllableItem(for: observationIdentifier) != nil
+            || PersistentSystemItemPolicyCatalog.controllableItem(
+                for: observationIdentifier
+            ) != nil
+    }
+
+    func isInteractiveSystemItem(_ observationIdentifier: String) -> Bool {
+        isControllableSystemItem(observationIdentifier)
+    }
+
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    func sharedSystemItemTrialTarget(
+        for observationIdentifier: String
+    ) -> SharedSystemItemTrialTarget? {
+        SharedSystemItemTrialTarget.matchingSystemItem(
+            observationIdentifier: observationIdentifier
+        )
+    }
+
+    func sharedSystemItemTrialPresentation(
+        for target: SharedSystemItemTrialTarget
+    ) -> SharedSystemItemTrialPresentation {
+        sharedSystemItemTrials[target] ?? .checking
+    }
+
+    #endif
 
     func navigate(to section: ProductInterfaceSection) {
         var updatedNavigation = navigation
@@ -272,6 +379,15 @@ final class ProductInterfaceModel: ObservableObject {
         )
     }
 
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    func setSharedSystemItemTrial(
+        _ target: SharedSystemItemTrialTarget,
+        presentation: SharedSystemItemTrialPresentation
+    ) {
+        sharedSystemItemTrials[target] = presentation
+    }
+    #endif
+
     func setManagementRuntimeState(
         _ state: ManagementLoopState,
         developmentMutationAvailable: Bool
@@ -291,6 +407,18 @@ final class ProductInterfaceModel: ObservableObject {
             }
         }
         return candidates
+    }
+
+    func applicationCandidates(in policy: MenuBarBundlePolicy) -> [PolicyCandidate] {
+        candidates(in: policy).filter {
+            !ExperimentalAppleBundlePolicyCatalog.contains($0.bundleIdentifier)
+        }
+    }
+
+    func appleSystemCandidates(in policy: MenuBarBundlePolicy) -> [PolicyCandidate] {
+        candidates(in: policy).filter {
+            ExperimentalAppleBundlePolicyCatalog.contains($0.bundleIdentifier)
+        }
     }
 
     func candidate(bundleIdentifier: String) -> PolicyCandidate? {
@@ -382,6 +510,42 @@ final class ProductInterfaceModel: ObservableObject {
             destination: destination,
             editor: &editor
         )
+        if outcome.changedDraft {
+            model = editor
+            setStatus("Draft changes are local and unapplied.", isError: false)
+        }
+        return outcome
+    }
+
+    @discardableResult
+    func assignBluetooth(
+        destination: MenuBarBundlePolicy
+    ) -> PolicyDraftAssignmentOutcome {
+        assignSystemItem(
+            identifier: SystemMenuBarItemObservation.bluetoothIdentifier,
+            destination: destination
+        )
+    }
+
+    @discardableResult
+    func assignSystemItem(
+        identifier: String,
+        destination: MenuBarBundlePolicy
+    ) -> PolicyDraftAssignmentOutcome {
+        guard !isApplying, !isRefreshing else {
+            return .rejected(.interactionInProgress)
+        }
+        guard var editor = model else { return .rejected(.unknownCandidate) }
+        let result = editor.assignSystemItem(identifier: identifier, to: destination)
+        let outcome: PolicyDraftAssignmentOutcome
+        switch result {
+        case .changed:
+            outcome = .changed
+        case .unchanged:
+            outcome = .rejected(.samePolicy)
+        case .unknownCandidate, .rejectedBlennyMustRemainVisible:
+            outcome = .rejected(.unknownCandidate)
+        }
         if outcome.changedDraft {
             model = editor
             setStatus("Draft changes are local and unapplied.", isError: false)
@@ -543,7 +707,9 @@ final class PolicyEditorWindowController: NSWindowController {
         onOpenKoFi: @escaping () -> Void,
         onSetLaunchAtLogin: @escaping (Bool) -> Void,
         onOpenLoginItemsSettings: @escaping () -> Void,
-        onShowFishPlacementGuide: @escaping () -> Void
+        onShowFishPlacementGuide: @escaping () -> Void,
+        onHideSharedSystemItem: @escaping (SharedSystemItemTrialTarget) -> Void,
+        onRestoreSharedSystemItem: @escaping (SharedSystemItemTrialTarget) -> Void
     ) {
         #if DEBUG
         usesPopulatedValidationFixture = ProcessInfo.processInfo.environment[
@@ -605,7 +771,9 @@ final class PolicyEditorWindowController: NSWindowController {
             openKoFi: onOpenKoFi,
             setLaunchAtLogin: onSetLaunchAtLogin,
             openLoginItemsSettings: onOpenLoginItemsSettings,
-            showFishPlacementGuide: onShowFishPlacementGuide
+            showFishPlacementGuide: onShowFishPlacementGuide,
+            hideSharedSystemItem: onHideSharedSystemItem,
+            restoreSharedSystemItem: onRestoreSharedSystemItem
         )
         let rootView = BlennyRootView(model: interfaceModel, actions: actions)
         let hostingController = NSHostingController(rootView: rootView)
@@ -741,6 +909,15 @@ final class PolicyEditorWindowController: NSWindowController {
     ) {
         interfaceModel.setNativeOverflowPlacement(snapshot)
     }
+
+    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    func setSharedSystemItemTrial(
+        _ target: SharedSystemItemTrialTarget,
+        presentation: SharedSystemItemTrialPresentation
+    ) {
+        interfaceModel.setSharedSystemItemTrial(target, presentation: presentation)
+    }
+    #endif
 
     func setApplying(_ applying: Bool) {
         interfaceModel.setApplying(applying)

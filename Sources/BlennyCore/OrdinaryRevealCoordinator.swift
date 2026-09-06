@@ -201,4 +201,16 @@ public struct OrdinaryRevealCoordinator: Sendable {
     }
 
     public mutating func resume() { suspended = false }
+
+    /// A pass-through expansion does not alter user intent or the reveal clock.
+    /// Ignore native reflow, but retain explicit input and an already-fired timeout.
+    public mutating func suspendForPassThroughUpdate() {
+        suspended = true
+        if pendingOrigin == .native {
+            pending = nil
+            pendingOrigin = nil
+            pendingReason = nil
+        }
+        lastDecision = "pass-through-update-preserve-explicit-intent"
+    }
 }

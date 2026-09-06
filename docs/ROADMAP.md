@@ -7,7 +7,7 @@ Blenny advances by verified exit criteria, not by elapsed time or commit count. 
 - `0.0.x` versions are private engineering-foundation milestones. They may add bounded experimental capability, may be Debug-only, and are not public releases.
 - `0.y.0` versions beginning with `0.1.0` introduce a coherent pre-release product capability built on the validated engineering foundation.
 - `0.y.z` patch versions after a `0.y.0` milestone contain fixes and compatibility updates without expanding that milestone's scope.
-- `0.9.x` versions are the first public, open-source release candidates. Source and signed binaries ship together.
+- `0.10.x` versions are the first public, open-source release candidates. Source and signed binaries ship together.
 - `1.0.0` begins the stable product contract and published macOS compatibility policy.
 - A version advances only when every required exit criterion is verified and restoration is complete.
 - An explicitly scoped safety-feasibility investigation may close with an evidenced no-go; that does not mean the proposed feature or its implementation gate passed.
@@ -347,9 +347,290 @@ Final product resolution:
   28 suites. Both 0.7.0 app configurations build; installed verification and
   exact local-state comparison are recorded in the spike.
 
-## 0.8.0 — Distribution prototype
+## 0.8.0 — Apple system-item visibility feasibility
 
-Moved from 0.7.0 to retain the separate ordering milestone; distribution scope is unchanged.
+Status: **Complete. Bluetooth raw value `1` is the sole ordinary Release
+promotion. The optimized trial supports every current mapped target except Clock
+through one of three narrow capability families: numbered item assertion, exact
+owning-bundle assertion, or item-scoped persistent transaction. The owner
+validated all three families, restored Siri, Time Machine and Now Playing, and
+the final installed stopped-startup regression preserved every baseline.**
+
+Investigate whether one non-critical Apple item that System Settings itself
+allows the user to hide can be concealed and restored through the existing
+assessment boundary. The original trial selected Bluetooth alone. The owner
+clarified that they want all mapped controls available in the Debug Board for
+manual testing, not sequential automated trials. Expose raw values 0, 1, 3, 4, 5,
+6, 7 and 8 through the existing serial writer and Review/Apply flow, with isolated
+test policy and a stopped startup. Clock and native overflow remain read-only;
+Siri, Now Playing and unknown identities await a separate implemented route.
+Release still exposes only Bluetooth. Manual visibility results do not count as
+automatic promotion or completion of restoration/lifecycle evidence.
+
+Advance when:
+
+- The exact macOS 27 private system-item catalog is mapped to fresh AX and scoped
+  preference identities without invoking a private mutation method.
+- One installed PREVIEW binds a complete Bluetooth-visible baseline, all protected
+  system identity counts, scoped preference values, preference/policy file hashes,
+  exact runtime and a frozen application allow-list to a mode-0600 receipt. Recorded
+  frame reflow and application departure are benign; identity drift or any newly
+  running bundle remains stale.
+- Deterministic tests prove confirmation, staleness, exact-target, serial-writer,
+  failure, invalidation and exact-restoration behavior. The diagnostic delegate
+  remains Debug-only; Release contains only the runtime-gated writer path.
+- The owner receives the exact target, allow-list delta, duration, fingerprint,
+  risk and recovery contract and separately authorizes that exact receipt before
+  one real write.
+- A successful authorized run omits only Bluetooth raw value `1`, performs zero
+  preference writes, verifies once, invalidates once and exactly restores AX
+  state, scoped preferences and file hashes. There is no polling, automatic
+  reconciliation, synthetic input, pixel capture, injection, private entitlement,
+  SIP change, helper or system UI restart.
+- Debug and Release tests/builds and installed regressions pass with Xcode 27.
+  Promotion is limited to Bluetooth and does not authorize any other Apple item.
+
+Evidence and the promotion decision are recorded in
+`docs/TECH_SPIKE_0.8.0.md`.
+
+Current verified implementation: 312 Debug tests / 33 suites and 267 Release tests /
+28 suites pass. Both 0.8.0 app configurations build and pass architecture, SDK,
+deployment and signature checks. Installed Debug no-writer dry-run prepared a
+Bluetooth-visible schema-3 plan with no writer, assertion or persistence change.
+The exact Release build is installed and running; startup preserved the
+accepted-policy and previous-policy hashes. The owner subsequently exercised the
+Visible / Revealable / Hidden Bluetooth controls and reported normal adjustment.
+A presentation-only follow-up uses AppKit's native Bluetooth template and macOS
+27's dedicated Siri symbol without broadening Apple-item write authority.
+The subsequent read-only identifier investigation confirms the nine-value
+assessment enum is complete on this build and identifies separate Siri/module
+preference surfaces. Next research is exact string identity, persistence,
+notification and restoration semantics; it does not promote further items.
+See `Research/0.8.0/IDENTIFIER_FINDINGS.md`.
+
+The 0.8.0 startup recovery correction also limits danger detection to mutation
+scope. A previously approved bundle remains in the exact policy plan without
+requiring a live ownership candidate, whether dormant or currently running, and
+multiple owner PIDs consolidate under that bundle identity. Unknown ownership or
+unknown input still fails closed because either could hide an unapproved item. The installed case that previously
+reported inactive solely because `xyz.fi5h.Usage4Claude` was dormant now reaches
+active management and restores its serial writer on normal Quit.
+
+The 2026-09-04 lifecycle follow-up separately preserves accepted bundle policy
+across launch/quit and uses accepted, not unapplied Draft, scope. Confirmed
+unrestricted cleanup becomes a neutral pause notice; unconfirmed cleanup remains
+an error. Local checks pass 316 Debug tests / 33 suites and 271 Release tests /
+28 suites plus both builds/signatures; that checkpoint was not installed.
+The owner subsequently approved an additions-only, event-triggered pass-through
+update. The implementation coalesces launch identities over a fixed 250 ms,
+reuses only the already-active serial writer, preserves both policy presentations
+and the existing reveal deadline, and performs no AX inventory for named bundles.
+No polling or retry loop is added. Tests now pass 330 Debug / 34 suites and
+285 Release / 29 suites; installed no-writer regression now passes with unchanged
+accepted-policy and backup hashes. Live observed performance remains pending.
+Existing 0.7.0 launch-invalidation notes above are historical and superseded by
+this explicit owner-authorized lifecycle exception.
+
+The expanded Debug Bluetooth/Wi-Fi trial planner passes 333 Debug tests / 34
+suites, with 285 Release tests / 29 suites unchanged. Both builds pass and an
+installed Wi-Fi PREVIEW passes without a writer or state changes. Wi-Fi APPLY
+was not executed. That one-item workflow is superseded by the owner's request
+for manual Debug Board controls; this is not promotion.
+
+The manual Board build passes 341 Debug tests / 35 suites, 292 Release tests /
+30 suites and both builds. Installed no-writer regression covers eight controls
+and 24 policy plans. After the initial Accessibility setup checkpoint, the owner
+reported successful hide/show for Bluetooth, Wi-Fi, Control Center and Sound.
+This is owner-observed visibility evidence, not exhaustive lifecycle/restoration
+acceptance; Release stays Bluetooth-only.
+
+The subsequent Clock-excluded investigation establishes Weather and Input Menu
+dedicated-owner candidates, exact Input Menu visibility controls, a Now Playing
+read/inverse model passing 95 pure checks in both optimization modes, and Siri's
+distributed-notification emitter. No new system mutation or app replacement
+occurred. Remaining gates are exact-owner assessment effect/restoration for
+Weather/Input Menu, and installed persistent-write/refresh/recovery design for
+Now Playing/Siri. See `Research/0.8.0/REMAINING_ITEMS_VALIDATION.md`.
+
+On 2026-09-05, Weather and Input Menu were added to the owner-operated Debug
+Board as exact bundle-level candidates. No preference route was added. Every
+other Apple bundle remains read-only, and Release remains Bluetooth-only on its
+previously validated build. The host had updated to `26A5425a`; before admitting
+that build to Debug, a standalone read-only probe confirmed the unchanged
+MenuBarClientCore UUID, six exact method encodings and an in-memory configuration
+round trip without constructing an assertion. The complete Debug 345-test / 35-
+suite and Release 296-test / 30-suite matrices and both app builds pass. Installed
+dry-run observed both current owners and verified six plans with no writer,
+assertion or policy/hash change. Actual hide/show and restoration are pending the
+owner's manual trial.
+
+The owner then confirmed successful hide and Reveal for both Weather and Input
+Menu. Their exact Debug application identities now render with semantic Weather
+and Input Menu symbols rather than generic application/fallback artwork. The
+full 345 Debug / 35-suite and 296 Release / 30-suite matrices and both signed
+macOS 27 builds pass after that presentation-only correction.
+
+Siri and Time Machine are now confirmed to share `com.apple.systemuiserver`, so
+bundle assessment is prohibited for both. Current-build read-only mapping
+resolves Siri's two current-user/any-host keys and notification, and Time
+Machine's exact ordered `menuExtras` path plus status-item metadata and private
+per-item setter route. A product-excluded plan passes 15 pure checks in both
+optimization modes and performs five reads with zero writes/notifications. The
+remaining gate is a dedicated installed no-write receipt and serial
+persistent-state writer with exact comparison/recovery; neither item is editable
+or promoted yet. The current app is not replaced until the owner observes the
+active state and approves releasing it.
+
+The dedicated manual route is implemented. A
+read-only ABI probe on build `26A5425a` resolved the shared
+`SystemItemMenuBarPreferences` object and returned `true` from the Siri and Time
+Machine getters without calling either setter. The app exposes explicit Hide and
+Restore buttons in Settings. One serial operation gate prevents reentrant writes;
+each hide saves a mode-0600 exact receipt before calling Apple's item-specific
+setter, verifies once, and performs one bounded rollback on failure. Restore
+refuses intervening changes and restores exact presence/value state. Debug passes
+349 tests / 36 suites; Release remains 296 / 30 and contains neither the private
+framework path, accessor symbols, ABI shim symbols nor the Debug panel. The owner
+then requested a Release-configuration binary because the Debug build
+was not suitable for their local permission state. A separate optimized trial
+flavor passed 300 tests / 31 suites and was installed at `/Applications/Blenny.app`
+with executable SHA-256
+`6d580ff8a81c76954cbabffd12738776b89735934bad664b8f68f9d04da3c226`.
+Its startup generated no recovery receipt, left Siri visible and Time Machine's
+exact menu-extra path present, and did not change the stopped policy/backup hashes.
+Normal Release still passes 296 / 30 and strips the feature. Owner-operated live
+hide/restore remains pending.
+
+The first optimized flavor was incomplete: it included the separate shared-item
+panel but its Board catalog retained ordinary Release's Bluetooth-only condition.
+The corrected trial flavor applies the dedicated compile flag to the full existing
+manual catalog, exact Weather/Input Menu exceptions, policy validation/planning,
+current-build gate and isolated stopped-on-launch store. It passes the same 300 / 31
+trial matrix; Debug remains 349 / 36 and ordinary Release remains 296 / 30. The
+corrected signed executable hash is
+`46cb5788a209fb2d5c0381472d0c62c92bd84aa247b009f6ce8193537c135aeb`
+and it is running from `/Applications/Blenny.app`. Installation/startup changed no
+policy or backup hash and created no shared-item receipt. All mapped manual targets
+are available to the owner; Clock and unknown identities remain read-only.
+
+Owner UI review then corrected system presentation without broadening either
+writer. Weather and Input Menu now appear in the macOS group and use the same
+natural-aspect SF Symbol renderer as numbered items. Exact Siri and Time Machine
+observations expose their separate Hide / receipt-backed Restore action from the
+Board, while remaining outside the three-lane assertion policy. A known Time
+Machine identifier is retained even without localized AX text. The unreadable
+count now opens the exact bundle/error list. Debug 351/36, ordinary Release 297/30
+and optimized trial 302/31 pass; installed hash `b6083ea8...`, PID 41358. Startup
+again changed no policy/backup hash and created no shared-item receipt.
+
+The owner then confirmed Siri Hide and exact Restore work without issue. The
+optimized trial now presents Siri, and state-backed Time Machine when available,
+as two-state draggable Board items: Visible to Hidden calls the dedicated serial
+writer; Hidden to Visible restores the exact receipt. Revealable is rejected and
+the shared SystemUIServer owner never enters bundle policy. The circular Clock is
+not Time Machine and remains read-only. Debug 353/36, ordinary Release 298/30 and
+optimized trial 304/31 pass; installed hash `d6c76f66...`, PID 47667. Startup was
+stopped, created no shared-item receipt and preserved the manual policy hashes.
+
+The first owner-operated Time Machine Hide exposed an incorrect post-write
+visibility check: Apple's setter removed the live target successfully while its
+legacy `menuExtras` membership could remain. Blenny rejected that snapshot, rolled
+back exactly, and then hid the safely restored card as unavailable. Verification
+now requires the paired getter to report hidden, permits the ordered `menuExtras`
+array to remain exact or remove only the Time Machine path, and permits target-local
+Boolean/position normalization only during write verification,
+records the actual applied snapshot, and restores only from that exact snapshot or
+the exact baseline. Safe rollback re-reads and restores the card presentation.
+Debug 357/36, ordinary Release 298/30 and optimized trial 308/31 pass. After the
+owner restored Siri and its receipt disappeared, the signed `412ca1ad...` build was
+installed as PID 52867. Startup remained stopped, created no receipt, preserved all
+four policy/backup hashes and the exact Time Machine baseline, and performed no
+automatic Hide.
+
+Writable presentation is now explicitly capability-based. A recognized AX identity
+is interactive only when its current-build descriptor also supplies an isolated
+setter, authoritative state, bounded verification and an exact inverse. This avoids
+per-item duplicate machinery without converting every recognizable system icon into
+an unsafe write probe. Now Playing remains recognized but read-only until its packed
+current-host preference capability is revalidated and manually exercised on the
+current build.
+
+The three-state follow-up removes the old two-state Siri/Time Machine exception.
+Visible, Revealable and Hidden are product intent, not backend API shapes. For a
+persistent item whose exact visible baseline has been captured, Revealable applies
+the verified hidden state at baseline, restores that exact baseline during an
+ordinary reveal, and reapplies the verified hidden state on conceal. Hidden stays
+hidden in both presentations; Visible retains the exact visible baseline. Policy
+edits, reveal transitions, Stop, Quit and invalidation all pass through one
+coordinator that serializes persistent transitions with assertion replacement.
+If reveal rollback fails, management stops and every owned assertion and receipt
+is restored; no transition polls or retries.
+If a restored older policy omits a persistent item entirely, omission means exact
+restore and receipt removal after commit, never “leave the previous hidden state.”
+
+The persistent capability catalog contains only exact Siri, Time Machine and Now
+Playing identities. Siri and Time Machine use the already owner-validated paired
+setters. Now Playing uses current-user/current-host `com.apple.controlcenter` key
+`NowPlaying`: visibility mask `0xA`, visible value `0x2`, hidden value `0x8`, with
+all unrelated bits preserved and an absent baseline restored as absence. A target
+is not made writable merely because AX recognizes it; identity, current-build
+state reading, isolated mutation, bounded verification and exact restoration are
+all required. Clock, native overflow and unknown/incomplete identities remain
+read-only.
+
+Deterministic coverage now includes all three persistent states, exact Now Playing
+bit preservation and absence restoration, multi-target batch rollback, ordinary
+three-lane dragging, fingerprint binding, pass-through preservation, combined
+assertion/persistent verification, failed-reveal rollback and failed-conceal full
+cleanup. Xcode 27 passes 369 Debug tests / 37 suites, 307 ordinary Release tests /
+31 suites and 320 optimized trial tests / 32 suites. Debug, ordinary Release and
+optimized trial app bundles build, sign and verify. No Now Playing live write has
+occurred. After confirming stopped management, an empty shared-item receipt
+directory and unchanged policy/backup hashes, the prior app was preserved under
+ignored LocalData and optimized trial `ffc7f6dd...` was installed at
+`/Applications/Blenny.app` as PID 61869. Startup kept all four hashes exact, left
+Siri and Time Machine unchanged, kept Now Playing absent, and created no receipt.
+No Release audit, commit, tag or push is authorized.
+
+The first owner-operated Siri Revealable Apply exposed delayed Time Machine
+normalization from a prior receipt. Siri hid, but the batch then rejected Time
+Machine's later target-local hidden representation and rolled Siri back exactly.
+Siri was confirmed visible with no receipt; the policy remained stopped. Receipt
+ownership now accepts only states satisfying the same per-target bounded hide
+predicate: Siri and Now Playing remain exact, while Time Machine may normalize only
+its own fields and the known path representation while preserving every unrelated
+menu-extra entry and order. A deterministic regression restores this second
+normalization exactly and still rejects unrelated drift. The matrix passes Debug
+370/37, ordinary Release 307/31 and optimized trial 321/32; all three arm64 app
+bundles pass strict signature verification. An installed read-only PREVIEW then
+validated the sole Time Machine receipt; the same serial writer restored its exact
+path / `VisibleCC = true` / position 86 baseline once and removed the receipt.
+Siri and all policy/backup hashes remained unchanged. Corrected optimized build
+`9978eafd...` is installed and running stopped as PID 67676. Ordinary Release
+still strips this route. A final follow-up also removes the terminal-cleanup Quit
+self-wait; candidate `befc3b7e...` passes the same matrix and signature checks but
+is not installed while owner testing is active. No release audit, commit, tag or
+push ran.
+
+Final closure on 2026-09-06 supersedes those candidate notes. The owner observed
+Siri, Time Machine and Now Playing hidden and then manually restored all three.
+Read-only comparison found an empty receipt directory, an absent Now Playing
+current-host key, and Time Machine restored to its exact menu-extra path,
+`VisibleCC = true` and preferred position 86. The four isolated/production policy
+and backup hashes matched the accepted post-restoration baseline. Xcode 27 passes
+370 Debug tests / 37 suites, 307 ordinary Release tests / 31 suites and 321
+optimized-trial tests / 32 suites. All three arm64 bundles build and pass strict
+signature verification. The final optimized trial installed at
+`/Applications/Blenny.app` has SHA-256
+`8795e401166f8efb5ab7e19a19d25aeff420340db1fe4e49f07ee55262e37768`;
+its stopped startup created no receipt and changed no preference or policy hash.
+Ordinary Release remains Bluetooth-only. The local version is closed without a
+push.
+
+## 0.9.0 — Distribution prototype
+
+Moved from 0.8.0 to keep Apple system-item visibility as a separate safety
+investigation; distribution scope is unchanged.
 
 Advance when:
 
@@ -359,7 +640,7 @@ Advance when:
 - A compatibility kill switch can disable the private backend on unknown macOS builds.
 - Privacy, diagnostics export, uninstall, and complete restore instructions are reviewed.
 
-## 0.9.0 — First public release candidate
+## 0.10.0 — First public release candidate
 
 Publish the repository and signed prerelease together when:
 
