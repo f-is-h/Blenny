@@ -1,13 +1,138 @@
 # Blenny
 
+> A minimal, native menu bar organizer for macOS 27 and later.
+
+## Current status
+
+Current phase: `0.9.0` complete as a local experimental milestone on 2026-09-12.
+
+Version 0.9.0 integrates reviewed menu-bar ordering into the existing three-state
+Organize Board as a local experimental milestone. Its implementation scope is
+accepted; verification and restoration evidence are recorded in
+[the 0.9.0 release record](docs/RELEASE_0.9.0.md). It is not a distribution or
+public release.
+
+Owner-operated testing on macOS 27.0 build `26A5425a` confirms the repaired drag
+flow and tested third-party ordering. It also confirms responsive Visible,
+Revealable and Hidden behavior for Siri, Time Machine and Control Center. Those
+reports establish the tested local workflow, not a universal application,
+hardware, display or macOS-build compatibility matrix.
+
+Ordering remains available only in Debug and the explicitly opted-in optimized
+trial. Ordinary Release excludes ordering. Sorting for Siri, Time Machine and
+Control Center is deferred; their three-state visibility remains in the admitted
+experimental runtime. Weather and Input Menu retain their exact-owner ordering
+route. The native overflow arrow has no established writable ordering identity,
+so fish/arrow adjacency is not a product guarantee.
+
+The Clock cannot open Notification Center while Blenny management is active on
+the tested build. A left swipe from the trackpad's right edge still works. The
+owner accepts this as a documented limitation and rejects automatic Stop/Resume
+around Clock clicks. See [Known limitations](docs/KNOWN_LIMITATIONS.md) and the
+[technical report](docs/NOTIFICATION_CENTER_TECHNICAL_REPORT_2026-09-12.md).
+
+Version 0.10.0 focuses on final interface, copy and usability refinement. Begin
+with a concrete review and owner-approved recommendations before implementation.
+License adoption remains follow-up work after that review. Signing, notarization
+and all distribution requirements remain gates for the first public source and
+binary release candidate in 0.11.0. Blenny retains one canonical repository;
+publication and any push remain separate, explicit actions.
+
+## Current product contract
+
+Blenny manages intent at the owning application bundle level. Visible,
+Revealable and Hidden remain distinct, and ordinary reveal never includes Hidden.
+A selected third-party owner moves with every associated configured ordering key
+as one block. Reviewed policy and ordering mutations share one serial writer,
+fresh preflight, durable private recovery records, bounded verification and
+bounded rollback. Unexpected identity or target drift fails closed.
+
+Successful order changes persist through Stop and Quit; explicit Undo restores
+the recorded ordering baseline. Stop and Quit release process-owned visibility
+restrictions. Retained preferred positions do not guarantee visibility after
+management ends or placement relative to the native overflow arrow.
+
+## Document map
+
+- [README.md](README.md) is the concise public-facing project entry point.
+- [docs/ROADMAP.md](docs/ROADMAP.md) defines version boundaries and exit criteria.
+- [docs/TECH_SPIKE_0.9.0.md](docs/TECH_SPIKE_0.9.0.md) is the detailed 0.9.0
+  contract, evidence record and historical experiment log.
+- [docs/HISTORICAL_DEVELOPMENT_NOTES.md](docs/HISTORICAL_DEVELOPMENT_NOTES.md)
+  preserves the former dated README narrative.
+- [Research/README.md](Research/README.md) indexes unsupported archived probes.
+
+## Historical 0.9.0 development log
+
+The following dated entries preserve intermediate results and superseded pending
+items. Use the current status above for the accepted milestone boundary.
+
+On macOS 27.0 build `26A5425a`, the native Clock cannot open Notification Center
+while Blenny management is active. The owner accepts this backend conflict as a
+known `0.9.0` limitation. The final investigation identifies ControlCenter ignoring
+Clock events while an external visibility restriction is active; three bounded
+rounds found no compatible replacement backend.
+The owner confirms that swiping left from the trackpad right edge still opens
+Notification Center while management remains active. Use that gesture on the
+tested setup; automatic suspension around Clock clicks is explicitly rejected. See [Known limitations](docs/KNOWN_LIMITATIONS.md)
+and [the final technical report](docs/NOTIFICATION_CENTER_TECHNICAL_REPORT_2026-09-12.md).
+This acceptance removes this issue as a mandatory `0.9.0` fix; it does not close
+the version or authorize distribution, publication, or release.
+
+
+Latest owner feedback confirms responsive Siri reveal as well as conceal and
+Control Center visibility. The owner-requested Debug trial removes only Time
+Machine ordinary-reveal settlement waits, retaining exact verification and waited
+cleanup. Drag-source retirement now refreshes native registration, with repeated
+native delivery handled idempotently. Time Machine interaction is now owner-confirmed;
+the three deferred system sorting capabilities and public-release gates remain.
+Public-source discussion is pending before version closure.
+
+Latest September 11 scope: Siri, Time Machine and Control Center sorting is
+explicitly deferred to a future version, possibly after public release. Their
+three-state visibility controls remain available and the UI must state that
+sorting is unsupported. Resume/Stop drag continuity, system-visibility latency
+and native-arrow placement remain active 0.9.0 follow-up work. The distribution
+and public-release gates are unchanged. See [the 0.9.0 spike](docs/TECH_SPIKE_0.9.0.md).
+
+Current verified owner-test archive: `build/ordering-trial/Blenny-0.9.0-time-machine-trial.zip`.
+Debug and optimized builds pass 560 tests; ordinary Release passes 315. Actual
+interface-model self-checks pass in both test-enabled configurations. Owner testing
+of native drag-session refresh remains pending;
+native-arrow placement is unresolved. The earlier Siri reveal improvement is
+owner-confirmed. No version closure or publication is authorized.
+
 > A minimal, native menu bar organizer designed exclusively for macOS 27 and later.
 
-## Document status
+## Detailed chronological status (historical)
 
 - Project name: **Blenny**
 - Development directory: repository root
-- Current phase: `0.8.0` is complete. The optimized owner trial implements one capability-based three-state policy for every current mapped target except Clock. Numbered MenuBarClientCore items use the process-owned assessment assertion; Weather and Input Menu use exact owning-bundle assessment; Siri, Time Machine and Now Playing use item-scoped persistent transactions. The owner validated hide and exact restoration across all three families. Bluetooth alone is promoted to ordinary Release; Clock, native overflow, unknown identities and items without a complete capability descriptor remain read-only. The distribution prototype moves to `0.9.0`. The version closes with a local annotated tag and no push.
-- Document date: 2026-09-06
+- Current phase: `0.9.0` is in development: Debug integration of reviewed, recoverable menu-bar slot permutations through the existing serial coordinator. The latest research proves one approved non-adjacent pair on macOS 27 build `26A5425a`; general application, multi-item, display and lifecycle support is not established. `0.8.0` remains the latest completed local milestone. Distribution moves to `0.10.0`; the first public source/binary release candidate moves to `0.11.0`. No push is authorized.
+- Document date: 2026-09-11
+- 2026-09-10 drag lifecycle artifact: `build/ordering-trial/Blenny-0.9.0-drag-lifecycle.zip` is signed and integrity-verified. Its packaged interface-model check passes with ten watched state files unchanged. The existing installation, previous archive, 21 original research files and history remain preserved; no live sorting or Undo was performed.
+- 2026-09-10 drag lifecycle verification: token-bearing transferable identity, current-source resolution, native-session cleanup and delivery-order tolerance pass 549 tests / 50 suites in Debug and optimized builds and 314 tests / 32 suites in ordinary Release, without warnings. A synthetic check of the actual interface model passes repeated post-Apply and cross-area drags in both executables. Native long-hover and repeated-Apply acceptance remain pending.
+- 2026-09-10 drag lifecycle regression: the owner reports long-hover drop loss and unavailable same-area ordering after Apply while cross-area moves still work. The installed prior candidate and ready/saved live UI are confirmed read-only. The follow-up aligns exposed drag identity with the layout-bound token, resolves payloads from current model state and scopes cleanup to native sessions. Actual interface-model lifecycle checks and attended retesting are required; prior test counts do not establish a fix.
+- 2026-09-09 drag/Undo artifact: the signed optimized candidate is `build/ordering-trial/Blenny-0.9.0-drag-stability.zip`. Packaged read-only validation recognizes the actual stale clean ledger, passes an eight-subject schema 4 preview and fresh preflight, and leaves nine state files unchanged without a writer. Installed application, original research and Git history remain preserved; live drag and Apply/Undo acceptance are pending.
+- 2026-09-09 drag/Undo verification: fixed destination geometry and stable drag identity, plus explicitly reviewed supersession of clean stale Undo history, pass 547 tests / 50 suites in Debug and optimized owner-test builds and 313 tests / 32 suites in ordinary Release, with no warnings. Live drag acceptance remains pending; existing installation and system state are preserved.
+- 2026-09-09 drag/Undo regression: the owner reports restore-required errors for every new order and unstable or unavailable drag previews. Read-only inspection finds a clean applied schema 3 receipt whose committed positions differ from current configuration, rather than an unfinished write. The follow-up must support explicitly reviewed replacement of stale clean Undo history while preserving an archived ledger and external changes; pending writes remain recoverable. Drag landing geometry and startup availability require a separate fix and manual acceptance. Existing live receipt and system settings are preserved during diagnosis.
+- 2026-09-09 controls artifact: the optimized owner-test app (executable SHA-256 prefix `3015dd59`) passes strict signature checks and a read-only schema 4 preview for Weather plus seven system subjects, including Control Center, followed by one fresh preflight. Nine watched state files remain byte-identical; no ordering writer or receipt was created. The new archive matches the packaged executable. The installed preceding build, preceding archive, 21 original research files and Git history remain unchanged. Live Control Center adoption/inverse and arrow/fish adjacency are still outstanding.
+- 2026-09-09 controls verification: Xcode 27/macOS 27 SDK passes 538 tests / 50 suites in Debug and the optimized ordering flavor, plus 313 tests / 32 suites in ordinary Release, without warnings. Siri composite-to-policy regressions and conditional Control Center namespace, binary-version, final-scope and Undo tests pass. Ordinary Release still contains no ordering-table literal. These deterministic checks do not establish live Control Center adoption or native-arrow adjacency.
+- 2026-09-09 controls follow-up: the owner reports that all currently offered items now sort correctly. This is owner-operated adoption evidence for the presented scope, not a complete per-item inverse or lifecycle matrix. The remaining requests are native-arrow/fish adjacency, Control Center ordering and Siri three-state UI. Siri live composite identities must resolve to their canonical persistent-policy identity rather than falling back to the old manual Hide/Restore controls. Control Center is being added as a conditional build-specific Debug trial, requiring the sole exact BentoBox key, attested host and pinned Apple binaries; its primary-key relationship remains a bounded inference pending owner adoption. Clock remains excluded. Native-arrow adjacency is not yet a demonstrated product capability.
+- 2026-09-09 optimized artifact verification: the new app passes strict signature checks and a real read-only schema 4 preview for Weather plus six exact system controls, followed by one successful fresh preflight. All nine watched state files are unchanged; no ordering writer or receipt was created. The archive matches the packaged executable, while the installed prior build, previous test archive, original 21 research files and Git history are preserved. Physical system adoption and inverse remain owner-operated acceptance work.
+- 2026-09-09 exact-system revision verification: the Board now mixes whole application owners with six independently bound system controls, and retains the drag source/landing slot until typed data delivery. Xcode 27/macOS 27 SDK passes 531 tests / 50 suites in Debug and the optimized ordering flavor, plus 311 tests / 32 suites in ordinary Release, without warnings. Coverage includes signed-host lifetime and token conflicts, system-only display scope, shared-host sibling preservation, mixed multi-key owners, old-receipt migration, post-policy drift compensation and exact inverse verification. The new optimized owner-test bundle awaits physical system ordering, drag-feel and Stop/Quit acceptance; these checks do not close 0.9.0.
+- 2026-09-09 owner acceptance and next revision: the owner reports correct ordering for all third-party items they tested, correct combined area/order changes, and successful Weather/Input Menu ordering without observed anomalies. The remaining drag-release bounce is a UX defect to resolve. The owner confirms that submitted ordering is a user setting and should persist through Stop/Quit; explicit Undo remains separate. The next Debug revision adds exact individual system ordering for Bluetooth, Wi-Fi, Sound, Now Playing, Siri and Time Machine through the existing serial coordinator, as a narrow exception for already identified system controls. This does not enable per-icon control within third-party owners, Clock, native overflow or unmapped modules. New system sorting and inverse remain owner-operated acceptance items.
+- 2026-09-09 owner follow-up: the owner reports successful configuration-first ordering for most icons. The follow-up unifies equivalent drag gaps with a translucent icon preview, prepares reviews from fresh configuration, and limits process freshness to participating owners and their collision evidence. Verified commits must remain reported as saved if a later UI refresh fails. Exact Weather/Input Menu owners join Debug ordering lanes; module and shared-host system ordering require separate identity/recovery work and are not yet enabled. No new agent-operated system write or version closure is claimed.
+- 2026-09-09 drag follow-up verification: Xcode 27/macOS 27 SDK passes 511 tests / 49 suites in Debug and the optimized ordering flavor, plus 311 tests / 32 suites in ordinary Release. New regressions cover canonical landing gaps, preview-width stability, unrelated process/configuration drift, exact Apple owner eligibility and complete final-write scope including unchanged reviewed owners. A new optimized test bundle is prepared for owner acceptance; the installed prior configuration build remains untouched.
+- 2026-09-09 configuration revision verification: Xcode 27/macOS 27 SDK passes 500 tests / 49 suites in Debug and the optimized ordering flavor, plus 311 tests / 32 suites in ordinary Release. This includes whole-owner multi-key plans, missing visual evidence, free lane insertion, repeated commits, partial failure, ambiguous receipt persistence, Stop races, external drift, exact policy/backup compensation and crash recovery. The optimized manual-test build is prepared separately; the active installed exchange build is preserved. The 21 original research files remain byte-identical. New installed adoption and native-arrow placement remain unverified; 0.9.0 is not closed.
+- 2026-09-09 product direction: replace the restrictive exchange-session model with configuration-backed ordering across all three areas. Free insertion within and between lanes produces a reviewed global Hidden → Revealable → Visible order. AX overlap, missing visual positions, enabled management and empty owner autosave records are not, by themselves, reasons to reject a uniquely attributable configuration change. Include every associated key of each selected owner as a block; never select only one convenient icon. Verify exact configuration independently from optional visual evidence. Successful committed positions persist through Stop/Quit, with explicit undo; unfinished writes remain recoverable. Native-arrow anchoring and continued invisibility after releasing management are not established. This decision supersedes the earlier narrow scope and restore-between-every-change rules below; implementation and new acceptance are in progress.
+- 2026-09-09 owner result after overlap relaxation: the owner reports normal ordering among the four offered applications, and read-only inspection confirms the new candidate is installed. The latest WeChat/Usage4Claude receipt is archived as restored, with no active ordering receipt. Coverage diagnosis finds eight additional third-party owners excluded only by the enabled-management scope rule, with seven other third-party owners limited by lifetime, autosave identity, multi-key scope or position evidence. These are explicit productization gaps; no broader compatibility or version closure is claimed.
+- 2026-09-09 overlap decision: at the owner’s request, remove zero-overlap and frozen-dimension requirements from the ordering observer. The product verifies relative order using agreeing horizontal edges in a common vertical band, with no overlap-size threshold. Indistinguishable equal/nested proxy frames, unknown identity and incomplete owner scope remain unsupported. OS rendering is not controlled by Blenny; fresh identity/configuration checks, serial writes and exact recovery remain required. Debug and optimized configurations each pass 463 tests / 45 suites; the optimized candidate was built and signed, then subsequently found installed as recorded above. These checks do not establish additional live application compatibility.
+- 2026-09-09 integrated Board follow-up: the owner requested initial observed ordering and same-area insertion in the existing Organize Board, alongside cross-area policy moves, replacing the separate exchange editor. The implementation preserves bounded reviewed writes and one outstanding recoverable trial order. Normally launched app preference-read failure must be diagnosed independently from successful development-context reads; failed ordering reads must preserve the Board's applications. The normal-launch failure is an App Data permission denial; the Board now retains applications and exposes its concrete cause. Collapsed native-overflow proxy geometry is explicitly unverified. The integrated core passes 456 tests / 45 suites in both Debug and optimized configurations; installed three-owner read-only preflight passes with no writer. A later owner screenshot confirms normal-launch ordering reads now succeed; live insertion acceptance remains pending.
+- 2026-09-08 expanded manual-test scope: at the owner's request, broaden the optimized ordering trial to fully observable third-party single-item owners across all intent groups while management is stopped, and positively corroborated standard sandbox preference containers. While management runs, only Visible intent is eligible. Restore still precedes Resume, Hidden remains excluded from ordinary Reveal, and incomplete owners, system items, unresolved identities and overlapping pair geometry remain unsupported. Both Debug and optimized trial pass 430 tests / 42 suites. The installed read-only scan finds 15 eligible owners, and a Snipaste/Usage4Claude preview plus fresh preflight passes without a writer or receipt. Expanded compatibility requires new owner-operated evidence; earlier successes do not prove it.
+- 2026-09-08 owner result: in the optimized ordering trial, the owner reports successful exchanges among the four presented applications except AltServer/SwitchResX Daemon, which is refused at Preview Exchange for non-separate geometry. The last AltServer/CleanShot X receipt records verified restoration; read-only comparison confirms no active receipt, the complete group matches the pretrial contents, and both target owner-position sets match that receipt. Per-combination attended restoration confirmation remains pending. This is product-path evidence, not universal compatibility or version closure.
+- 2026-09-08 manual testing build: the owner requested a Release-configuration ordering binary. The explicit `BLENNY_ORDERING_TRIAL=YES` build uses optimization while retaining the existing Debug capability gates, isolated stopped-on-launch policy and exact recovery contract. This owner-test flavor is not ordinary Release promotion or version completion.
+- 2026-09-08 earlier automated acceptance attempt: the owner authorized an AltServer/CleanShot X exchange and inverse. Both automated submissions were refused before writing (expired review window, then changed owner observation). No product ordering write or active recovery receipt resulted from that attempt; the original installation and all eight watched files were verified restored. The subsequent owner-operated results are recorded above; version closure remains pending.
 - 2026-09-06 closure: the owner confirmed Siri, Time Machine and Now Playing
   hidden states and then manually restored all three. Read-only post-restoration
   checks found no recovery receipt, an absent Now Playing current-host key, the
@@ -23,8 +148,9 @@
 - 2026-09-04 follow-up: local lifecycle fixes preserve accepted bundle intent across application launch/quit, use accepted rather than unapplied Draft scope, and present confirmed unrestricted cleanup as a neutral pause. The owner authorized bounded, event-triggered additions to the pass-through allowlist through the existing serial writer. A fixed 250 ms batch coalesces new bundle identities; known identities do not write, accepted Hidden/Revealable and system-item allowances are unchanged, and existing reveal deadlines are preserved. No polling, drift-repair loop, preference write or retry is added. Installation and observed performance validation remain pending. System API research continues only on macOS 27, with concrete Now Playing packed preferences and Siri stash restoration semantics recorded in the 0.8.0 identifier report.
 - Product status: the AppKit-hosted SwiftUI product connects reviewed Drafts to one runtime-gated serial writer with bounded verification, transactional persistence, rollback, Stop, Restore, ordinary Reveal and lifecycle cleanup. The installed owner trial is an optimized Release-configuration flavor with the explicit trial gate; ordinary Release keeps the Bluetooth-only system policy boundary.
 - Source lineage decision: clean implementation, not an Ice fork
-- License decision: pending; decide before the first public release
-- Repository decision: one canonical repository; private until source and binary become public together with the first `0.10.x` release candidate
+- License decision at this historical checkpoint: pending; superseded by the
+  current deferral of license adoption to 0.10.0 above
+- Repository decision: one canonical repository; private until source and binary become public together with the first `0.11.x` release candidate
 
 The owner-operated optimized trial Board exposes the eight exactly mapped
 assessment items except Clock, the exact Weather/Input Menu owners, and the
@@ -87,6 +213,13 @@ for Siri, Time Machine and Now Playing. Clock remains excluded. See
   unreadable count opens the exact bundle/error list and still creates no
   candidate. Debug 351/36, ordinary Release 297/30 and optimized trial 302/31
   pass; installed hash `b6083ea8...`, PID 41358, with no startup mutation.
+
+## Historical design record
+
+The numbered sections below preserve the original product investigation and
+architecture narrative. Statements framed as proposals, future work or earlier
+version boundaries are historical where they conflict with the current status,
+0.9.0 spike or roadmap above.
 
 ## 1. Product premise
 
@@ -257,7 +390,7 @@ Consequences:
 
 ### 6.1 Ice
 
-Ice is GPL-3.0 and was developed as an independent Swift macOS application.
+Ice is GPL-3.0-or-later and was developed as an independent Swift macOS application.
 
 Important legacy techniques in Ice include:
 
@@ -271,7 +404,7 @@ These techniques were inventive and useful on older systems, but they are fragil
 
 ### 6.2 Thaw
 
-Thaw began as a fork of Ice and remains GPL-3.0.
+Thaw began as a fork of Ice and remains GPL-3.0-or-later.
 
 Thaw added substantial machinery, including:
 
@@ -316,14 +449,11 @@ GPL does not require a fork to:
 - Pay royalties.
 - Publish private/internal modifications that are never distributed outside an organization.
 
-Because Blenny will be a clean implementation, it may choose a new license. Candidates to decide later:
-
-- GPL-3.0, to keep distributed derivatives open.
-- MPL-2.0, to keep modified project files open while allowing clearer module boundaries.
-- Apache-2.0, for permissive reuse with an explicit patent grant.
-- MIT, for maximum simplicity and adoption.
-
-Do not add a license file until the project owner chooses one.
+The owner prefers Apache License 2.0, but has deferred license adoption,
+repository notices and app resource packaging until after the 0.10.0 interface
+review. The 0.9.0 Git tree does not include LICENSE or NOTICE; local drafts may
+remain untracked and excluded. Referenced third-party projects retain their separate
+licenses; this does not permit copied implementation code.
 
 ## 8. Product scope
 
@@ -363,8 +493,9 @@ Blenny develops through small, independently reviewable product increments. A ro
 - The original `v0.7.0` tag records the separate real physical menu-bar ordering feasibility investigation with a no-go for implementation on the inspected runtime. SDK 27, current scoped AX and runtime metadata, and historical preference experiments do not establish an exact reversible arrow-relative ordering contract. The desired fish position near the native arrow's right edge and revealed Revealable items to its right remain unimplemented guarantees. Product source, Board behavior, native integration, policy, writer and artwork stay unchanged. No position write is performed; tests, both builds and installed no-writer regression pass with unchanged policy/backup hashes and zero scoped preferred-position restore operations. Reopening requires stable owner/instance identity, exact snapshot/write/inverse semantics, deterministic serial failure/restoration tests, installed dry-run and separate exact-target authorization. No synthetic input, Board-only sorting, reconciliation or Release backend promotion is permitted.
 - Post-tag presentation correction: each explicit user Reveal may run one bounded Blenny-owned fallback ladder. A usable native overflow control first removes the fallback status item entirely. If native overflow disappears, Blenny recreates a contentless zero-length transition; if that also fails, the fixed 22-point fallback returns and automatic layout events cannot retry. A later explicit Reveal may begin a fresh ladder. This performs no ordering or system write and cannot oscillate without a new user action. Event-driven confirmation can leave a brief empty transition between system rendering and AX notification; Blenny does not preemptively remove the only reveal control before native ownership is confirmed.
 - `0.8.0` closes the Apple system-item visibility investigation on the exact macOS 27 development build and promotes Bluetooth only to ordinary Release. The optimized owner trial unifies Visible / Revealable / Hidden across numbered MenuBarClientCore items, exact Weather/Input Menu owners, and item-scoped Siri/Time Machine/Now Playing transactions. The single coordinator serializes all mutation; item receipts preserve exact inverse state and bounded target-local Time Machine normalization. The owner validated every capability family and manually restored Siri, Time Machine and Now Playing. Final read-only comparison found no receipts and matched the accepted preferences and four policy/backup hashes. Clock, native overflow and identities without complete descriptors remain read-only. The same milestone corrects startup recovery so an approved dormant bundle does not force inactive management, consolidates multiple owner PIDs at bundle scope, and admits new harmless bundle identities through a bounded additions-only event batch. Details are in `docs/TECH_SPIKE_0.8.0.md`.
-- `0.9.0` inherits the unchanged distribution prototype that was previously planned for 0.8.0.
-- `0.10.0` is the first public release-candidate line.
+- `0.9.0` integrates reviewed real ordering in Debug through the existing serial coordinator. The initial capability swaps the existing positions of two uniquely corroborated, observable single-item application bundles on the exact tested runtime and one display, with snapshots, preview, durable recovery, bounded verification and explicit Restore. Multiple items, missing configured inputs and unknown identities remain unsupported. Visible intent is eligible; Revealable is eligible only while management is disabled, and Hidden is always excluded. Resume first restores an outstanding exchange. No absolute-coordinate or native-arrow anchor is promised. See `docs/TECH_SPIKE_0.9.0.md`.
+- `0.10.0` inherits the complete distribution prototype, retaining signing, notarization, installation, compatibility-disable, privacy and recovery requirements.
+- `0.11.0` is the first public release-candidate line, retaining all publication gates.
 
 ### 8.3 Explicit non-goals through version 1.0
 
@@ -661,7 +792,7 @@ Mitigation:
 - GPLv3 text: <https://www.gnu.org/licenses/gpl-3.0.html>
 - GNU GPL FAQ: <https://www.gnu.org/licenses/gpl-faq.en.html>
 
-## 17. Immediate next action
+## 17. Historical immediate actions
 
 The 0.5.0 failed-startup follow-up distinguishes saved enabled intent from actual
 management: explicit Resume rechecks current targets and runtime, then activates
@@ -697,5 +828,20 @@ was ordinary active-application reflow, not loss of the protected item; switchin
 applications restored it. Independent RECOVER matched exact state, preferences
 and file hashes. Bluetooth is promoted to formal policy and Release; every other
 Apple item remains read-only.
-Distribution is deferred to `0.9.0` and
-the first public release candidate to `0.10.0`.
+The current 0.9.0 work integrates the September 8 ordering result under the
+explicit scope and acceptance gates in `docs/TECH_SPIKE_0.9.0.md`. Distribution
+is deferred to `0.10.0` and the first public release candidate to `0.11.0`.
+The Clock/Notification Center conflict on the recorded runtime is an accepted
+known limitation for 0.9.0. The owner-verified current workaround is a left swipe
+from the trackpad's right edge; automatic Stop/Resume around Clock clicks is
+rejected. This decision supersedes the earlier mandatory-fix gate for that one
+issue and does not waive any other version or publication gate.
+
+## 18. Current next action
+
+Complete the checks tracked in
+[the 0.9.0 release record](docs/RELEASE_0.9.0.md): finish every required build and
+test configuration, verify the current system is restored without undoing the
+owner's accepted order, reconcile version documents and create the authorized
+local annotated tag. Distribution, publication, repository visibility changes
+and pushes remain outside this milestone.

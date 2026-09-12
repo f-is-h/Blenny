@@ -1,6 +1,21 @@
 # Repository policy
 
-Blenny uses one canonical repository. It remains private during the engineering milestones and is intended to become public with the first `0.10.x` release candidate.
+Blenny uses one canonical repository. It remains private during the engineering milestones and is intended to become public with the first `0.11.x` release candidate.
+
+## License and publication scope
+
+License adoption, notices and app packaging follow the 0.10.0 interface review. Apache-2.0
+remains the owner's preferred direction, but this milestone includes no LICENSE
+or NOTICE files in Git or app packages. Owner-only drafts may remain locally
+excluded. Complete the licensing work before public distribution.
+Third-party names and interface descriptions do not grant rights in another
+party's implementation or trademarks. Ice uses GPL-3.0-or-later; its nontrivial
+implementation is not incorporated into Blenny.
+
+Sanitized research and original reproducible probes stay in this same repository.
+They do not require a second public mirror. Raw evidence and owner-only Chinese
+notes remain ignored and require a private backup. Published historical reports
+retain their original evidence and explicitly identify superseded conclusions.
 
 ## History
 

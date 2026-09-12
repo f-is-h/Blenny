@@ -1,5 +1,34 @@
 # Blenny 0.7.0 Technical Spike
 
+Unreleased research correction, 2026-09-07:
+[External ordering verification](ORDERING_RESEARCH_2026-09-07.md) identifies
+the `com.apple.MenuBar` suite and its populated group-container position table.
+Earlier ordinary-domain absence observations below do not establish absence of
+that table. Controlled external writes to two temporary test owners did not
+pass a swap-and-inverse verification. Historical self-placement observations
+remain evidence of those runs; no product ordering feature or new release is
+implied.
+
+Unreleased positive follow-up, 2026-09-08:
+[Corrected identity and external swap verification](ORDERING_RESEARCH_2026-09-08.md)
+identified an executable-name fallback that made the earlier owner fixture's
+system keys collide. With two log-verified independent keys, an external group
+preference write swapped the two original test owners and its inverse restored
+the exact initial coordinates and complete preference baseline. The isolated
+run used no owner position commands, width changes, recreation or synthetic
+input. This supersedes a general impossibility inference from the failed
+fixtures; arbitrary third-party compatibility and product promotion remain
+unproven. The historical version and tag remain unchanged.
+
+The subsequent owner-approved Snipaste / Usage4Claude trial also passed a
+relative swap and inverse, with both existing group values and owner preference
+snapshots restored. Both target AX coordinates and 17 other single-item owners
+had a common three-point rightward translation afterward; exact global geometry
+restoration is not claimed. An explicitly requested attended repeat subsequently
+received owner confirmation of both the visible exchange and return, described
+as looking perfect. The pair is non-adjacent; adjacency is not a requirement.
+The implementation remains research-only and the version is unchanged.
+
 ## Real menu-bar ordering and anchored placement
 
 Status: **Two earlier self-placement runs restored scoped preferences and files,
