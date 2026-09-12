@@ -14,6 +14,7 @@ let package = Package(
     targets: [
         .target(
             name: "BlennyCore",
+            dependencies: ["BlennyPrivateABIShim"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("ApplicationServices")

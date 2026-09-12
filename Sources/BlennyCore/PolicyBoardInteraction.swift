@@ -21,15 +21,18 @@ public struct PolicyDragPayload:
         public let bundleIdentifier: String
         public let sourcePolicy: MenuBarBundlePolicy
         public let candidateGeneration: UUID
+        public let dragToken: UUID
 
         public init(
             bundleIdentifier: String,
             sourcePolicy: MenuBarBundlePolicy,
-            candidateGeneration: UUID
+            candidateGeneration: UUID,
+            dragToken: UUID
         ) {
             self.bundleIdentifier = bundleIdentifier
             self.sourcePolicy = sourcePolicy
             self.candidateGeneration = candidateGeneration
+            self.dragToken = dragToken
         }
     }
 
@@ -59,8 +62,61 @@ public struct PolicyDragPayload:
         ID(
             bundleIdentifier: bundleIdentifier,
             sourcePolicy: sourcePolicy,
-            candidateGeneration: candidateGeneration
+            candidateGeneration: candidateGeneration,
+            dragToken: dragToken
         )
+    }
+}
+
+/// Typed delivery can follow native cleanup. Missing terminal metadata is not
+/// a conflict; any still-present native or payload identity must agree. The
+/// coordinator separately validates the delivered token and current generation.
+public enum PolicyDragDelivery {
+    public static func matches(
+        delivered: PolicyDragPayload.ID,
+        reported: PolicyDragPayload.ID?,
+        active: PolicyDragPayload.ID?,
+        nativeSessionMatches: Bool?
+    ) -> Bool {
+        if nativeSessionMatches == false { return false }
+        if let reported, reported != delivered { return false }
+        if let active, active != delivered { return false }
+        return true
+    }
+}
+
+public enum PolicyDragDeliveryRegistration: Equatable, Sendable {
+    case first
+    case duplicate
+    case conflictingPayload
+}
+
+/// Remembers the one typed payload already handled for the latest native drop
+/// session. Repeated delivery from that session is idempotent, while a new
+/// native session remains independent even when it drags the same subject.
+public struct PolicyDragDeliveryReceipt<SessionID: Hashable>: Equatable {
+    public private(set) var sessionID: SessionID?
+    public private(set) var payloadID: PolicyDragPayload.ID?
+
+    public init() {}
+
+    public func contains(
+        sessionID: SessionID,
+        payloadID: PolicyDragPayload.ID
+    ) -> Bool {
+        self.sessionID == sessionID && self.payloadID == payloadID
+    }
+
+    public mutating func register(
+        sessionID: SessionID,
+        payloadID: PolicyDragPayload.ID
+    ) -> PolicyDragDeliveryRegistration {
+        guard self.sessionID == sessionID else {
+            self.sessionID = sessionID
+            self.payloadID = payloadID
+            return .first
+        }
+        return self.payloadID == payloadID ? .duplicate : .conflictingPayload
     }
 }
 

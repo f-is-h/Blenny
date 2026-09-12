@@ -99,8 +99,15 @@ extension ManagementLoopError: LocalizedError {
 public actor ManagementLoopController {
     public typealias WriterProvider = @Sendable () async throws -> any PolicyAssertionWriting
 
+    private struct PendingWriterCreation: Sendable {
+        let id: UUID
+        let generation: UInt64
+        let task: Task<any PolicyAssertionWriting, Error>
+    }
+
     private let writerProvider: WriterProvider
     private var writer: (any PolicyAssertionWriting)?
+    private var writerCreation: PendingWriterCreation?
     private var lifecycleGeneration: UInt64 = 0
     private var restartRequired = false
     private var terminationCleanupAttempted = false
@@ -132,6 +139,7 @@ public actor ManagementLoopController {
             guard generation == lifecycleGeneration else { return state }
             state = .writerActivating
             try await writer.applyBaselineReplacement(with: baseline)
+            guard generation == lifecycleGeneration else { return state }
             guard try await writer.verifyActivePlan(baseline) else {
                 throw ManagementLoopError.activationCouldNotBeVerified
             }
@@ -139,6 +147,7 @@ public actor ManagementLoopController {
             state = .baselineVerified(baseline.fingerprint)
             state = .active(baseline.fingerprint)
         } catch {
+            guard generation == lifecycleGeneration else { return state }
             await restoreAndStop(detail: "startup recovery failed: \(error)")
         }
         return state
@@ -154,15 +163,39 @@ public actor ManagementLoopController {
             break
         }
         do {
-            let generation = lifecycleGeneration
-            let created = try await writerProvider()
-            guard generation == lifecycleGeneration else {
+            let creation: PendingWriterCreation
+            if let pending = writerCreation { creation = pending }
+            else {
+                let provider = writerProvider
+                creation = PendingWriterCreation(
+                    id: UUID(), generation: lifecycleGeneration,
+                    task: Task { try await provider() }
+                )
+                writerCreation = creation
+            }
+            let created: any PolicyAssertionWriting
+            do { created = try await creation.task.value }
+            catch {
+                if writerCreation?.id == creation.id { writerCreation = nil }
+                guard creation.generation == lifecycleGeneration else {
+                    throw ManagementLoopError.staleLifecycleGeneration
+                }
+                throw error
+            }
+            if let writer { return writer }
+            guard writerCreation?.id == creation.id else {
+                throw ManagementLoopError.staleLifecycleGeneration
+            }
+            writerCreation = nil
+            guard creation.generation == lifecycleGeneration else {
                 await created.restoreAndStop()
-                throw ManagementLoopError.managementIsNotActive
+                throw ManagementLoopError.staleLifecycleGeneration
             }
             writer = created
             return created
         } catch {
+            if let loopError = error as? ManagementLoopError,
+               loopError == .staleLifecycleGeneration { throw error }
             state = .unsupportedRuntimeContract(String(describing: error))
             throw error
         }
@@ -182,6 +215,10 @@ public actor ManagementLoopController {
     }
 
     public func generationSnapshot() -> UInt64 { lifecycleGeneration }
+
+    /// Recovery may reuse the one retained coordinator after management has
+    /// stopped. This accessor never creates, resumes or changes loop state.
+    public func existingWriterForRecovery() -> (any PolicyAssertionWriting)? { writer }
 
     public func synchronizeCommittedPolicy(
         _ policy: PersistentBundlePolicyDocument,
@@ -369,7 +406,7 @@ public actor ManagementLoopController {
     }
 
     private func confirmCleanup(detail: String) async -> Bool {
-        guard await writer?.activePlanSnapshot() == nil else {
+        guard await writer?.hasPendingRestoration() != true else {
             restartRequired = true
             state = .restorationFailed(detail)
             return false

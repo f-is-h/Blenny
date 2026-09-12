@@ -84,6 +84,21 @@ struct SharedSystemItemManualTrialTests {
         #expect(baseline.values["NowPlaying"]?.encodedValue == nil)
     }
 
+    @Test("Schema 1 receipts decode without a reveal intent")
+    func schemaOneReceiptCompatibility() throws {
+        let original = try SharedSystemItemTrialReceipt(
+            runtime: .current(), baseline: makeSiriSnapshot()
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(
+            SharedSystemItemTrialReceipt.self, from: data
+        )
+
+        #expect(decoded == original)
+        #expect(decoded.schemaVersion == 1)
+        #expect(decoded.revealIntent == nil)
+    }
+
     @Test("Time Machine accepts setter-normalized target state and restores exactly")
     func timeMachineSetterNormalization() throws {
         let path = SharedSystemItemPreferenceSnapshot.timeMachineMenuExtraPath
@@ -220,6 +235,42 @@ struct SharedSystemItemManualTrialTests {
         #expect(!(await writer.hasRecoveryReceipt(for: .timeMachine)))
     }
 
+    @Test("A Time Machine normalization after the applied capture remains recoverable")
+    func writerAcceptsNormalizationAfterAppliedCapture() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeTimeMachineSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(
+            states: [.timeMachine: baseline],
+            normalizeTimeMachineAfterFirstAppliedCapture: true
+        )
+        let writer = SharedSystemItemManualTrialWriter(
+            backend: backend, receiptDirectory: directory
+        )
+
+        let receipt = try await writer.hide(.timeMachine)
+        #expect(receipt.applied?.effectiveVisible == false)
+        let recordedMenuExtras = try receipt.applied?.values["menuExtras"]?.stringArray() ?? []
+        #expect(recordedMenuExtras.contains(
+            SharedSystemItemPreferenceSnapshot.timeMachineMenuExtraPath
+        ))
+        let normalizedMenuExtras = try backend.states[.timeMachine]?
+            .values["menuExtras"]?.stringArray() ?? []
+        #expect(!normalizedMenuExtras.contains(
+            SharedSystemItemPreferenceSnapshot.timeMachineMenuExtraPath
+        ))
+
+        let hidden = [
+            SharedSystemItemTrialTarget.timeMachine.observationIdentifier:
+                PersistentSystemItemPresentation.hidden,
+        ]
+        #expect(try await writer.verifyManagedPlan(hidden))
+        try await writer.restore(.timeMachine)
+        #expect(backend.states[.timeMachine] == baseline)
+        #expect(backend.restoreCounts[.timeMachine] == 1)
+        #expect(!(await writer.hasRecoveryReceipt(for: .timeMachine)))
+    }
+
     @Test("Time Machine still rejects unrelated menu-extra drift")
     func timeMachineRejectsUnrelatedDrift() throws {
         let baseline = try makeTimeMachineSnapshot()
@@ -264,6 +315,195 @@ struct SharedSystemItemManualTrialTests {
         #expect(backend.states[.timeMachine] == (try makeTimeMachineSnapshot()))
         #expect(!(await writer.hasRecoveryReceipt(for: .siri)))
         #expect(!(await writer.hasRecoveryReceipt(for: .timeMachine)))
+    }
+
+    @Test("Siri ordinary reveal persists its exact intent before the setter")
+    func siriRevealIntentPrecedesSetter() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeImplicitSiriSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(states: [.siri: baseline])
+        let writer = SharedSystemItemManualTrialWriter(
+            backend: backend, receiptDirectory: directory
+        )
+        let identifier = SharedSystemItemTrialTarget.siri.observationIdentifier
+        var intentObservedBeforeSetter = false
+        backend.beforeVisibilityMutation = { target, visible in
+            guard target == .siri, visible,
+                  let data = try? Data(contentsOf: directory.appendingPathComponent("siri.json")),
+                  let receipt = try? JSONDecoder().decode(
+                    SharedSystemItemTrialReceipt.self, from: data
+                  ) else { return }
+            intentObservedBeforeSetter = receipt.schemaVersion == 2
+                && receipt.revealIntent?.effectiveVisible == true
+        }
+
+        try await writer.applyManagedPlan([identifier: .hidden])
+        try await writer.applyManagedPlan([identifier: .revealed])
+
+        #expect(intentObservedBeforeSetter)
+        #expect(backend.restoreCounts[.siri, default: 0] == 0)
+        #expect(backend.states[.siri] != baseline)
+        #expect(try await writer.verifyManagedPlan([identifier: .revealed]))
+    }
+
+    @Test("A persisted Siri reveal intent restores after a setter-side crash")
+    func siriRevealIntentCrashRecovery() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeImplicitSiriSnapshot()
+        var receipt = try SharedSystemItemTrialReceipt(
+            runtime: .current(), baseline: baseline
+        )
+        let hidden = try baseline.hidingProposal()
+        try receipt.recordApplied(hidden)
+        try receipt.recordSiriRevealIntent(from: hidden)
+        let encoder = JSONEncoder()
+        let url = directory.appendingPathComponent("siri.json")
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try encoder.encode(receipt).write(to: url, options: [.atomic])
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: url.path
+        )
+        let backend = FakeSharedSystemItemTrialBackend(states: [
+            .siri: try #require(receipt.revealIntent),
+        ])
+        let restarted = SharedSystemItemManualTrialWriter(
+            backend: backend, receiptDirectory: directory
+        )
+
+        #expect(await restarted.verifyAllManagedItemsAreRestorable())
+        #expect(await restarted.restoreAllManagedItems())
+        #expect(backend.states[.siri] == baseline)
+        #expect(backend.restoreCounts[.siri] == 1)
+        #expect(!(await restarted.hasRecoveryReceipt(for: .siri)))
+    }
+
+    @Test("A failed Siri reveal-intent write never reaches the setter")
+    func siriRevealIntentWriteFailureDoesNotMutate() async throws {
+        let directory = temporaryDirectory()
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: directory.path
+            )
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let backend = FakeSharedSystemItemTrialBackend(states: [
+            .siri: try makeImplicitSiriSnapshot(),
+        ])
+        let writer = SharedSystemItemManualTrialWriter(
+            backend: backend, receiptDirectory: directory
+        )
+        let identifier = SharedSystemItemTrialTarget.siri.observationIdentifier
+        try await writer.applyManagedPlan([identifier: .hidden])
+        var revealSetterCalled = false
+        backend.beforeVisibilityMutation = { target, visible in
+            if target == .siri, visible { revealSetterCalled = true }
+        }
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o500], ofItemAtPath: directory.path
+        )
+
+        await #expect(throws: SharedSystemItemTrialError.restorationFailed) {
+            try await writer.applyManagedPlan([identifier: .revealed])
+        }
+        #expect(!revealSetterCalled)
+    }
+
+    @Test("Siri reveal hides quickly and Stop still restores exactly")
+    func siriRevealHideAndExactStop() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeImplicitSiriSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(states: [.siri: baseline])
+        let writer = SharedSystemItemManualTrialWriter(
+            backend: backend, receiptDirectory: directory
+        )
+        let identifier = SharedSystemItemTrialTarget.siri.observationIdentifier
+
+        try await writer.applyManagedPlan([identifier: .hidden])
+        try await writer.applyManagedPlan([identifier: .revealed])
+        #expect(backend.states[.siri] != baseline)
+        try await writer.applyManagedPlan([identifier: .hidden])
+        #expect(backend.restoreCounts[.siri, default: 0] == 0)
+        #expect(backend.states[.siri]?.effectiveVisible == false)
+
+        #expect(await writer.restoreAllManagedItems())
+        #expect(backend.states[.siri] == baseline)
+        #expect(backend.restoreCounts[.siri] == 1)
+    }
+
+    @Test("Siri revealed-state drift is not taken over by cleanup")
+    func siriRevealedStateDriftRefusesRestore() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeImplicitSiriSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(states: [.siri: baseline])
+        let writer = SharedSystemItemManualTrialWriter(
+            backend: backend, receiptDirectory: directory
+        )
+        let identifier = SharedSystemItemTrialTarget.siri.observationIdentifier
+        try await writer.applyManagedPlan([identifier: .hidden])
+        try await writer.applyManagedPlan([identifier: .revealed])
+        backend.states[.siri] = try SharedSystemItemPreferenceSnapshot(
+            target: .siri,
+            values: [
+                "StatusMenuVisible": try ExactPreferenceValue(true),
+                "SiriPrefStashedStatusMenuVisible": try ExactPreferenceValue(true),
+            ],
+            effectiveVisible: true
+        )
+
+        #expect(!(try await writer.verifyManagedPlan([identifier: .revealed])))
+        #expect(!(await writer.restoreAllManagedItems()))
+        #expect(backend.restoreCounts[.siri, default: 0] == 0)
+        #expect(await writer.hasRecoveryReceipt(for: .siri))
+    }
+
+    @Test("Time Machine ordinary reveal uses the trial route and cleanup stays exact")
+    func timeMachineOrdinaryRevealRoute() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeTimeMachineSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(states: [.timeMachine: baseline])
+        let writer = SharedSystemItemManualTrialWriter(backend: backend, receiptDirectory: directory)
+        let identifier = SharedSystemItemTrialTarget.timeMachine.observationIdentifier
+        try await writer.applyManagedPlan([identifier: .hidden])
+        try await writer.applyManagedPlan([identifier: .revealed])
+        #expect(backend.ordinaryRevealCounts[.timeMachine] == 1)
+        #expect(backend.restoreCounts[.timeMachine, default: 0] == 0)
+        #expect(try await writer.verifyManagedPlan([identifier: .revealed]))
+        try await writer.applyManagedPlan([identifier: .hidden])
+        #expect(await writer.restoreAllManagedItems())
+        #expect(backend.restoreCounts[.timeMachine] == 1)
+        #expect(backend.states[.timeMachine] == baseline)
+    }
+
+    @Test("A failed Time Machine reveal restores its hidden checkpoint and receipt")
+    func timeMachineOrdinaryRevealFailure() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeTimeMachineSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(states: [.timeMachine: baseline])
+        let writer = SharedSystemItemManualTrialWriter(backend: backend, receiptDirectory: directory)
+        let identifier = SharedSystemItemTrialTarget.timeMachine.observationIdentifier
+        try await writer.applyManagedPlan([identifier: .hidden])
+        let hidden = backend.states[.timeMachine]
+        let receiptURL = directory.appendingPathComponent("timeMachine.json")
+        let receipt = try Data(contentsOf: receiptURL)
+        backend.failOrdinaryRevealVerification = true
+        await #expect(throws: SharedSystemItemTrialError.restorationFailed) {
+            try await writer.applyManagedPlan([identifier: .revealed])
+        }
+        #expect(backend.ordinaryRevealCounts[.timeMachine] == 1)
+        #expect(backend.restoreCounts[.timeMachine] == 1)
+        #expect(backend.states[.timeMachine] == hidden)
+        #expect(try Data(contentsOf: receiptURL) == receipt)
+        #expect(await writer.restoreAllManagedItems())
+        #expect(backend.states[.timeMachine] == baseline)
     }
 
     @Test("Managed persistent items implement all three policy states")
@@ -426,6 +666,17 @@ struct SharedSystemItemManualTrialTests {
         )
     }
 
+    private func makeImplicitSiriSnapshot() throws -> SharedSystemItemPreferenceSnapshot {
+        try SharedSystemItemPreferenceSnapshot(
+            target: .siri,
+            values: [
+                "StatusMenuVisible": try ExactPreferenceValue(nil),
+                "SiriPrefStashedStatusMenuVisible": try ExactPreferenceValue(false),
+            ],
+            effectiveVisible: true
+        )
+    }
+
     private func makeNowPlayingSnapshot() throws -> SharedSystemItemPreferenceSnapshot {
         try SharedSystemItemPreferenceSnapshot(
             target: .nowPlaying,
@@ -464,19 +715,27 @@ private final class FakeSharedSystemItemTrialBackend: SharedSystemItemTrialBacke
 {
     var states: [SharedSystemItemTrialTarget: SharedSystemItemPreferenceSnapshot]
     var restoreCounts: [SharedSystemItemTrialTarget: Int] = [:]
+    var ordinaryRevealCounts: [SharedSystemItemTrialTarget: Int] = [:]
+    var failOrdinaryRevealVerification = false
+    var beforeVisibilityMutation: ((SharedSystemItemTrialTarget, Bool) -> Void)?
     var maximumConcurrentMutations = 0
     private var activeMutations = 0
     private var failNextHideVerification: Bool
     private let normalizeTimeMachineHide: Bool
+    private let normalizeTimeMachineAfterFirstAppliedCapture: Bool
+    private var timeMachineNormalizationPending = false
 
     init(
         states: [SharedSystemItemTrialTarget: SharedSystemItemPreferenceSnapshot],
         failNextHideVerification: Bool = false,
-        normalizeTimeMachineHide: Bool = false
+        normalizeTimeMachineHide: Bool = false,
+        normalizeTimeMachineAfterFirstAppliedCapture: Bool = false
     ) {
         self.states = states
         self.failNextHideVerification = failNextHideVerification
         self.normalizeTimeMachineHide = normalizeTimeMachineHide
+        self.normalizeTimeMachineAfterFirstAppliedCapture =
+            normalizeTimeMachineAfterFirstAppliedCapture
     }
 
     func capture(_ target: SharedSystemItemTrialTarget) throws
@@ -495,6 +754,11 @@ private final class FakeSharedSystemItemTrialBackend: SharedSystemItemTrialBacke
                 effectiveVisible: true
             )
         }
+        if target == .timeMachine, timeMachineNormalizationPending {
+            timeMachineNormalizationPending = false
+            states[target] = try normalizedTimeMachineHiddenState(from: state)
+            return state
+        }
         return state
     }
 
@@ -506,30 +770,40 @@ private final class FakeSharedSystemItemTrialBackend: SharedSystemItemTrialBacke
         maximumConcurrentMutations = max(maximumConcurrentMutations, activeMutations)
         defer { activeMutations -= 1 }
         try await Task.sleep(for: .milliseconds(5))
-        guard !visible, let state = states[target] else {
+        beforeVisibilityMutation?(target, visible)
+        guard let state = states[target] else {
             throw SharedSystemItemTrialError.unsafeBaseline
         }
-        if target == .timeMachine, normalizeTimeMachineHide {
-            let appliedEntries = (try state.values["menuExtras"]?.stringArray() ?? [])
-                .filter {
-                    $0 != SharedSystemItemPreferenceSnapshot.timeMachineMenuExtraPath
-                }
+        if visible {
+            guard target == .siri else {
+                throw SharedSystemItemTrialError.unsafeBaseline
+            }
+            states[target] = try state.siriRevealingProposal()
+        } else if target == .timeMachine, normalizeTimeMachineAfterFirstAppliedCapture {
             states[target] = try SharedSystemItemPreferenceSnapshot(
-                target: .timeMachine,
-                values: [
-                    "menuExtras": try ExactPreferenceValue(
-                        appliedEntries.isEmpty ? nil : appliedEntries
-                    ),
-                    "NSStatusItem VisibleCC com.apple.menuextra.TimeMachine":
-                        try ExactPreferenceValue(false),
-                    "NSStatusItem Preferred Position com.apple.menuextra.TimeMachine":
-                        try ExactPreferenceValue(nil),
-                ],
-                effectiveVisible: false
+                target: .timeMachine, values: state.values, effectiveVisible: false
             )
+            timeMachineNormalizationPending = true
+        } else if target == .timeMachine, normalizeTimeMachineHide {
+            states[target] = try normalizedTimeMachineHiddenState(from: state)
         } else {
             states[target] = try state.hidingProposal()
         }
+    }
+
+    func restoreForOrdinaryReveal(_ snapshot: SharedSystemItemPreferenceSnapshot) async throws {
+        guard snapshot.target == .timeMachine else {
+            try await restoreExact(snapshot)
+            return
+        }
+        ordinaryRevealCounts[snapshot.target, default: 0] += 1
+        states[snapshot.target] = snapshot
+        if failOrdinaryRevealVerification {
+            failOrdinaryRevealVerification = false
+            // Simulate late target-local reflow before the writer's readback.
+            states[snapshot.target] = try snapshot.hidingProposal()
+        }
+        timeMachineNormalizationPending = false
     }
 
     func restoreExact(_ snapshot: SharedSystemItemPreferenceSnapshot) async throws {
@@ -538,7 +812,30 @@ private final class FakeSharedSystemItemTrialBackend: SharedSystemItemTrialBacke
         defer { activeMutations -= 1 }
         try await Task.sleep(for: .milliseconds(5))
         states[snapshot.target] = snapshot
+        if snapshot.target == .timeMachine { timeMachineNormalizationPending = false }
         restoreCounts[snapshot.target, default: 0] += 1
+    }
+
+    private func normalizedTimeMachineHiddenState(
+        from state: SharedSystemItemPreferenceSnapshot
+    ) throws -> SharedSystemItemPreferenceSnapshot {
+        let appliedEntries = (try state.values["menuExtras"]?.stringArray() ?? [])
+            .filter {
+                $0 != SharedSystemItemPreferenceSnapshot.timeMachineMenuExtraPath
+            }
+        return try SharedSystemItemPreferenceSnapshot(
+            target: .timeMachine,
+            values: [
+                "menuExtras": try ExactPreferenceValue(
+                    appliedEntries.isEmpty ? nil : appliedEntries
+                ),
+                "NSStatusItem VisibleCC com.apple.menuextra.TimeMachine":
+                    try ExactPreferenceValue(false),
+                "NSStatusItem Preferred Position com.apple.menuextra.TimeMachine":
+                    try ExactPreferenceValue(nil),
+            ],
+            effectiveVisible: false
+        )
     }
 }
 #endif

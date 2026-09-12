@@ -5,6 +5,23 @@ public protocol PersistentBundlePolicyStoring: Sendable {
     func loadBackup() async throws -> PersistentBundlePolicyBackup?
     func save(_ document: PersistentBundlePolicyDocument) async throws
     func restoreBackup() async throws -> PersistentBundlePolicyDocument?
+    func restoreSnapshot(
+        document: PersistentBundlePolicyDocument,
+        backup: PersistentBundlePolicyBackup?,
+        expecting: PersistentBundlePolicyDocument
+    ) async throws
+}
+
+public extension PersistentBundlePolicyStoring {
+    func restoreSnapshot(
+        document: PersistentBundlePolicyDocument,
+        backup: PersistentBundlePolicyBackup?,
+        expecting: PersistentBundlePolicyDocument
+    ) async throws {
+        // A store without exact snapshot restoration must not rotate away the
+        // user's earlier backup while compensating for a combined operation.
+        throw PersistentBundlePolicyStoreError.interruptedTransactionStateMismatch
+    }
 }
 
 extension PersistentBundlePolicyStore: PersistentBundlePolicyStoring {}
@@ -16,6 +33,7 @@ public protocol PolicyAssertionWriting: Sendable {
     func restoreAndStop() async
     func connectionInvalidated() async
     func activePlanSnapshot() async -> RevealAllowlistPlan?
+    func hasPendingRestoration() async -> Bool
     func finalizeCommittedPlan(_ plan: RevealAllowlistPlan) async
 }
 
@@ -27,6 +45,8 @@ public extension PolicyAssertionWriting {
     func verifyActivePlan(_ expected: RevealAllowlistPlan) async throws -> Bool {
         await activePlanSnapshot() == expected
     }
+
+    func hasPendingRestoration() async -> Bool { await activePlanSnapshot() != nil }
 
     func finalizeCommittedPlan(_ plan: RevealAllowlistPlan) async {}
 }

@@ -74,6 +74,11 @@ final class StatusItemController: NSObject {
     private var revealPrototypeArrowImageView: NSImageView?
     private var manualPositionCapture: (() -> Void)?
     private var manualPositionCaptureItem: NSMenuItem?
+    private let fallbackSlotDiagnosticItem = NSMenuItem(
+        title: "Fallback slot: checking…",
+        action: nil,
+        keyEquivalent: ""
+    )
     private let revealPrototypeStateItem = NSMenuItem(
         title: "0.0.5 Policy Editing Core validation: inactive",
         action: nil,
@@ -270,6 +275,9 @@ final class StatusItemController: NSObject {
             nativeOverflowUsable: nativeOverflow.isUsable,
             mayBeginCompaction: normalPresentation.canToggleReveal
         )
+        #if DEBUG
+        let previousSlotAllocation = lastFallbackSlotAllocation
+        #endif
         // A MenuBarAgent layout notification may result from this presentation
         // itself. Never resubmit unchanged content in response to that event.
         guard normalPresentation != lastRenderedPresentation
@@ -304,6 +312,15 @@ final class StatusItemController: NSObject {
             item.button?.setAccessibilityLabel(normalPresentation.nativeArrowHelp)
             item.button?.toolTip = normalPresentation.nativeArrowHelp
         }
+        #if DEBUG
+        if previousSlotAllocation != slotUpdate.allocation,
+           DebugSessionTrace.shared.enabled {
+            DebugSessionTrace.shared.write(
+                "fallback-slot nativeUsable=\(nativeOverflow.isUsable) "
+                    + debugFallbackSlotSummary
+            )
+        }
+        #endif
         ordinaryRevealItem.isEnabled = normalPresentation.canToggleReveal
         button.setAccessibilityLabel("Open Blenny")
         button.setAccessibilityHelp("Right-click to open Blenny, stop managing, or restore the previous policy.")
@@ -348,6 +365,9 @@ final class StatusItemController: NSObject {
 
     @objc private func openNormalMenu() -> Bool {
         guard let button = statusItem.button else { return false }
+        #if DEBUG
+        updateFallbackSlotDiagnosticItem()
+        #endif
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
         return true
     }
@@ -425,6 +445,39 @@ final class StatusItemController: NSObject {
         guard revealStatusItem != nil else { return "absent" }
         return revealStatusItem?.length == Self.ordinaryStatusItemLength
             ? "reserved" : "compact"
+    }
+    var debugFallbackSlotSummary: String {
+        let fishFrame = Self.debugFrameSummary(statusItem.button?.window?.frame)
+        let fallbackFrame = Self.debugFrameSummary(revealStatusItem?.button?.window?.frame)
+        return "allocation=\(debugOrdinaryRevealSlotMode)"
+            + " fishLength=\(statusItem.length) fishFrame=\(fishFrame)"
+            + " fishAutosave=\(statusItem.autosaveName ?? "none")"
+            + " fallbackLength=\(revealStatusItem?.length ?? 0)"
+            + " fallbackFrame=\(fallbackFrame)"
+            + " fallbackAutosave=\(revealStatusItem?.autosaveName ?? "none")"
+    }
+
+    private static func debugFrameSummary(_ frame: NSRect?) -> String {
+        guard let frame else { return "none" }
+        return "\(frame.origin.x),\(frame.origin.y),\(frame.size.width),\(frame.size.height)"
+    }
+
+    private func updateFallbackSlotDiagnosticItem() {
+        let fishFrame = Self.debugCompactFrameSummary(statusItem.button?.window?.frame)
+        let fallbackFrame = Self.debugCompactFrameSummary(revealStatusItem?.button?.window?.frame)
+        fallbackSlotDiagnosticItem.title = "Fallback slot: \(debugOrdinaryRevealSlotMode)"
+            + " · fish=\(fishFrame) · fallback=\(fallbackFrame)"
+    }
+
+    private static func debugCompactFrameSummary(_ frame: NSRect?) -> String {
+        guard let frame else { return "none" }
+        return String(
+            format: "(%.1f,%.1f,%.1f,%.1f)",
+            frame.origin.x,
+            frame.origin.y,
+            frame.size.width,
+            frame.size.height
+        )
     }
     /// Presentation-only fixtures run in the installed no-writer dry-run. They
     /// prove local AppKit state, not native event delivery or physical placement.
@@ -656,6 +709,10 @@ final class StatusItemController: NSObject {
         menu.addItem(refreshItem)
         menu.addItem(.separator())
         menu.addItem(managementStateItem)
+        #if DEBUG
+        fallbackSlotDiagnosticItem.isEnabled = false
+        menu.addItem(fallbackSlotDiagnosticItem)
+        #endif
         menu.addItem(ordinaryRevealItem)
         menu.addItem(resumeManagingItem)
         menu.addItem(stopManagingItem)

@@ -41,3 +41,7 @@ LocalData/
 
 # Private owner notes and working-language drafts
 LocalNotes/
+
+# Python research caches
+__pycache__/
+*.py[cod]

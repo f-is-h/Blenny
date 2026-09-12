@@ -267,15 +267,16 @@ struct PersistentBundlePolicyTransactionMarker: Codable, Equatable, Sendable {
     let oldPolicyData: Data
     let newPolicyHash: String
     let oldBackupData: Data?
-    let newBackupData: Data
+    let newBackupData: Data?
 
     init(
         oldPolicyData: Data,
         newPolicyHash: String,
         oldBackupData: Data?,
-        newBackupData: Data
+        newBackupData: Data?,
+        schemaVersion: Int = Self.currentSchemaVersion
     ) {
-        schemaVersion = Self.currentSchemaVersion
+        self.schemaVersion = schemaVersion
         self.oldPolicyData = oldPolicyData
         self.newPolicyHash = newPolicyHash
         self.oldBackupData = oldBackupData
@@ -379,6 +380,46 @@ public actor PersistentBundlePolicyStore {
                try loadBackup()?.previousPolicy == existing {
                 return
             }
+            throw error
+        }
+    }
+
+    /// Compensates a larger reviewed transaction without making the rejected
+    /// policy become the user's "previous policy" backup. Schema 2 can restore
+    /// an absent backup and can finish an interrupted backup-only restoration.
+    public func restoreSnapshot(
+        document: PersistentBundlePolicyDocument,
+        backup: PersistentBundlePolicyBackup?,
+        expecting: PersistentBundlePolicyDocument
+    ) async throws {
+        guard !readOnly else { throw PersistentBundlePolicyStoreError.readOnlyStore }
+        let current = try load()
+        guard current == expecting || current == document else {
+            throw PersistentBundlePolicyStoreError.interruptedTransactionStateMismatch
+        }
+        if current == document, try loadBackup() == backup { return }
+        let oldPolicyData = try Data(contentsOf: policyURL)
+        let newPolicyData = try Self.makeEncoder().encode(document)
+        let oldBackupData = FileManager.default.fileExists(atPath: backupURL.path)
+            ? try Data(contentsOf: backupURL) : nil
+        let newBackupData = try backup.map { try Self.makeEncoder().encode($0) }
+        let marker = PersistentBundlePolicyTransactionMarker(
+            oldPolicyData: oldPolicyData, newPolicyHash: Self.hash(newPolicyData),
+            oldBackupData: oldBackupData, newBackupData: newBackupData, schemaVersion: 2
+        )
+        try write(Self.makeEncoder().encode(marker), to: transactionURL)
+        do {
+            try Self.restorePreviousBackup(newBackupData, at: backupURL)
+            try write(newPolicyData, to: policyURL)
+            guard try load() == document, try loadBackup() == backup else {
+                throw PersistentBundlePolicyStoreError.interruptedTransactionCorrupt
+            }
+            try removeTransactionMarker()
+        } catch {
+            try Self.recoverInterruptedCommit(
+                policyURL: policyURL, backupURL: backupURL, transactionURL: transactionURL
+            )
+            if try load() == document, try loadBackup() == backup { return }
             throw error
         }
     }
@@ -487,9 +528,11 @@ public actor PersistentBundlePolicyStore {
             PersistentBundlePolicyTransactionMarker.self,
             from: Data(contentsOf: transactionURL)
         )
-        guard marker.schemaVersion
-            == PersistentBundlePolicyTransactionMarker.currentSchemaVersion,
-              hash(marker.oldPolicyData) != marker.newPolicyHash else {
+        guard marker.schemaVersion == 2 || (
+            marker.schemaVersion == PersistentBundlePolicyTransactionMarker.currentSchemaVersion
+                && marker.newBackupData != nil
+                && hash(marker.oldPolicyData) != marker.newPolicyHash
+        ) else {
             throw PersistentBundlePolicyStoreError.interruptedTransactionCorrupt
         }
 
@@ -497,7 +540,7 @@ public actor PersistentBundlePolicyStore {
             ? try Data(contentsOf: policyURL) : nil
         switch policyData.map(hash) {
         case marker.newPolicyHash:
-            try writeRecovered(marker.newBackupData, to: backupURL)
+            try restorePreviousBackup(marker.newBackupData, at: backupURL)
         case hash(marker.oldPolicyData):
             try restorePreviousBackup(marker.oldBackupData, at: backupURL)
         case nil:

@@ -71,6 +71,66 @@ struct SystemItemPolicyCatalogTests {
         #endif
     }
 
+    @Test("Persistent policy identities accept only trusted live composites")
+    func persistentPolicyObservationMapping() throws {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        let observations = [
+            "com.apple.systemuiserver|:siri|axmenubaritem":
+                "com.apple.menuextra.siri",
+            "com.apple.systemuiserver|:time machine|axmenubaritem":
+                "com.apple.menuextra.TimeMachine",
+            "com.apple.controlcenter|:now playing|axmenubaritem":
+                "com.apple.menuextra.now-playing",
+        ]
+        for (observation, expectedIdentifier) in observations {
+            let item = try #require(PersistentSystemItemPolicyCatalog.controllableItem(
+                forObservationIdentifier: observation
+            ))
+            #expect(item.identifier == expectedIdentifier)
+        }
+
+        let stableSiri = MenuBarItemIdentity(
+            ownerBundleIdentifier: "com.apple.systemuiserver",
+            accessibilityIdentifier: "Siri",
+            semanticLabel: nil,
+            role: "AXMenuBarItem",
+            subrole: "AXMenuExtra",
+            instanceOrdinal: 0,
+            confidence: .strong
+        ).stableKey
+        #expect(PersistentSystemItemPolicyCatalog.controllableItem(
+            forObservationIdentifier: stableSiri
+        )?.identifier == "com.apple.menuextra.siri")
+        let semanticStableSiri = MenuBarItemIdentity(
+            ownerBundleIdentifier: "com.apple.systemuiserver",
+            accessibilityIdentifier: nil,
+            semanticLabel: "Siri",
+            role: "AXMenuBarItem",
+            subrole: nil,
+            instanceOrdinal: 0,
+            confidence: .moderate
+        ).stableKey
+        #expect(PersistentSystemItemPolicyCatalog.controllableItem(
+            forObservationIdentifier: semanticStableSiri
+        )?.identifier == "com.apple.menuextra.siri")
+
+        for rejected in [
+            "com.example.statusapp|:siri|axmenubaritem",
+            "com.apple.systemuiserver|:siri settings|axmenubaritem",
+            "com.apple.systemuiserver|:siri|axbutton",
+            "com.apple.menuextra.siri-settings",
+        ] {
+            #expect(PersistentSystemItemPolicyCatalog.controllableItem(
+                forObservationIdentifier: rejected
+            ) == nil)
+        }
+        #else
+        #expect(PersistentSystemItemPolicyCatalog.controllableItem(
+            forObservationIdentifier: "com.apple.systemuiserver|:siri|axmenubaritem"
+        ) == nil)
+        #endif
+    }
+
     @Test("Tampered receipt keys cannot decode into a writable policy")
     func tamperedPersistenceDecodeFailsClosed() throws {
         #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL

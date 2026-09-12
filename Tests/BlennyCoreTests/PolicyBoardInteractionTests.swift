@@ -409,6 +409,17 @@ struct PolicyBoardInteractionTests {
         #expect(payload.id.bundleIdentifier == payload.bundleIdentifier)
         #expect(payload.id.sourcePolicy == payload.sourcePolicy)
         #expect(payload.id.candidateGeneration == payload.candidateGeneration)
+        #expect(payload.id.dragToken == payload.dragToken)
+
+        let laterAttempt = PolicyDragPayload(
+            bundleIdentifier: payload.bundleIdentifier,
+            sourcePolicy: payload.sourcePolicy,
+            candidateGeneration: payload.candidateGeneration,
+            dragToken: UUID(
+                uuidString: "00000000-0000-0000-0000-000000000034"
+            )!
+        )
+        #expect(laterAttempt.id != payload.id)
 
         #expect(
             provider.hasItemConformingToTypeIdentifier(
@@ -429,6 +440,64 @@ struct PolicyBoardInteractionTests {
         }
 
         #expect(decoded == payload)
+    }
+
+    @Test("Typed drop accepts either completion order but refuses conflicting sessions")
+    func deliveryCompletionOrder() {
+        let current = PolicyDragPayload(
+            bundleIdentifier: visible, sourcePolicy: .visible,
+            candidateGeneration: UUID()
+        )
+        let older = PolicyDragPayload(
+            bundleIdentifier: visible, sourcePolicy: .visible,
+            candidateGeneration: current.candidateGeneration
+        )
+        #expect(PolicyDragDelivery.matches(delivered: current.id,
+            reported: current.id, active: current.id, nativeSessionMatches: true))
+        #expect(PolicyDragDelivery.matches(delivered: current.id,
+            reported: nil, active: nil, nativeSessionMatches: nil))
+        #expect(PolicyDragDelivery.matches(delivered: current.id,
+            reported: nil, active: current.id, nativeSessionMatches: true))
+        #expect(!PolicyDragDelivery.matches(delivered: older.id,
+            reported: nil, active: current.id, nativeSessionMatches: true))
+        #expect(!PolicyDragDelivery.matches(delivered: current.id,
+            reported: older.id, active: nil, nativeSessionMatches: nil))
+        #expect(!PolicyDragDelivery.matches(delivered: current.id,
+            reported: current.id, active: current.id, nativeSessionMatches: false))
+    }
+
+    @Test("One native drop session handles one typed payload at most once")
+    func nativeDropDeliveryReceipt() {
+        let firstSession = UUID()
+        let nextSession = UUID()
+        let current = PolicyDragPayload(
+            bundleIdentifier: visible, sourcePolicy: .visible,
+            candidateGeneration: UUID()
+        )
+        let conflicting = PolicyDragPayload(
+            bundleIdentifier: visible, sourcePolicy: .visible,
+            candidateGeneration: current.candidateGeneration
+        )
+        var receipt = PolicyDragDeliveryReceipt<UUID>()
+
+        let first = receipt.register(
+            sessionID: firstSession, payloadID: current.id
+        )
+        #expect(first == .first)
+        #expect(receipt.contains(sessionID: firstSession, payloadID: current.id))
+        #expect(!receipt.contains(sessionID: nextSession, payloadID: current.id))
+        let duplicate = receipt.register(
+            sessionID: firstSession, payloadID: current.id
+        )
+        #expect(duplicate == .duplicate)
+        let conflict = receipt.register(
+            sessionID: firstSession, payloadID: conflicting.id
+        )
+        #expect(conflict == .conflictingPayload)
+        let next = receipt.register(
+            sessionID: nextSession, payloadID: conflicting.id
+        )
+        #expect(next == .first)
     }
 
     private func payload(

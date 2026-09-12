@@ -251,14 +251,32 @@ public struct SharedSystemItemPreferenceSnapshot: Codable, Equatable, Sendable {
         }
         return try Self(target: target, values: proposed, effectiveVisible: false)
     }
+
+    /// The inspected Siri setter removes the stash key before changing the
+    /// visible flag. This exact target-local result is narrow enough to record
+    /// before an ordinary reveal setter runs. No equivalent Time Machine
+    /// result has been established.
+    public func siriRevealingProposal() throws -> Self {
+        try validate()
+        guard target == .siri, !effectiveVisible,
+              try values["StatusMenuVisible"]?.optionalBoolean() == false,
+              try values["SiriPrefStashedStatusMenuVisible"]?.optionalBoolean() == nil else {
+            throw SharedSystemItemTrialError.unsafeBaseline
+        }
+        var proposed = values
+        proposed["StatusMenuVisible"] = try ExactPreferenceValue(true)
+        proposed["SiriPrefStashedStatusMenuVisible"] = try ExactPreferenceValue(nil)
+        return try Self(target: target, values: proposed, effectiveVisible: true)
+    }
 }
 
 public struct SharedSystemItemTrialReceipt: Codable, Equatable, Sendable {
-    public let schemaVersion: Int
+    public private(set) var schemaVersion: Int
     public let runtime: RuntimeEnvironment
     public let baseline: SharedSystemItemPreferenceSnapshot
     public let proposed: SharedSystemItemPreferenceSnapshot
     public var applied: SharedSystemItemPreferenceSnapshot?
+    public private(set) var revealIntent: SharedSystemItemPreferenceSnapshot?
 
     public init(
         runtime: RuntimeEnvironment,
@@ -269,6 +287,7 @@ public struct SharedSystemItemTrialReceipt: Codable, Equatable, Sendable {
         self.baseline = baseline
         proposed = try baseline.hidingProposal()
         applied = nil
+        revealIntent = nil
         try validate()
     }
 
@@ -279,6 +298,23 @@ public struct SharedSystemItemTrialReceipt: Codable, Equatable, Sendable {
             throw SharedSystemItemTrialError.verificationFailed
         }
         applied = snapshot
+        revealIntent = nil
+    }
+
+    /// Persist the complete Siri result authorized for an ordinary reveal
+    /// before invoking its setter. A crash on either side of the setter can
+    /// then distinguish Blenny's exact visible state from external drift.
+    public mutating func recordSiriRevealIntent(
+        from current: SharedSystemItemPreferenceSnapshot
+    ) throws {
+        try validate()
+        guard baseline.target == .siri,
+              try baseline.acceptsAppliedHide(current) else {
+            throw SharedSystemItemTrialError.staleState
+        }
+        schemaVersion = 2
+        revealIntent = try current.siriRevealingProposal()
+        try validate()
     }
 
     public func validate() throws {
@@ -290,12 +326,21 @@ public struct SharedSystemItemTrialReceipt: Codable, Equatable, Sendable {
         } else {
             appliedIsValid = true
         }
-        guard schemaVersion == 1,
+        let revealIntentIsValid: Bool
+        if let revealIntent, baseline.target == .siri {
+            let expected = try proposed.siriRevealingProposal()
+            revealIntentIsValid = revealIntent == expected
+        } else {
+            revealIntentIsValid = revealIntent == nil
+        }
+        guard [1, 2].contains(schemaVersion),
+              (schemaVersion == 2 || revealIntent == nil),
               runtime == .current(),
               baseline.target == proposed.target,
               baseline.effectiveVisible,
               proposed == (try baseline.hidingProposal()),
-              appliedIsValid else {
+              appliedIsValid,
+              revealIntentIsValid else {
             throw SharedSystemItemTrialError.malformedReceipt
         }
     }
@@ -305,7 +350,8 @@ public struct SharedSystemItemTrialReceipt: Codable, Equatable, Sendable {
     ) throws -> Bool {
         try validate()
         if current == baseline { return true }
-        return try acceptsOwnedHiddenCurrent(current)
+        if try acceptsOwnedHiddenCurrent(current) { return true }
+        return try acceptsOwnedRevealedCurrent(current)
     }
 
     /// SystemUIServer may normalize target-owned keys again after the setter
@@ -318,6 +364,17 @@ public struct SharedSystemItemTrialReceipt: Codable, Equatable, Sendable {
     ) throws -> Bool {
         try validate()
         return try baseline.acceptsAppliedHide(current)
+    }
+
+    public func acceptsOwnedRevealedCurrent(
+        _ current: SharedSystemItemPreferenceSnapshot
+    ) throws -> Bool {
+        try validate()
+        try current.validate()
+        guard current.target == baseline.target, current.effectiveVisible else {
+            return false
+        }
+        return current == baseline || current == revealIntent
     }
 
     public var fingerprint: String {
@@ -336,6 +393,23 @@ public protocol SharedSystemItemTrialBackend: AnyObject, Sendable {
         -> SharedSystemItemPreferenceSnapshot
     func setVisibility(_ visible: Bool, for target: SharedSystemItemTrialTarget) async throws
     func restoreExact(_ snapshot: SharedSystemItemPreferenceSnapshot) async throws
+    func restoreForOrdinaryReveal(_ snapshot: SharedSystemItemPreferenceSnapshot) async throws
+}
+
+extension SharedSystemItemTrialBackend {
+    public func restoreForOrdinaryReveal(
+        _ snapshot: SharedSystemItemPreferenceSnapshot
+    ) async throws {
+        try await restoreExact(snapshot)
+    }
+}
+
+/// Explicit owner-trial operations routed through Blenny's sole mutation
+/// coordinator. The lower-level preference backend remains private to its writer.
+public protocol ManualSystemItemTrialWriting: Sendable {
+    func hide(_ target: SharedSystemItemTrialTarget) async throws
+        -> SharedSystemItemTrialReceipt
+    func restore(_ target: SharedSystemItemTrialTarget) async throws
 }
 
 public actor SharedSystemItemManualTrialWriter {
@@ -486,7 +560,8 @@ public actor SharedSystemItemManualTrialWriter {
                         return false
                     }
                 case .revealed:
-                    guard let receipt, current == receipt.baseline else {
+                    guard let receipt,
+                          try receipt.acceptsOwnedRevealedCurrent(current) else {
                         await operationGate.release()
                         return false
                     }
@@ -577,11 +652,8 @@ public actor SharedSystemItemManualTrialWriter {
         to presentation: PersistentSystemItemPresentation
     ) async throws {
         switch presentation {
-        case .restored, .revealed:
+        case .restored:
             guard hasRecoveryReceipt(for: target) else {
-                if presentation == .revealed {
-                    throw SharedSystemItemTrialError.staleState
-                }
                 return
             }
             let receipt = try readReceipt(for: target)
@@ -595,6 +667,32 @@ public actor SharedSystemItemManualTrialWriter {
                     throw SharedSystemItemTrialError.restorationFailed
                 }
             }
+        case .revealed:
+            guard hasRecoveryReceipt(for: target) else {
+                throw SharedSystemItemTrialError.staleState
+            }
+            var receipt = try readReceipt(for: target)
+            let current = try await backend.capture(target)
+            guard try receipt.acceptsRestoreCurrent(current) else {
+                throw SharedSystemItemTrialError.staleState
+            }
+            if try receipt.acceptsOwnedRevealedCurrent(current) { return }
+            guard target == .siri else {
+                try await backend.restoreForOrdinaryReveal(receipt.baseline)
+                guard try await backend.capture(target) == receipt.baseline else {
+                    throw SharedSystemItemTrialError.restorationFailed
+                }
+                return
+            }
+            try receipt.recordSiriRevealIntent(from: current)
+            // This receipt write is the crash boundary: it records the sole
+            // non-baseline visible state cleanup may later take ownership of.
+            try writeReceipt(receipt, for: target, withoutOverwriting: false)
+            try await backend.setVisibility(true, for: target)
+            let revealed = try await backend.capture(target)
+            guard try receipt.acceptsOwnedRevealedCurrent(revealed) else {
+                throw SharedSystemItemTrialError.verificationFailed
+            }
         case .hidden:
             guard hasRecoveryReceipt(for: target) else {
                 _ = try await hideLocked(target)
@@ -603,7 +701,7 @@ public actor SharedSystemItemManualTrialWriter {
             var receipt = try readReceipt(for: target)
             let current = try await backend.capture(target)
             if try receipt.acceptsOwnedHiddenCurrent(current) { return }
-            guard current == receipt.baseline else {
+            guard try receipt.acceptsOwnedRevealedCurrent(current) else {
                 throw SharedSystemItemTrialError.staleState
             }
             do {
@@ -722,7 +820,8 @@ public actor SharedSystemItemManualTrialWriter {
     }
 }
 
-extension SharedSystemItemManualTrialWriter: PersistentSystemItemPlanWriting {}
+extension SharedSystemItemManualTrialWriter:
+    PersistentSystemItemPlanWriting, ManualSystemItemTrialWriting {}
 
 private actor SharedSystemItemTrialOperationGate {
     private var isHeld = false

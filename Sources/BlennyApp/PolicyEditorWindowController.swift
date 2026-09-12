@@ -41,6 +41,14 @@ struct ResolvedPolicyIcon {
     let image: NSImage
 }
 
+#if DEBUG
+enum OrderingBoardConfigurationMutationOutcome {
+    case changed(policyChanged: Bool)
+    case unchanged
+    case rejected(String)
+}
+#endif
+
 @MainActor
 final class WorkspacePolicyIconResolver {
     private let workspace: NSWorkspace
@@ -187,6 +195,15 @@ final class ProductInterfaceModel: ObservableObject {
     @Published private(set) var managementRuntimeState: ManagementLoopState = .unknown
     @Published private(set) var developmentMutationAvailable = false
     @Published private(set) var nativeOverflowPlacementAvailable = false
+    #if DEBUG
+    let orderingPresentation = DebugOrderingPresentation()
+    @Published private(set) var orderingLayoutDraft: OrderingBoardLayoutDraft?
+    @Published private(set) var orderingDragSourceRevision: UInt = 0
+    private var orderingPresentationCancellable: AnyCancellable?
+    private var orderingConsumedDragTokens: Set<UUID> = []
+    private var orderingDragLayoutGenerations: [UUID: UUID] = [:]
+    private var orderingDragPayloads = OrderingBoardDragPayloadRegistry()
+    #endif
     #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
     @Published private(set) var sharedSystemItemTrials = Dictionary(
         uniqueKeysWithValues: SharedSystemItemTrialTarget.allCases.map {
@@ -197,6 +214,15 @@ final class ProductInterfaceModel: ObservableObject {
 
     private let iconResolver = WorkspacePolicyIconResolver()
     private var assignmentCoordinator = PolicyDraftAssignmentCoordinator()
+
+    init() {
+        #if DEBUG
+        orderingPresentationCancellable = orderingPresentation.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+        #endif
+    }
 
     var controls: ProductInterfaceControlState {
         ProductInterfaceControlState(
@@ -252,7 +278,7 @@ final class ProductInterfaceModel: ObservableObject {
     func systemItems(in policy: MenuBarBundlePolicy) -> [SystemMenuBarItemObservation] {
         systemItems.filter { observation in
             if isControllableSystemItem(observation.observationIdentifier) {
-                return model?.effectiveSystemItemPolicy(
+                return effectiveSystemItemPolicy(
                     for: observation.observationIdentifier
                 ) == policy
             }
@@ -261,14 +287,53 @@ final class ProductInterfaceModel: ObservableObject {
     }
 
     func isControllableSystemItem(_ observationIdentifier: String) -> Bool {
-        SystemItemPolicyCatalog.controllableItem(for: observationIdentifier) != nil
-            || PersistentSystemItemPolicyCatalog.controllableItem(
-                for: observationIdentifier
-            ) != nil
+        systemItemPolicyIdentifier(for: observationIdentifier) != nil
     }
 
     func isInteractiveSystemItem(_ observationIdentifier: String) -> Bool {
         isControllableSystemItem(observationIdentifier)
+    }
+
+    /// Policy-backed system controls use the same three product intents as
+    /// applications. The older manual item trial remains a recovery surface,
+    /// not a second Visible/Hidden policy selector.
+    func systemItemPolicyDestinations(
+        for observationIdentifier: String
+    ) -> [MenuBarBundlePolicy] {
+        guard isControllableSystemItem(observationIdentifier),
+              effectiveSystemItemPolicy(for: observationIdentifier) != nil else {
+            return []
+        }
+        return [.visible, .revealable, .hidden]
+    }
+
+    func effectiveSystemItemPolicy(
+        for observationIdentifier: String
+    ) -> MenuBarBundlePolicy? {
+        guard let policyIdentifier = systemItemPolicyIdentifier(
+            for: observationIdentifier
+        ) else { return nil }
+        return model?.effectiveSystemItemPolicy(for: policyIdentifier)
+    }
+
+    /// Converts an already recognized live system-item identity to the exact
+    /// identifier accepted by the policy editor. Accessibility observations
+    /// can use a stable composite identity while the persistent policy is
+    /// intentionally keyed by its canonical menu-extra identifier.
+    private func systemItemPolicyIdentifier(
+        for observationIdentifier: String
+    ) -> String? {
+        if let item = SystemItemPolicyCatalog.controllableItem(
+            for: observationIdentifier
+        ) {
+            return item.identifier
+        }
+        if let item = PersistentSystemItemPolicyCatalog.controllableItem(
+            forObservationIdentifier: observationIdentifier
+        ) {
+            return item.identifier
+        }
+        return nil
     }
 
     #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
@@ -317,14 +382,25 @@ final class ProductInterfaceModel: ObservableObject {
     func display(
         model: PolicyEditorViewModel,
         observationCount: Int,
-        recoveryAvailable: Bool
+        recoveryAvailable: Bool,
+        preservingOrderingLayout: Bool = false
     ) {
+        #if DEBUG
+        let previousOrderingLayout = preservingOrderingLayout
+            ? orderingLayoutDraft : nil
+        #endif
         self.model = model
         if !model.acceptedPolicy.managementEnabled {
             managementRuntimeState = .stopped
         }
         assignmentCoordinator.replaceCandidateGeneration()
         candidateGeneration = assignmentCoordinator.candidateGeneration
+        #if DEBUG
+        orderingLayoutDraft = nil
+        orderingConsumedDragTokens.removeAll(keepingCapacity: true)
+        orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
+        orderingDragPayloads.clear()
+        #endif
         self.observationCount = observationCount
         self.recoveryAvailable = recoveryAvailable
 
@@ -353,6 +429,32 @@ final class ProductInterfaceModel: ObservableObject {
                 observation: observation
             )
         }
+
+        #if DEBUG
+        if preservingOrderingLayout {
+            if let previousOrderingLayout {
+                if !restoreOrderingLayoutDraft(previousOrderingLayout) {
+                    setOrderingStatus(
+                        "The application scope changed during the management transition. Refresh the Board before arranging again."
+                    )
+                }
+            } else if orderingPresentation.hasObservation {
+                // A preceding build or interrupted transition may already have
+                // discarded the layout while leaving its captured rows intact.
+                // Rebuild from those rows without performing another read.
+                initializeOrderingLayoutFromCurrentRows(force: true)
+                if orderingLayoutDraft == nil {
+                    setOrderingStatus(
+                        "The captured ordering rows could not rebuild the Board. Refresh before arranging again."
+                    )
+                }
+            } else {
+                setOrderingStatus(
+                    "No captured ordering rows are available after the management transition. Refresh the Board before arranging."
+                )
+            }
+        }
+        #endif
 
         setStatus(
             model.hasDraftChanges
@@ -410,15 +512,660 @@ final class ProductInterfaceModel: ObservableObject {
     }
 
     func applicationCandidates(in policy: MenuBarBundlePolicy) -> [PolicyCandidate] {
+        let candidates = baseApplicationCandidates(in: policy)
+        #if DEBUG
+        if let orderingLayoutDraft {
+            let rank = Dictionary(uniqueKeysWithValues:
+                orderingLayoutDraft.bundleIdentifiers(in: policy).enumerated().map {
+                    ($0.element, $0.offset)
+                }
+            )
+            return candidates.sorted {
+                let leftRank = rank[$0.bundleIdentifier]
+                let rightRank = rank[$1.bundleIdentifier]
+                switch (leftRank, rightRank) {
+                case let (left?, right?): return left < right
+                case (.some, .none): return true
+                case (.none, .some): return false
+                case (.none, .none):
+                    return ($0.bundleIdentifier.lowercased(), $0.bundleIdentifier)
+                        < ($1.bundleIdentifier.lowercased(), $1.bundleIdentifier)
+                }
+            }
+        }
+        let owners = candidates.map { candidate in
+            let row = orderingRow(for: candidate.bundleIdentifier)
+            return OrderingBoardOwner(
+                bundleIdentifier: candidate.bundleIdentifier,
+                observedX: row?.observedX,
+                isEligible: row?.isEligible == true
+            )
+        }
+        let ranks = Dictionary(uniqueKeysWithValues:
+            OrderingBoardArrangement.sortedLeftToRight(owners).enumerated().map {
+                ($0.element.bundleIdentifier, $0.offset)
+            }
+        )
+        return candidates.sorted {
+            ranks[$0.bundleIdentifier, default: .max]
+                < ranks[$1.bundleIdentifier, default: .max]
+        }
+        #else
+        return candidates
+        #endif
+    }
+
+    private func baseApplicationCandidates(in policy: MenuBarBundlePolicy) -> [PolicyCandidate] {
+        #if DEBUG
+        candidates(in: policy)
+        #else
         candidates(in: policy).filter {
             !ExperimentalAppleBundlePolicyCatalog.contains($0.bundleIdentifier)
         }
+        #endif
     }
 
+    #if DEBUG
+    func orderingRow(for bundleIdentifier: String) -> DebugOrderingRow? {
+        orderingRow(for: .application(bundleIdentifier))
+    }
+
+    func orderingRow(for subjectID: OrderingSubjectID) -> DebugOrderingRow? {
+        switch subjectID {
+        case let .application(bundleIdentifier):
+            let canonical = BundlePolicyIdentity.canonicalKey(for: bundleIdentifier)
+            return orderingPresentation.rows.first { row in
+                guard case let .application(rowBundle) = row.subjectID else { return false }
+                return BundlePolicyIdentity.canonicalKey(for: rowBundle) == canonical
+            }
+        case .systemItem:
+            return orderingPresentation.rows.first { $0.subjectID == subjectID }
+        }
+    }
+
+    func orderingExplanation(for bundleIdentifier: String) -> String {
+        orderingExplanation(for: .application(bundleIdentifier))
+    }
+
+    func orderingExplanation(for subjectID: OrderingSubjectID) -> String {
+        guard let row = orderingRow(for: subjectID) else {
+            return "Position unverified: no current ordering observation is available."
+        }
+        switch row.availability {
+        case .ready:
+            return "Mapped for ordering. The configuration can be freely arranged before Apply."
+                + (row.observedX == nil ? " Its current physical position is not separately observable." : "")
+        case .needsMapping:
+            if case .systemItem = subjectID, row.systemKey == nil {
+                return "This system control has no current preferred-position key, so it is not added to the ordered lane. \(row.reason ?? "")"
+            }
+            return "Its area can be edited, but its preferred position remains unchanged until the configuration key is identified. \(row.reason ?? "")"
+        case .unverified:
+            return "Mapping or observation is not fully verified yet. Its configuration position can still be arranged. \(row.reason ?? "")"
+        case .blocked:
+            return "This control is outside application ordering. \(row.reason ?? "")"
+        }
+    }
+
+    func initializeOrderingLayoutFromCurrentRows(force: Bool = false) {
+        guard model != nil else {
+            orderingLayoutDraft = nil
+            return
+        }
+        if !force, let orderingLayoutDraft,
+           orderingLayoutDraft.candidateGeneration == candidateGeneration,
+           orderingLayoutDraft.hasChanges {
+            return
+        }
+        func orderedSubjects(in policy: MenuBarBundlePolicy) -> [OrderingSubjectID] {
+            let applicationSubjects = baseApplicationCandidates(in: policy).map {
+                OrderingSubjectID.application($0.bundleIdentifier)
+            }
+            let systemSubjects = exactSystemOrderingItems(in: policy).map(\.subjectID)
+            return (applicationSubjects + systemSubjects).enumerated().sorted { lhs, rhs in
+                let left = orderingSeed(for: lhs.element)
+                let right = orderingSeed(for: rhs.element)
+                if left.kind != right.kind { return left.kind < right.kind }
+                if left.value != right.value { return left.value < right.value }
+                return lhs.offset < rhs.offset
+            }.map(\.element)
+        }
+        do {
+            orderingLayoutDraft = try OrderingBoardLayoutDraft(
+                visibleSubjects: orderedSubjects(in: .visible),
+                revealableSubjects: orderedSubjects(in: .revealable),
+                hiddenSubjects: orderedSubjects(in: .hidden),
+                candidateGeneration: candidateGeneration
+            )
+            orderingConsumedDragTokens.removeAll(keepingCapacity: true)
+            orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
+            orderingDragPayloads.clear()
+        } catch {
+            orderingLayoutDraft = nil
+            orderingConsumedDragTokens.removeAll(keepingCapacity: true)
+            orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
+            orderingDragPayloads.clear()
+            setOrderingStatus("The observed applications could not form one unique configuration order: \(error)")
+        }
+    }
+
+    /// Rebinds the configuration that was just committed to the interface's
+    /// new candidate generation. This uses the reviewed target order and the
+    /// synchronized accepted policy, so drag availability does not depend on
+    /// the optional post-commit physical observation succeeding.
+    @discardableResult
+    func installCommittedOrderingLayout(
+        from request: DebugOrderingConfigurationRequest
+    ) -> Bool {
+        guard model != nil else { return false }
+
+        let currentSubjects = currentOrderingSubjects()
+        guard currentSubjects.count == Set(currentSubjects).count,
+              request.orderedSubjects.count == Set(request.orderedSubjects).count,
+              Set(currentSubjects) == Set(request.orderedSubjects),
+              request.orderedSubjects.allSatisfy({ subject in
+                  guard let committedPolicy = effectiveOrderingPolicy(for: subject)
+                  else { return false }
+                  return request.draftSubjectPolicies[subject] == committedPolicy
+              }) else {
+            return false
+        }
+
+        func subjects(in policy: MenuBarBundlePolicy) -> [OrderingSubjectID] {
+            request.orderedSubjects.filter {
+                effectiveOrderingPolicy(for: $0) == policy
+            }
+        }
+        do {
+            orderingLayoutDraft = try OrderingBoardLayoutDraft(
+                visibleSubjects: subjects(in: .visible),
+                revealableSubjects: subjects(in: .revealable),
+                hiddenSubjects: subjects(in: .hidden),
+                candidateGeneration: candidateGeneration
+            )
+            orderingConsumedDragTokens.removeAll(keepingCapacity: true)
+            orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
+            orderingDragPayloads.clear()
+            return true
+        } catch {
+            orderingLayoutDraft = nil
+            orderingConsumedDragTokens.removeAll(keepingCapacity: true)
+            orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
+            orderingDragPayloads.clear()
+            return false
+        }
+    }
+
+    /// Rebinds an uncommitted ordering draft after Resume or Stop replaces the
+    /// accepted policy model. The initial lanes remain the discard baseline;
+    /// the current lanes remain the user's local draft.
+    private func restoreOrderingLayoutDraft(
+        _ previous: OrderingBoardLayoutDraft
+    ) -> Bool {
+        let previousSubjects = previous.visible + previous.revealable + previous.hidden
+        let currentSubjects = currentOrderingSubjects().map { dragIdentifier(for: $0) }
+        guard previousSubjects.count == Set(previousSubjects).count,
+              currentSubjects.count == Set(currentSubjects).count,
+              Set(previousSubjects) == Set(currentSubjects),
+              previousSubjects.allSatisfy({ identifier in
+                  guard let subject = orderingSubject(forDragIdentifier: identifier),
+                        let previousPolicy = previous.policy(of: identifier) else {
+                      return false
+                  }
+                  return effectiveOrderingPolicy(for: subject) == previousPolicy
+              }) else {
+            return false
+        }
+
+        var restored: OrderingBoardLayoutDraft
+        do {
+            restored = try OrderingBoardLayoutDraft(
+                visible: previous.initialVisible,
+                revealable: previous.initialRevealable,
+                hidden: previous.initialHidden,
+                candidateGeneration: candidateGeneration
+            )
+        } catch {
+            return false
+        }
+
+        for policy in MenuBarBundlePolicy.allCases {
+            for identifier in previous.bundleIdentifiers(in: policy) {
+                guard let sourcePolicy = restored.policy(of: identifier) else {
+                    return false
+                }
+                let source = OrderingBoardLayoutItemID(
+                    bundleIdentifier: identifier,
+                    sourcePolicy: sourcePolicy,
+                    candidateGeneration: candidateGeneration,
+                    layoutGeneration: restored.layoutGeneration
+                )
+                switch restored.moving(
+                    source,
+                    to: OrderingBoardLayoutDestination(policy: policy, position: .end)
+                ) {
+                case let .success(updated):
+                    restored = updated
+                case .failure(.unchanged):
+                    break
+                case .failure:
+                    return false
+                }
+            }
+        }
+        guard restored.visible == previous.visible,
+              restored.revealable == previous.revealable,
+              restored.hidden == previous.hidden,
+              restored.hasChanges == previous.hasChanges else {
+            return false
+        }
+        orderingLayoutDraft = restored
+        orderingConsumedDragTokens.removeAll(keepingCapacity: true)
+        orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
+        orderingDragPayloads.clear()
+        return true
+    }
+
+    private func currentOrderingSubjects() -> [OrderingSubjectID] {
+        let applications = MenuBarBundlePolicy.allCases.flatMap { policy in
+            baseApplicationCandidates(in: policy).map {
+                OrderingSubjectID.application($0.bundleIdentifier)
+            }
+        }
+        let systems = MenuBarBundlePolicy.allCases.flatMap { policy in
+            exactSystemOrderingItems(in: policy).map(\.subjectID)
+        }
+        return applications + systems
+    }
+
+    var currentOrderingConfigurationRequest: DebugOrderingConfigurationRequest? {
+        orderingLayoutDraft.map(DebugOrderingConfigurationRequest.init)
+    }
+
+    var hasOrderingLayoutChanges: Bool {
+        orderingLayoutDraft?.hasChanges == true
+    }
+
+    func resetOrderingLayoutDraft() {
+        orderingLayoutDraft = orderingLayoutDraft?.resetting()
+        orderingConsumedDragTokens.removeAll(keepingCapacity: true)
+        orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
+        orderingDragPayloads.clear()
+    }
+
+    func discardOrderingLayoutDraft() {
+        resetOrderingLayoutDraft()
+    }
+
+    func orderingLayoutItemID(
+        bundleIdentifier: String,
+        sourcePolicy: MenuBarBundlePolicy
+    ) -> OrderingBoardLayoutItemID? {
+        guard let orderingLayoutDraft else { return nil }
+        return OrderingBoardLayoutItemID(
+            bundleIdentifier: bundleIdentifier,
+            sourcePolicy: sourcePolicy,
+            candidateGeneration: candidateGeneration,
+            layoutGeneration: orderingLayoutDraft.layoutGeneration
+        )
+    }
+
+    func orderingLayoutItemID(
+        subjectID: OrderingSubjectID,
+        sourcePolicy: MenuBarBundlePolicy
+    ) -> OrderingBoardLayoutItemID? {
+        guard let orderingLayoutDraft else { return nil }
+        return OrderingBoardLayoutItemID(
+            subjectID: subjectID,
+            sourcePolicy: sourcePolicy,
+            candidateGeneration: candidateGeneration,
+            layoutGeneration: orderingLayoutDraft.layoutGeneration
+        )
+    }
+
+    func requestOrderingConfigurationDrop(
+        payload: PolicyDragPayload,
+        destination: OrderingBoardLayoutDestination,
+        notifyPreview: Bool = true
+    ) -> OrderingBoardConfigurationMutationOutcome {
+        guard !isApplying, !isRefreshing else {
+            return .rejected("Wait for the current operation to finish.")
+        }
+        guard !orderingConsumedDragTokens.contains(payload.dragToken) else {
+            return .rejected("This drop was already handled.")
+        }
+        guard !orderingPresentation.hasPendingRecovery else {
+            return .rejected("Restore the unresolved ordering operation before changing the configuration.")
+        }
+        guard payload.candidateGeneration == candidateGeneration,
+              let layout = orderingLayoutDraft else {
+            return .rejected("Refresh changed the available items. Start a new drag.")
+        }
+        guard orderingDragLayoutGenerations[payload.dragToken] == layout.layoutGeneration else {
+            return .rejected("The configuration changed after this drag began. Start a new drag.")
+        }
+        guard let subjectID = orderingSubject(forDragIdentifier: payload.bundleIdentifier) else {
+            return .rejected("This item is no longer available.")
+        }
+        let source = OrderingBoardLayoutItemID(
+            subjectID: subjectID,
+            sourcePolicy: payload.sourcePolicy,
+            candidateGeneration: payload.candidateGeneration,
+            layoutGeneration: layout.layoutGeneration
+        )
+        let updatedLayout: OrderingBoardLayoutDraft
+        switch layout.moving(source, to: destination) {
+        case let .success(updated):
+            updatedLayout = updated
+        case .failure(.sameItem), .failure(.unchanged):
+            // A native drop back onto the item's effective source gap is a
+            // completed delivery, but it changes neither policy nor order.
+            // Retire only this payload so a later drag gets a fresh token while
+            // the current layout generation remains valid.
+            orderingConsumedDragTokens.insert(payload.dragToken)
+            retireOrderingDragPayload(payload.id)
+            return .unchanged
+        case let .failure(rejection):
+            return .rejected(orderingLayoutReason(rejection))
+        }
+
+        let policyChanged = payload.sourcePolicy != destination.policy
+        if policyChanged {
+            guard var editor = model else {
+                return .rejected("This item is no longer available.")
+            }
+            switch subjectID {
+            case .application:
+                let assignment = assignmentCoordinator.assign(
+                    payload: payload,
+                    destination: destination.policy,
+                    editor: &editor
+                )
+                guard assignment == .changed else {
+                    if case let .rejected(reason) = assignment {
+                        return .rejected(reason.interfaceReason)
+                    }
+                    return .rejected("The requested group did not change.")
+                }
+            case let .systemItem(item):
+                switch editor.assignSystemItem(
+                    identifier: item.observationIdentifier,
+                    to: destination.policy
+                ) {
+                case .changed:
+                    break
+                case .unchanged:
+                    return .rejected("The requested group did not change.")
+                case .rejectedBlennyMustRemainVisible, .unknownCandidate:
+                    return .rejected(
+                        "This system item can be reordered in its current area, but its area assignment is unavailable."
+                    )
+                }
+            }
+            model = editor
+            setStatus("Configuration changes are local and unapplied.", isError: false)
+        }
+
+        orderingConsumedDragTokens.insert(payload.dragToken)
+        orderingDragLayoutGenerations.removeValue(forKey: payload.dragToken)
+        orderingLayoutDraft = updatedLayout
+        orderingDragPayloads.clear()
+        orderingPresentation.isError = false
+        if notifyPreview { requestCurrentOrderingConfigurationPreview() }
+        return .changed(policyChanged: policyChanged)
+    }
+
+    func requestCurrentOrderingConfigurationPreview() {
+        guard let currentOrderingConfigurationRequest else { return }
+        orderingPresentation.requestConfigurationPreview(currentOrderingConfigurationRequest)
+    }
+
+    private func orderingSeed(for subjectID: OrderingSubjectID) -> (kind: Int, value: Double) {
+        guard let row = orderingRow(for: subjectID) else {
+            return (2, 0)
+        }
+        let configured = row.configuredPosition
+            ?? row.currentPositionLabel.flatMap(Double.init)
+        if let configured, configured.isFinite {
+            // Preferred positions are trailing-edge priorities: larger values
+            // appear farther left in the observed macOS 27 table.
+            return (0, -configured)
+        }
+        if let observedX = row.observedX, observedX.isFinite {
+            return (1, observedX)
+        }
+        return (2, 0)
+    }
+
+    private func orderingSeed(for bundleIdentifier: String) -> (kind: Int, value: Double) {
+        orderingSeed(for: .application(bundleIdentifier))
+    }
+
+    func orderingSubject(forDragIdentifier identifier: String) -> OrderingSubjectID? {
+        if let explicit = OrderingSubjectID(boardID: identifier) { return explicit }
+        guard BundlePolicyIdentity.canonicalKey(for: identifier) != nil else { return nil }
+        return .application(identifier)
+    }
+
+    func dragIdentifier(for subjectID: OrderingSubjectID) -> String {
+        switch subjectID {
+        case let .application(bundleIdentifier): bundleIdentifier
+        case .systemItem: subjectID.boardID
+        }
+    }
+
+    func effectiveOrderingPolicy(for subjectID: OrderingSubjectID) -> MenuBarBundlePolicy? {
+        switch subjectID {
+        case let .application(bundleIdentifier):
+            return model?.effectivePolicy(for: bundleIdentifier)
+        case let .systemItem(item):
+            return effectiveSystemItemPolicy(for: item.observationIdentifier)
+                ?? orderingRow(for: subjectID)?.policy
+        }
+    }
+
+    func exactSystemOrderingItems(
+        in policy: MenuBarBundlePolicy
+    ) -> [DebugExactSystemBoardItem] {
+        let rows = orderingPresentation.rows.compactMap { row -> DebugExactSystemBoardItem? in
+            guard case let .systemItem(item) = row.subjectID,
+                  item.isOrderingOffered,
+                  effectiveOrderingPolicy(for: row.subjectID) == policy else { return nil }
+            let observed = systemItems.first {
+                ExactSystemOrderingItem(
+                    observationIdentifier: $0.observationIdentifier
+                ) == item
+            }
+            guard row.systemKey != nil || observed != nil else { return nil }
+            let observation = observed ?? SystemMenuBarItemObservation(
+                observationIdentifier: item.observationIdentifier,
+                ownerBundleIdentifier: item.hostBundleIdentifier,
+                displayName: item.displayName,
+                observationCount: 0
+            )
+            return DebugExactSystemBoardItem(item: item, observation: observation, row: row)
+        }
+        guard let layout = orderingLayoutDraft else {
+            return rows.sorted { orderingSeed(for: $0.subjectID).value < orderingSeed(for: $1.subjectID).value }
+        }
+        let rank = Dictionary(uniqueKeysWithValues: layout.subjects(in: policy).enumerated().map {
+            ($0.element, $0.offset)
+        })
+        return rows.sorted {
+            rank[$0.subjectID, default: .max] < rank[$1.subjectID, default: .max]
+        }
+    }
+
+    func dragPayload(
+        subjectID: OrderingSubjectID,
+        sourcePolicy: MenuBarBundlePolicy
+    ) -> PolicyDragPayload {
+        dragPayload(
+            bundleIdentifier: dragIdentifier(for: subjectID),
+            sourcePolicy: sourcePolicy
+        )
+    }
+
+    /// Resolves the current layout-bound payload when the native drag source
+    /// asks for data. Repeated evaluations in one unchanged layout return the
+    /// same payload; rebuilding the layout after Apply produces a new token.
+    func beginOrderingDragPayload(
+        subjectID: OrderingSubjectID,
+        sourcePolicy: MenuBarBundlePolicy
+    ) -> PolicyDragPayload? {
+        // SwiftUI may evaluate its typed drag-source closure while merely
+        // updating the view. Keep this lookup side-effect free; actual session
+        // validation owns any user-facing refusal.
+        guard !isApplying, !isRefreshing,
+              !orderingPresentation.hasPendingRecovery else { return nil }
+        guard let layout = orderingLayoutDraft,
+              layout.candidateGeneration == candidateGeneration,
+              layout.policy(of: subjectID) == sourcePolicy else { return nil }
+        return dragPayload(subjectID: subjectID, sourcePolicy: sourcePolicy)
+    }
+
+    /// Ends the authority owned by one native drag session. The exact payload
+    /// token keeps late cleanup from an older session from retiring a newer
+    /// source, while the published revision remounts SwiftUI's drag provider
+    /// even when the Board layout and policy draft did not change.
+    func retireOrderingDragSession(_ identity: PolicyDragPayload.ID) {
+        retireOrderingDragPayload(identity)
+    }
+
+    private func retireOrderingDragPayload(_ identity: PolicyDragPayload.ID) {
+        orderingDragLayoutGenerations.removeValue(forKey: identity.dragToken)
+        guard orderingDragPayloads.discard(token: identity.dragToken) else { return }
+        orderingDragSourceRevision &+= 1
+    }
+
+    /// Records a refusal only after the native drag/drop layer has observed a
+    /// real session failure. Source payload lookup stays side-effect free.
+    func rejectOrderingDrag(_ message: String) {
+        guard !orderingPresentation.isError
+                || orderingPresentation.message != message else { return }
+        setOrderingStatus(message)
+    }
+
+    private func orderingLayoutReason(_ rejection: OrderingBoardLayoutRejection) -> String {
+        switch rejection {
+        case .staleCandidateGeneration, .staleLayoutGeneration:
+            "The configuration changed after this drag began. Start a new drag."
+        case .staleSourcePolicy:
+            "This application moved after the drag began. Start a new drag."
+        case let .missingDestination(bundleIdentifier):
+            "The destination is no longer available: \(bundleIdentifier)."
+        case .sameItem, .unchanged:
+            "That drop would not change the configuration order."
+        case .invalidBundleIdentifier, .duplicateBundleIdentifier:
+            "The current application inventory cannot form a unique order."
+        }
+    }
+
+    func requestOrderingInsertion(
+        moving sourceBundleIdentifier: String,
+        before targetBundleIdentifier: String,
+        in policy: MenuBarBundlePolicy
+    ) {
+        guard let sourcePolicy = orderingLayoutDraft?.policy(of: sourceBundleIdentifier)
+        else { return }
+        let result = requestOrderingConfigurationDrop(
+            payload: dragPayload(
+                bundleIdentifier: sourceBundleIdentifier,
+                sourcePolicy: sourcePolicy
+            ),
+            destination: OrderingBoardLayoutDestination(
+                policy: policy,
+                position: .before(targetBundleIdentifier)
+            )
+        )
+        if case let .rejected(reason) = result { setOrderingStatus(reason) }
+    }
+
+    func requestOrderingMove(
+        _ bundleIdentifier: String,
+        direction: OrderingBoardMoveDirection,
+        in policy: MenuBarBundlePolicy
+    ) {
+        guard let lane = orderingLayoutDraft?.bundleIdentifiers(in: policy),
+              let index = lane.firstIndex(of: bundleIdentifier) else { return }
+        let destination: OrderingBoardLayoutDestination
+        switch direction {
+        case .left:
+            guard index > lane.startIndex else { return }
+            destination = .init(policy: policy, position: .before(lane[index - 1]))
+        case .right:
+            guard index < lane.index(before: lane.endIndex) else { return }
+            destination = .init(policy: policy, position: .after(lane[index + 1]))
+        }
+        let result = requestOrderingConfigurationDrop(
+            payload: dragPayload(bundleIdentifier: bundleIdentifier, sourcePolicy: policy),
+            destination: destination
+        )
+        if case let .rejected(reason) = result { setOrderingStatus(reason) }
+    }
+
+    func canRequestOrderingMove(
+        _ bundleIdentifier: String,
+        direction: OrderingBoardMoveDirection,
+        in policy: MenuBarBundlePolicy
+    ) -> Bool {
+        guard !isApplying, !isRefreshing,
+              let lane = orderingLayoutDraft?.bundleIdentifiers(in: policy),
+              let index = lane.firstIndex(of: bundleIdentifier) else { return false }
+        switch direction {
+        case .left: return index > lane.startIndex
+        case .right: return index < lane.index(before: lane.endIndex)
+        }
+    }
+
+    private func orderingOwners(in policy: MenuBarBundlePolicy) -> [OrderingBoardOwner] {
+        applicationCandidates(in: policy).map { candidate in
+            let row = orderingRow(for: candidate.bundleIdentifier)
+            return OrderingBoardOwner(
+                bundleIdentifier: candidate.bundleIdentifier,
+                observedX: row?.observedX,
+                isEligible: row?.isEligible == true
+            )
+        }
+    }
+
+    private func handleOrderingArrangement(
+        _ result: Result<
+            OrderingBoardArrangementPlan,
+            OrderingBoardArrangementRejection
+        >
+    ) {
+        switch result {
+        case let .success(plan):
+            orderingPresentation.isError = false
+            orderingPresentation.requestReorder(plan.desiredOrder)
+        case let .failure(rejection):
+            switch rejection {
+            case let .ineligibleOwner(bundle), let .unverifiedOwner(bundle):
+                let name = orderingRow(for: bundle)?.name ?? bundle
+                setOrderingStatus("Cannot arrange this interval because of \(name). \(orderingExplanation(for: bundle))")
+            default:
+                setOrderingStatus(rejection.interfaceReason)
+            }
+        }
+    }
+
+    private func setOrderingStatus(_ message: String) {
+        orderingPresentation.isError = true
+        orderingPresentation.message = message
+    }
+    #endif
+
     func appleSystemCandidates(in policy: MenuBarBundlePolicy) -> [PolicyCandidate] {
+        #if DEBUG
+        // Dedicated owner bundles participate in the same ordered lane. Shared
+        // system modules remain in the separate policy-control presentation.
+        []
+        #else
         candidates(in: policy).filter {
             ExperimentalAppleBundlePolicyCatalog.contains($0.bundleIdentifier)
         }
+        #endif
     }
 
     func candidate(bundleIdentifier: String) -> PolicyCandidate? {
@@ -454,10 +1201,45 @@ final class ProductInterfaceModel: ObservableObject {
         bundleIdentifier: String,
         sourcePolicy: MenuBarBundlePolicy
     ) -> PolicyDragPayload {
-        PolicyDragPayload(
+        #if DEBUG
+        if let subjectID = orderingSubject(forDragIdentifier: bundleIdentifier) {
+            let layoutGeneration = orderingLayoutDraft?.layoutGeneration
+                ?? candidateGeneration
+            let payload = orderingDragPayloads.payload(
+                dragIdentifier: bundleIdentifier,
+                subjectID: subjectID,
+                sourcePolicy: sourcePolicy,
+                candidateGeneration: candidateGeneration,
+                layoutGeneration: layoutGeneration
+            )
+            if orderingLayoutDraft?.policy(of: subjectID) == sourcePolicy {
+                orderingDragLayoutGenerations[payload.dragToken] = layoutGeneration
+            }
+            return payload
+        }
+        #endif
+        let payload = PolicyDragPayload(
             bundleIdentifier: bundleIdentifier,
             sourcePolicy: sourcePolicy,
             candidateGeneration: candidateGeneration
+        )
+        return payload
+    }
+
+    /// Policy-only system items can be represented by a structured live
+    /// observation while their draft is keyed by a canonical menu-extra ID.
+    /// Keep that live identity out of the transferable payload so the shared
+    /// assignment coordinator can validate and consume it normally.
+    func systemPolicyDragPayload(
+        for observationIdentifier: String,
+        sourcePolicy: MenuBarBundlePolicy
+    ) -> PolicyDragPayload? {
+        guard let policyIdentifier = systemItemPolicyIdentifier(
+            for: observationIdentifier
+        ) else { return nil }
+        return dragPayload(
+            bundleIdentifier: policyIdentifier,
+            sourcePolicy: sourcePolicy
         )
     }
 
@@ -493,6 +1275,9 @@ final class ProductInterfaceModel: ObservableObject {
         )
         if outcome.changedDraft {
             model = editor
+            #if DEBUG
+            orderingDragPayloads.clear()
+            #endif
             setStatus("Draft changes are local and unapplied.", isError: false)
         }
         return outcome
@@ -512,6 +1297,9 @@ final class ProductInterfaceModel: ObservableObject {
         )
         if outcome.changedDraft {
             model = editor
+            #if DEBUG
+            orderingDragPayloads.clear()
+            #endif
             setStatus("Draft changes are local and unapplied.", isError: false)
         }
         return outcome
@@ -535,8 +1323,14 @@ final class ProductInterfaceModel: ObservableObject {
         guard !isApplying, !isRefreshing else {
             return .rejected(.interactionInProgress)
         }
+        guard let policyIdentifier = systemItemPolicyIdentifier(for: identifier) else {
+            return .rejected(.unknownCandidate)
+        }
         guard var editor = model else { return .rejected(.unknownCandidate) }
-        let result = editor.assignSystemItem(identifier: identifier, to: destination)
+        let result = editor.assignSystemItem(
+            identifier: policyIdentifier,
+            to: destination
+        )
         let outcome: PolicyDraftAssignmentOutcome
         switch result {
         case .changed:
@@ -548,6 +1342,9 @@ final class ProductInterfaceModel: ObservableObject {
         }
         if outcome.changedDraft {
             model = editor
+            #if DEBUG
+            orderingDragPayloads.clear()
+            #endif
             setStatus("Draft changes are local and unapplied.", isError: false)
         }
         return outcome
@@ -563,6 +1360,9 @@ final class ProductInterfaceModel: ObservableObject {
         assignmentCoordinator.replaceCandidateGeneration()
         candidateGeneration = assignmentCoordinator.candidateGeneration
         model = editor
+        #if DEBUG
+        resetOrderingLayoutDraft()
+        #endif
         setStatus(
             "Draft discarded. Newly observed apps remain effectively Visible.",
             isError: false
@@ -666,8 +1466,13 @@ final class ProductInterfaceModel: ObservableObject {
 
 @MainActor
 final class PolicyEditorWindowController: NSWindowController {
+    #if DEBUG
+    private static let organizePreferredContentSize = NSSize(width: 980, height: 560)
+    private static let organizeMinimumContentSize = NSSize(width: 800, height: 500)
+    #else
     private static let organizePreferredContentSize = NSSize(width: 980, height: 410)
     private static let organizeMinimumContentSize = NSSize(width: 800, height: 410)
+    #endif
     private static let compactPreferredContentSize = NSSize(width: 680, height: 410)
     private static let compactMinimumContentSize = NSSize(width: 560, height: 410)
     #if DEBUG
@@ -853,19 +1658,59 @@ final class PolicyEditorWindowController: NSWindowController {
     func display(
         model: PolicyEditorViewModel,
         observationCount: Int,
-        recoveryAvailable: Bool
+        recoveryAvailable: Bool,
+        preservingOrderingLayout: Bool = false
     ) {
         guard !usesPopulatedValidationFixture else { return }
         interfaceModel.display(
             model: model,
             observationCount: observationCount,
-            recoveryAvailable: recoveryAvailable
+            recoveryAvailable: recoveryAvailable,
+            preservingOrderingLayout: preservingOrderingLayout
         )
     }
 
     var candidateGeneration: UUID {
         interfaceModel.candidateGeneration
     }
+
+    #if DEBUG
+    var orderingPresentation: DebugOrderingPresentation {
+        interfaceModel.orderingPresentation
+    }
+
+    func initializeOrderingLayoutFromCurrentRows(force: Bool = false) {
+        interfaceModel.initializeOrderingLayoutFromCurrentRows(force: force)
+    }
+
+    @discardableResult
+    func installCommittedOrderingLayout(
+        from request: DebugOrderingConfigurationRequest
+    ) -> Bool {
+        interfaceModel.installCommittedOrderingLayout(from: request)
+    }
+
+    var currentOrderingConfigurationRequest: DebugOrderingConfigurationRequest? {
+        interfaceModel.currentOrderingConfigurationRequest
+    }
+
+    var hasOrderingLayoutChanges: Bool {
+        interfaceModel.hasOrderingLayoutChanges
+    }
+
+    func discardOrderingLayoutDraft() {
+        interfaceModel.discardOrderingLayoutDraft()
+    }
+
+    func resetOrderingLayoutDraft() {
+        interfaceModel.resetOrderingLayoutDraft()
+    }
+
+    @discardableResult
+    func discardConfigurationDraft() -> PolicyEditorViewModel? {
+        interfaceModel.discardDraft()
+    }
+    #endif
 
     func setDiscoveryWarnings(_ warnings: [String]) {
         interfaceModel.discoveryWarnings = warnings

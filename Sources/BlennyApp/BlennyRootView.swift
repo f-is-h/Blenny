@@ -273,6 +273,12 @@ private struct OrganizeView: View {
                     actions: actions,
                     interaction: $interaction
                 )
+                #if DEBUG
+                DebugOrderingStatusBar(
+                    presentation: model.orderingPresentation,
+                    managementEnabled: model.managementEnabled
+                )
+                #endif
                 SelectionDetailRail(
                     model: model,
                     interaction: $interaction,
@@ -282,10 +288,19 @@ private struct OrganizeView: View {
                 if model.statusIsError {
                     statusMessage
                 } else {
-                    Label(
-                        "Policy intent only — macOS owns physical placement · Manual observation, no polling",
-                        systemImage: "menubar.rectangle"
-                    )
+                    Group {
+                        #if DEBUG
+                        Label(
+                            debugBoardFooter,
+                            systemImage: "menubar.rectangle"
+                        )
+                        #else
+                        Label(
+                            "Policy intent only — macOS owns physical placement · Manual observation, no polling",
+                            systemImage: "menubar.rectangle"
+                        )
+                        #endif
+                    }
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
@@ -446,6 +461,15 @@ private struct OrganizeView: View {
         case false, nil: .secondary
         }
     }
+
+    #if DEBUG
+    private var debugBoardFooter: String {
+        if model.orderingLayoutDraft?.hasChanges == true {
+            return "Configuration draft · Global target: Hidden → Revealable → Visible · Apply reports any owner that still needs mapping"
+        }
+        return "Drag before, after, or to the end of any area · Missing mapping remains informational · No polling"
+    }
+    #endif
 }
 
 private struct OrganizationBoard: View {
@@ -453,6 +477,9 @@ private struct OrganizationBoard: View {
     let actions: ProductInterfaceActions
     @Binding var interaction: PolicyBoardInteractionState
     @Namespace private var iconNamespace
+    @State private var activeDragSessionID: DragSession.ID?
+    @State private var activeDragIdentity: PolicyDragPayload.ID?
+    @State private var deliveryReceipt = PolicyDragDeliveryReceipt<DropSession.ID>()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -469,6 +496,7 @@ private struct OrganizationBoard: View {
                             .padding(.horizontal, 12)
                             .accessibilityHidden(true)
                     }
+                    #if DEBUG
                     PolicyLaneRow(
                         policy: policy,
                         model: model,
@@ -477,8 +505,25 @@ private struct OrganizationBoard: View {
                         iconNamespace: iconNamespace,
                         reduceMotion: effectiveReduceMotion,
                         contrast: effectiveContrast,
-                        onDrop: commitDrop
+                        onDrop: commitDrop,
+                        registerDelivery: registerDelivery,
+                        hasRegisteredDelivery: hasRegisteredDelivery,
+                        onLayoutDrop: commitLayoutDrop
                     )
+                    #else
+                    PolicyLaneRow(
+                        policy: policy,
+                        model: model,
+                        actions: actions,
+                        interaction: $interaction,
+                        iconNamespace: iconNamespace,
+                        reduceMotion: effectiveReduceMotion,
+                        contrast: effectiveContrast,
+                        onDrop: commitDrop,
+                        registerDelivery: registerDelivery,
+                        hasRegisteredDelivery: hasRegisteredDelivery
+                    )
+                    #endif
                 }
             }
             .background(boardSurface)
@@ -522,8 +567,13 @@ private struct OrganizationBoard: View {
     private func updateDragSession(_ session: DragSession) {
         let identities = session.draggedItemIDs(for: PolicyDragPayload.ID.self)
         guard identities.count == 1, let identity = identities.first else {
-            if case .ended = session.phase {
-                interaction.endDragWithoutDrop()
+            switch session.phase {
+            case .ended(let operation) where operation != .move:
+                endDragSessionIfCurrent(session.id, retirePayload: true)
+            case .dataTransferCompleted:
+                endDragSessionIfCurrent(session.id)
+            default:
+                break
             }
             return
         }
@@ -534,6 +584,11 @@ private struct OrganizationBoard: View {
         withAnimation(animation) {
             switch session.phase {
             case .initial, .active:
+                if activeDragSessionID != session.id
+                    || activeDragIdentity != identity {
+                    activeDragSessionID = session.id
+                    activeDragIdentity = identity
+                }
                 if interaction.draggedBundleIdentifier != identity.bundleIdentifier
                     || interaction.draggedSourcePolicy != identity.sourcePolicy {
                     interaction.beginDrag(
@@ -541,14 +596,55 @@ private struct OrganizationBoard: View {
                         sourcePolicy: identity.sourcePolicy
                     )
                 }
-            case .ended, .dataTransferCompleted:
-                if interaction.settleState == nil {
-                    interaction.endDragWithoutDrop()
+            case .ended(let operation):
+                // Successful local moves deliver typed data after pointer end.
+                // Cancellation has no later delivery and must clean up now.
+                if operation != .move,
+                   activeDragSessionID == session.id,
+                   activeDragIdentity == identity {
+                    endDragSessionIfCurrent(session.id, retirePayload: true)
+                }
+            case .dataTransferCompleted:
+                if activeDragSessionID == session.id,
+                   activeDragIdentity == identity {
+                    endDragSessionIfCurrent(session.id)
                 }
             @unknown default:
-                interaction.endDragWithoutDrop()
+                endDragSessionIfCurrent(session.id, retirePayload: true)
             }
         }
+    }
+
+    private func endDragSessionIfCurrent(
+        _ sessionID: DragSession.ID,
+        retirePayload: Bool = false
+    ) {
+        guard activeDragSessionID == sessionID else { return }
+        let identity = activeDragIdentity
+        if interaction.settleState == nil {
+            interaction.endDragWithoutDrop()
+        }
+        activeDragSessionID = nil
+        activeDragIdentity = nil
+        #if DEBUG
+        if retirePayload, let identity {
+            model.retireOrderingDragSession(identity)
+        }
+        #endif
+    }
+
+    private func registerDelivery(
+        sessionID: DropSession.ID,
+        payloadID: PolicyDragPayload.ID
+    ) -> PolicyDragDeliveryRegistration {
+        deliveryReceipt.register(sessionID: sessionID, payloadID: payloadID)
+    }
+
+    private func hasRegisteredDelivery(
+        sessionID: DropSession.ID,
+        payloadID: PolicyDragPayload.ID
+    ) -> Bool {
+        deliveryReceipt.contains(sessionID: sessionID, payloadID: payloadID)
     }
 
     private var boardIsObscured: Bool {
@@ -568,6 +664,27 @@ private struct OrganizationBoard: View {
         payload: PolicyDragPayload,
         destination: MenuBarBundlePolicy
     ) {
+        #if DEBUG
+        if model.orderingLayoutDraft?.policy(of: payload.bundleIdentifier) != nil {
+            commitLayoutDrop(
+                payload: payload,
+                destination: OrderingBoardLayoutDestination(
+                    policy: destination,
+                    position: .end
+                )
+            )
+        } else {
+            commitPolicyDrop(payload: payload, destination: destination)
+        }
+        #else
+        commitPolicyDrop(payload: payload, destination: destination)
+        #endif
+    }
+
+    private func commitPolicyDrop(
+        payload: PolicyDragPayload,
+        destination: MenuBarBundlePolicy
+    ) {
         let animation: Animation = effectiveReduceMotion
             ? .easeOut(duration: 0.10)
             : .smooth(duration: 0.23, extraBounce: 0)
@@ -582,14 +699,63 @@ private struct OrganizationBoard: View {
         } completion: {
             interaction.finishSettling(token: payload.dragToken)
         }
-
         switch outcome {
         case .changed:
             if let editor = model.model { actions.draftDidChange(editor) }
-        case .rejected(let reason):
+        case .rejected(.samePolicy):
+            break
+        case let .rejected(reason):
             model.setStatus(reason.interfaceReason, isError: false)
         }
     }
+
+    #if DEBUG
+    private func commitLayoutDrop(
+        payload: PolicyDragPayload,
+        destination: OrderingBoardLayoutDestination
+    ) {
+        let animation: Animation = effectiveReduceMotion
+            ? .easeOut(duration: 0.10)
+            : .smooth(duration: 0.23, extraBounce: 0)
+        var outcome = OrderingBoardConfigurationMutationOutcome.rejected(
+            "This application is no longer available."
+        )
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            outcome = model.requestOrderingConfigurationDrop(
+                payload: payload,
+                destination: destination,
+                notifyPreview: false
+            )
+            interaction.completeDrop(
+                payload: payload,
+                destination: destination.policy,
+                outcome: configurationAssignmentOutcome(outcome)
+            )
+        } completion: {
+            interaction.finishSettling(token: payload.dragToken)
+        }
+
+        switch outcome {
+        case let .changed(policyChanged):
+            if policyChanged, let editor = model.model { actions.draftDidChange(editor) }
+            model.requestCurrentOrderingConfigurationPreview()
+        case .unchanged:
+            break
+        case let .rejected(reason):
+            model.rejectOrderingDrag(reason)
+        }
+    }
+
+    private func configurationAssignmentOutcome(
+        _ outcome: OrderingBoardConfigurationMutationOutcome
+    ) -> PolicyDraftAssignmentOutcome {
+        switch outcome {
+        case .changed: .changed
+        case .unchanged: .rejected(.samePolicy)
+        case .rejected: .rejected(.unknownCandidate)
+        }
+    }
+    #endif
 
     private var permissionMessage: String {
         model.accessibilityPromptRequested
@@ -672,6 +838,17 @@ private struct PolicyLaneRow: View {
     let reduceMotion: Bool
     let contrast: ColorSchemeContrast
     let onDrop: (PolicyDragPayload, MenuBarBundlePolicy) -> Void
+    let registerDelivery: (
+        DropSession.ID,
+        PolicyDragPayload.ID
+    ) -> PolicyDragDeliveryRegistration
+    let hasRegisteredDelivery: (DropSession.ID, PolicyDragPayload.ID) -> Bool
+    @State private var activeDropSessionID: DropSession.ID?
+    @State private var activeDropIdentity: PolicyDragPayload.ID?
+    #if DEBUG
+    let onLayoutDrop: (PolicyDragPayload, OrderingBoardLayoutDestination) -> Void
+    @State private var orderingLandingSession = OrderingBoardLandingSession()
+    #endif
 
     var body: some View {
         HStack(spacing: 0) {
@@ -680,11 +857,25 @@ private struct PolicyLaneRow: View {
                 .padding(.leading, 12)
                 .padding(.trailing, 14)
 
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 2) {
+            GeometryReader { viewport in
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 2) {
                     let candidates = model.applicationCandidates(in: policy)
                     let appleSystemCandidates = model.appleSystemCandidates(in: policy)
                     let systemItems = model.systemItems(in: policy)
+                    #if DEBUG
+                    let exactSystemItems = model.exactSystemOrderingItems(in: policy)
+                    let orderingItems = mixedOrderingItems(
+                        applications: candidates,
+                        systemItems: exactSystemItems
+                    )
+                    let residualSystemItems = systemItems.filter { observation in
+                        ExactSystemOrderingItem(
+                            observationIdentifier: observation.observationIdentifier
+                        )?.isOrderingOffered != true
+                    }
+                    let mixedLandingPreview = mixedLandingPreview(among: orderingItems)
+                    #else
                     let applicationLandingPreview = landingPreview(
                         among: candidates,
                         systemPresentation: false
@@ -693,36 +884,40 @@ private struct PolicyLaneRow: View {
                         among: appleSystemCandidates,
                         systemPresentation: true
                     )
-                    if candidates.isEmpty
-                        && appleSystemCandidates.isEmpty
+                    #endif
+                    #if DEBUG
+                    if candidates.isEmpty && exactSystemItems.isEmpty
+                        && residualSystemItems.isEmpty {
+                        ZStack(alignment: .leading) {
+                            mixedOrderingStrip(
+                                orderingItems,
+                                preview: mixedLandingPreview
+                            )
+                            if mixedLandingPreview == nil {
+                                emptyState
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                    } else {
+                        mixedOrderingStrip(orderingItems, preview: mixedLandingPreview)
+
+                        if !residualSystemItems.isEmpty {
+                            systemSectionHeader(items: residualSystemItems)
+                            ForEach(residualSystemItems, id: \.observationIdentifier) { item in
+                                systemBoardItem(item)
+                            }
+                        }
+                    }
+                    #else
+                    if candidates.isEmpty && appleSystemCandidates.isEmpty
                         && applicationLandingPreview == nil
-                        && appleSystemLandingPreview == nil
-                        && systemItems.isEmpty {
+                        && appleSystemLandingPreview == nil && systemItems.isEmpty {
                         emptyState
                     } else {
-                        ForEach(
-                            Array(candidates.enumerated()),
-                            id: \.element.bundleIdentifier
-                        ) { index, candidate in
-                            if applicationLandingPreview?.index == index {
-                                landingPreviewView(applicationLandingPreview)
-                            }
-                            ApplicationBoardItem(
-                                candidate: candidate,
-                                policy: policy,
-                                model: model,
-                                interaction: $interaction,
-                                iconNamespace: iconNamespace,
-                                reduceMotion: reduceMotion,
-                                contrast: contrast,
-                                presentsAsSystemItem: false,
-                                onMove: performMove
-                            )
-                        }
-
-                        if applicationLandingPreview?.index == candidates.endIndex {
-                            landingPreviewView(applicationLandingPreview)
-                        }
+                        applicationStrip(
+                            candidates,
+                            preview: applicationLandingPreview
+                        )
 
                         if !appleSystemCandidates.isEmpty || !systemItems.isEmpty {
                             Rectangle()
@@ -756,16 +951,9 @@ private struct PolicyLaneRow: View {
                                 if appleSystemLandingPreview?.index == index {
                                     landingPreviewView(appleSystemLandingPreview)
                                 }
-                                ApplicationBoardItem(
-                                    candidate: candidate,
-                                    policy: policy,
-                                    model: model,
-                                    interaction: $interaction,
-                                    iconNamespace: iconNamespace,
-                                    reduceMotion: reduceMotion,
-                                    contrast: contrast,
-                                    presentsAsSystemItem: true,
-                                    onMove: performMove
+                                applicationBoardItem(
+                                    candidate,
+                                    presentsAsSystemItem: true
                                 )
                             }
 
@@ -775,24 +963,28 @@ private struct PolicyLaneRow: View {
                             }
 
                             ForEach(systemItems, id: \.observationIdentifier) { item in
-                                SystemBoardItem(
-                                    observation: item,
-                                    policy: policy,
-                                    model: model,
-                                    interaction: $interaction,
-                                    contrast: contrast,
-                                    actions: actions,
-                                    onMove: performMove
-                                )
+                                systemBoardItem(item)
                             }
                         }
                     }
+                    #endif
+                    }
+                    .frame(
+                        minWidth: viewport.size.width,
+                        minHeight: BlennyDesign.laneHeight,
+                        alignment: .leading
+                    )
+                    .contentShape(Rectangle())
+                    .dropDestination(for: PolicyDragPayload.self) { payloads, session in
+                        acceptDrop(payloads, in: session)
+                    }
+                    .dropConfiguration(dropConfiguration)
+                    .onDropSessionUpdated(updateDropSession)
+                    .padding(.horizontal, 5)
                 }
-                .padding(.horizontal, 5)
-                .frame(height: BlennyDesign.laneHeight)
+                .scrollIndicators(.automatic)
+                .scrollEdgeEffectHidden(true, for: .all)
             }
-            .scrollIndicators(.automatic)
-            .scrollEdgeEffectHidden(true, for: .all)
         }
         .frame(height: BlennyDesign.laneHeight)
         .contentShape(Rectangle())
@@ -808,21 +1000,317 @@ private struct PolicyLaneRow: View {
                     .allowsHitTesting(false)
             }
         }
-        .dropDestination(for: PolicyDragPayload.self) { payloads, session in
-            guard payloads.count == 1, let payload = payloads.first else {
-                model.setStatus(
-                    "Only one application can be moved at a time.",
-                    isError: false
-                )
-                return
-            }
-            onDrop(payload, policy)
-        }
-        .dropConfiguration(dropConfiguration)
-        .onDropSessionUpdated(updateDropSession)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(policy.interfaceTitle), \(applicationCount) applications")
         .accessibilityHint(policy.interfaceDetail)
+    }
+
+    private func acceptDrop(
+        _ payloads: [PolicyDragPayload],
+        in session: DropSession
+    ) {
+        guard payloads.count == 1, let payload = payloads.first else {
+            model.setStatus(
+                "Only one application can be moved at a time.",
+                isError: false
+            )
+            return
+        }
+        if hasRegisteredDelivery(session.id, payload.id) {
+            // Native cleanup can remove current session metadata before a
+            // repeated typed callback arrives. The exact previously handled
+            // session and payload remain an idempotent acknowledgement.
+            return
+        }
+        guard PolicyDragDelivery.matches(
+            delivered: payload.id,
+            reported: localIdentity(in: session),
+            active: activeDropIdentity,
+            nativeSessionMatches: activeDropSessionID.map { $0 == session.id }
+        ) else {
+            rejectDrop("The drag session changed before delivery. Start a new drag.")
+            return
+        }
+        switch registerDelivery(session.id, payload.id) {
+        case .duplicate:
+            // SwiftUI can deliver the same typed value more than once for one
+            // native destination session. The first callback owns the operation.
+            return
+        case .conflictingPayload:
+            rejectDrop("The drag session changed before delivery. Start a new drag.")
+            return
+        case .first:
+            break
+        }
+        #if DEBUG
+        if let subjectID = model.orderingSubject(
+            forDragIdentifier: payload.bundleIdentifier
+        ), model.orderingLayoutDraft?.policy(of: subjectID) != nil {
+            let identifiers = currentOrderingIdentifiers
+            guard let position = orderingLandingSession.consume(
+                moving: payload.bundleIdentifier,
+                among: identifiers
+            ) ?? OrderingBoardLandingProjection.position(
+                at: session.location.x,
+                itemExtent: orderingItemExtent,
+                moving: payload.bundleIdentifier,
+                among: identifiers
+            ) else {
+                rejectDrop("The landing position is no longer available.")
+                return
+            }
+            onLayoutDrop(payload, .init(policy: policy, position: position))
+            return
+        }
+        #endif
+        onDrop(payload, policy)
+    }
+
+    private func rejectDrop(_ reason: String) {
+        #if DEBUG
+        model.rejectOrderingDrag(reason)
+        #else
+        model.setStatus(reason, isError: false)
+        #endif
+    }
+
+    @ViewBuilder
+    private func systemSectionHeader(
+        items: [SystemMenuBarItemObservation]
+    ) -> some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 1, height: 34)
+            .padding(.horizontal, 3)
+            .accessibilityHidden(true)
+
+        VStack(spacing: 2) {
+            Image(systemName: "apple.logo")
+                .font(.system(size: 13, weight: .regular))
+            Text("macOS")
+                .font(.caption)
+            Text(items.contains(where: {
+                model.isInteractiveSystemItem($0.observationIdentifier)
+            }) ? systemControlLabel : "Read only")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .help(systemControlHelp)
+        }
+        .frame(width: 54)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("macOS system items")
+    }
+
+    private func systemBoardItem(
+        _ item: SystemMenuBarItemObservation
+    ) -> some View {
+        #if DEBUG
+        SystemBoardItem(
+            observation: item,
+            policy: policy,
+            model: model,
+            interaction: $interaction,
+            contrast: contrast,
+            actions: actions,
+            onMove: performMove,
+            orderingSubjectID: nil
+        )
+        #else
+        SystemBoardItem(
+            observation: item,
+            policy: policy,
+            model: model,
+            interaction: $interaction,
+            contrast: contrast,
+            actions: actions,
+            onMove: performMove
+        )
+        #endif
+    }
+
+    #if DEBUG
+    private func systemBoardItem(
+        _ item: SystemMenuBarItemObservation,
+        orderingSubjectID: OrderingSubjectID
+    ) -> some View {
+        SystemBoardItem(
+            observation: item,
+            policy: policy,
+            model: model,
+            interaction: $interaction,
+            contrast: contrast,
+            actions: actions,
+            onMove: performMove,
+            orderingSubjectID: orderingSubjectID
+        )
+    }
+    #endif
+
+    #if DEBUG
+    private enum MixedOrderingItem: Identifiable {
+        case application(PolicyCandidate)
+        case system(DebugExactSystemBoardItem)
+
+        var subjectID: OrderingSubjectID {
+            switch self {
+            case let .application(candidate): .application(candidate.bundleIdentifier)
+            case let .system(item): item.subjectID
+            }
+        }
+
+        var id: String { subjectID.boardID }
+    }
+
+    private func mixedOrderingItems(
+        applications: [PolicyCandidate],
+        systemItems: [DebugExactSystemBoardItem]
+    ) -> [MixedOrderingItem] {
+        let values = applications.map(MixedOrderingItem.application)
+            + systemItems.map(MixedOrderingItem.system)
+        guard let layout = model.orderingLayoutDraft else { return values }
+        let rank = Dictionary(uniqueKeysWithValues: layout.subjects(in: policy).enumerated().map {
+            ($0.element, $0.offset)
+        })
+        return values.sorted {
+            rank[$0.subjectID, default: .max] < rank[$1.subjectID, default: .max]
+        }
+    }
+
+    private var currentOrderingIdentifiers: [String] {
+        mixedOrderingItems(
+            applications: model.applicationCandidates(in: policy),
+            systemItems: model.exactSystemOrderingItems(in: policy)
+        ).map { model.dragIdentifier(for: $0.subjectID) }
+    }
+
+    private var orderingItemExtent: Double {
+        BlennyDesign.itemFrame.width + 2
+    }
+
+    @ViewBuilder
+    private func mixedOrderingStrip(
+        _ items: [MixedOrderingItem],
+        preview: LandingPreview?
+    ) -> some View {
+        ZStack(alignment: .leading) {
+            HStack(spacing: 2) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    mixedOrderingItemView(item)
+                        .offset(
+                            x: preview.map { index >= $0.index ? orderingItemExtent : 0 }
+                                ?? 0
+                        )
+                }
+                Color.clear
+                    .frame(
+                        width: BlennyDesign.itemFrame.width,
+                        height: BlennyDesign.itemFrame.height
+                    )
+            }
+            .frame(minWidth: items.isEmpty ? 225 : 0, alignment: .leading)
+
+            if let preview {
+                landingPreviewView(preview)
+                    .offset(x: Double(preview.index) * orderingItemExtent)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func mixedOrderingItemView(_ item: MixedOrderingItem) -> some View {
+        switch item {
+        case let .application(candidate):
+            applicationBoardItem(
+                candidate,
+                presentsAsSystemItem: ExperimentalAppleBundlePolicyCatalog.contains(
+                    candidate.bundleIdentifier
+                )
+            )
+        case let .system(systemItem):
+            systemBoardItem(
+                systemItem.observation,
+                orderingSubjectID: systemItem.subjectID
+            )
+        }
+    }
+
+    private func mixedLandingPreview(
+        among items: [MixedOrderingItem]
+    ) -> LandingPreview? {
+        guard let identifier = interaction.draggedBundleIdentifier,
+              let subjectID = model.orderingSubject(forDragIdentifier: identifier),
+              model.orderingLayoutDraft?.policy(of: subjectID) != nil,
+              (activeTarget != nil || orderingLandingSession.position != nil),
+              let index = OrderingBoardLandingProjection.insertionIndex(
+                for: orderingLandingSession.position ?? .end,
+                among: items.map { model.dragIdentifier(for: $0.subjectID) }
+              ),
+              let presentation = orderingLandingPresentation(for: subjectID)
+        else { return nil }
+        return LandingPreview(index: index, presentation: presentation)
+    }
+
+    private func orderingLandingPresentation(
+        for subjectID: OrderingSubjectID
+    ) -> ResolvedPolicyIcon? {
+        switch subjectID {
+        case let .application(bundleIdentifier):
+            return model.applicationIcon(for: bundleIdentifier)
+        case let .systemItem(item):
+            return model.systemIcon(for: SystemMenuBarItemObservation(
+                observationIdentifier: item.observationIdentifier,
+                ownerBundleIdentifier: item.hostBundleIdentifier,
+                displayName: item.displayName,
+                observationCount: 0
+            ))
+        }
+    }
+    #endif
+
+    @ViewBuilder
+    private func applicationStrip(
+        _ candidates: [PolicyCandidate],
+        preview: LandingPreview?
+    ) -> some View {
+        applicationStripContent(candidates, preview: preview)
+    }
+
+    private func applicationStripContent(
+        _ candidates: [PolicyCandidate],
+        preview: LandingPreview?
+    ) -> some View {
+        HStack(spacing: 2) {
+            ForEach(Array(candidates.enumerated()), id: \.element.bundleIdentifier) {
+                index, candidate in
+                if preview?.index == index { landingPreviewView(preview) }
+                applicationBoardItem(
+                    candidate,
+                    presentsAsSystemItem: ExperimentalAppleBundlePolicyCatalog.contains(
+                        candidate.bundleIdentifier
+                    )
+                )
+            }
+            if preview?.index == candidates.endIndex { landingPreviewView(preview) }
+        }
+    }
+
+    @ViewBuilder
+    private func applicationBoardItem(
+        _ candidate: PolicyCandidate,
+        presentsAsSystemItem: Bool
+    ) -> some View {
+        ApplicationBoardItem(
+            candidate: candidate,
+            policy: policy,
+            model: model,
+            interaction: $interaction,
+            iconNamespace: iconNamespace,
+            reduceMotion: reduceMotion,
+            contrast: contrast,
+            presentsAsSystemItem: presentsAsSystemItem,
+            onMove: performMove
+        )
     }
 
     private var systemControlLabel: String {
@@ -895,6 +1383,21 @@ private struct PolicyLaneRow: View {
         among candidates: [PolicyCandidate],
         systemPresentation: Bool
     ) -> LandingPreview? {
+        #if DEBUG
+        if !systemPresentation,
+           let bundleIdentifier = interaction.draggedBundleIdentifier,
+           model.orderingLayoutDraft?.policy(of: bundleIdentifier) != nil,
+           (activeTarget != nil || orderingLandingSession.position != nil),
+           let index = OrderingBoardLandingProjection.insertionIndex(
+                for: orderingLandingSession.position ?? .end,
+                among: candidates.map(\.bundleIdentifier)
+           ) {
+            return LandingPreview(
+                index: index,
+                presentation: model.applicationIcon(for: bundleIdentifier)
+            )
+        }
+        #endif
         guard isValidTarget,
               let bundleIdentifier = interaction.draggedBundleIdentifier,
               interaction.draggedSourcePolicy != policy,
@@ -931,12 +1434,14 @@ private struct PolicyLaneRow: View {
     }
 
     private func localIdentity(in session: DropSession) -> PolicyDragPayload.ID? {
-        guard session.itemsCount == 1, let localSession = session.localSession else {
-            return nil
+        if session.itemsCount == 1, let localSession = session.localSession {
+            let identities = localSession.draggedItemIDs(for: PolicyDragPayload.ID.self)
+            if identities.count == 1 { return identities[0] }
+            if identities.count > 1 { return nil }
         }
-        let identities = localSession.draggedItemIDs(for: PolicyDragPayload.ID.self)
-        guard identities.count == 1 else { return nil }
-        return identities[0]
+        // Metadata may disappear during transfer. Only reuse this exact native
+        // destination session's previously established identity.
+        return activeDropSessionID == session.id ? activeDropIdentity : nil
     }
 
     private func validation(
@@ -945,6 +1450,19 @@ private struct PolicyLaneRow: View {
         guard identity.candidateGeneration == model.candidateGeneration else {
             return .rejected(.staleCandidateGeneration)
         }
+        #if DEBUG
+        if let subjectID = model.orderingSubject(
+            forDragIdentifier: identity.bundleIdentifier
+        ), model.orderingLayoutDraft?.policy(of: subjectID) == identity.sourcePolicy,
+           model.effectiveOrderingPolicy(for: subjectID) == identity.sourcePolicy,
+           !model.isApplying, !model.isRefreshing {
+            if case let .application(bundleIdentifier) = subjectID,
+               model.isBlenny(bundleIdentifier) {
+                return .rejected(.blennyMustRemainVisible)
+            }
+            return .changed
+        }
+        #endif
         return model.validateDrag(
             bundleIdentifier: identity.bundleIdentifier,
             sourcePolicy: identity.sourcePolicy,
@@ -971,8 +1489,18 @@ private struct PolicyLaneRow: View {
             switch session.phase {
             case .entering, .active:
                 guard let identity = localIdentity(in: session) else {
-                    interaction.clearTarget(policy: policy)
+                    // Local item metadata can be temporarily unavailable while
+                    // the same native session remains active. Keep its bound
+                    // identity and landing gap until a terminal phase arrives.
                     return
+                }
+                if activeDropSessionID != session.id
+                    || activeDropIdentity != identity {
+                    #if DEBUG
+                    orderingLandingSession.clear()
+                    #endif
+                    activeDropSessionID = session.id
+                    activeDropIdentity = identity
                 }
                 if interaction.draggedBundleIdentifier != identity.bundleIdentifier
                     || interaction.draggedSourcePolicy != identity.sourcePolicy {
@@ -981,21 +1509,86 @@ private struct PolicyLaneRow: View {
                         sourcePolicy: identity.sourcePolicy
                     )
                 }
-                interaction.target(
-                    policy: policy,
-                    validation: validation(for: identity)
-                )
-            case .exiting, .ended, .dataTransferCompleted:
-                interaction.clearTarget(policy: policy)
+                let outcome = validation(for: identity)
+                #if DEBUG
+                if outcome == .changed,
+                   let subjectID = model.orderingSubject(
+                    forDragIdentifier: identity.bundleIdentifier
+                   ), model.orderingLayoutDraft?.policy(of: subjectID)
+                    == identity.sourcePolicy,
+                   let position = OrderingBoardLandingProjection.position(
+                    at: session.location.x,
+                    itemExtent: orderingItemExtent,
+                    moving: identity.bundleIdentifier,
+                    among: currentOrderingIdentifiers
+                   ) {
+                    if orderingLandingSession.boundPosition(
+                        moving: identity.bundleIdentifier,
+                        among: currentOrderingIdentifiers
+                    ) != position {
+                        _ = orderingLandingSession.update(
+                            moving: identity.bundleIdentifier,
+                            to: position,
+                            among: currentOrderingIdentifiers
+                        )
+                    }
+                } else {
+                    orderingLandingSession.clear()
+                }
+                #endif
+                interaction.target(policy: policy, validation: outcome)
+            case .exiting:
+                if activeDropSessionID == session.id {
+                    clearCurrentDropSession()
+                }
+            case .ended(let operation):
+                guard activeDropSessionID == session.id else { return }
+                if let identity = localIdentity(in: session),
+                   identity != activeDropIdentity { return }
+                if operation == .move {
+                    #if DEBUG
+                    orderingLandingSession.pointerEnded()
+                    #endif
+                    interaction.clearTarget(policy: policy)
+                } else {
+                    clearCurrentDropSession()
+                }
+            case .dataTransferCompleted:
+                if activeDropSessionID == session.id {
+                    if let identity = localIdentity(in: session),
+                       identity != activeDropIdentity { return }
+                    clearCurrentDropSession(transferCompleted: true)
+                }
             @unknown default:
-                interaction.clearTarget(policy: policy)
+                if activeDropSessionID == session.id {
+                    clearCurrentDropSession()
+                }
             }
         }
     }
 
+    private func clearCurrentDropSession(transferCompleted: Bool = false) {
+        #if DEBUG
+        if let identity = activeDropIdentity {
+            if transferCompleted {
+                orderingLandingSession.transferCompleted(
+                    moving: identity.bundleIdentifier
+                )
+            } else {
+                orderingLandingSession.clear(moving: identity.bundleIdentifier)
+            }
+        }
+        #endif
+        interaction.clearTarget(policy: policy)
+        activeDropSessionID = nil
+        activeDropIdentity = nil
+    }
+
     @ViewBuilder
     private func targetHeader(_ target: PolicyBoardDropTarget) -> some View {
-        if let rejection = target.rejection {
+        if target.rejection == .samePolicy {
+            EmptyView()
+        } else if let rejection = target.rejection {
             Label(compactReason(for: rejection), systemImage: "nosign")
                 .font(.system(.footnote, weight: .medium))
                 .foregroundStyle(.red)
@@ -1027,6 +1620,21 @@ private struct PolicyLaneRow: View {
         bundleIdentifier: String,
         destination: MenuBarBundlePolicy
     ) {
+        #if DEBUG
+        if let item = ExactSystemOrderingItem(
+            observationIdentifier: bundleIdentifier
+        ), item.isOrderingOffered {
+            let subjectID = OrderingSubjectID.systemItem(item)
+            guard let source = model.orderingLayoutDraft?.policy(of: subjectID) else {
+                return
+            }
+            onLayoutDrop(
+                model.dragPayload(subjectID: subjectID, sourcePolicy: source),
+                .init(policy: destination, position: .end)
+            )
+            return
+        }
+        #endif
         if model.isControllableSystemItem(bundleIdentifier) {
             let outcome = model.assignSystemItem(
                 identifier: bundleIdentifier,
@@ -1128,6 +1736,33 @@ private struct ApplicationBoardItem: View {
                     currentPolicy: policy,
                     onMove: onMove
                 )
+                #if DEBUG
+                Divider()
+                Button("Move Left") {
+                    model.requestOrderingMove(
+                        candidate.bundleIdentifier,
+                        direction: .left,
+                        in: policy
+                    )
+                }
+                .disabled(!model.canRequestOrderingMove(
+                    candidate.bundleIdentifier,
+                    direction: .left,
+                    in: policy
+                ))
+                Button("Move Right") {
+                    model.requestOrderingMove(
+                        candidate.bundleIdentifier,
+                        direction: .right,
+                        in: policy
+                    )
+                }
+                .disabled(!model.canRequestOrderingMove(
+                    candidate.bundleIdentifier,
+                    direction: .right,
+                    in: policy
+                ))
+                #endif
             } else {
                 Text("Blenny must remain Visible")
             }
@@ -1141,6 +1776,32 @@ private struct ApplicationBoardItem: View {
                         }
                     }
                 }
+                #if DEBUG
+                Button("Move Left") {
+                    model.requestOrderingMove(
+                        candidate.bundleIdentifier,
+                        direction: .left,
+                        in: policy
+                    )
+                }
+                .disabled(!model.canRequestOrderingMove(
+                    candidate.bundleIdentifier,
+                    direction: .left,
+                    in: policy
+                ))
+                Button("Move Right") {
+                    model.requestOrderingMove(
+                        candidate.bundleIdentifier,
+                        direction: .right,
+                        in: policy
+                    )
+                }
+                .disabled(!model.canRequestOrderingMove(
+                    candidate.bundleIdentifier,
+                    direction: .right,
+                    in: policy
+                ))
+                #endif
             }
         }
         .zIndex(showsName ? 20 : isSelected ? 10 : 0)
@@ -1238,12 +1899,37 @@ private struct ApplicationBoardItem: View {
                     .accessibilityHidden(true)
             }
         }
+        #if DEBUG
+        .overlay(alignment: .topLeading) {
+            if let symbol = orderingStateSymbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundStyle(orderingStateColor)
+                    .padding(3)
+                    .accessibilityHidden(true)
+            }
+        }
+        #endif
         .overlay(alignment: .bottom) {
+            #if DEBUG
+            if showsName {
+                FloatingItemName(name: presentation.displayName)
+                    .offset(y: 5)
+                    .transition(.opacity)
+            } else if let orderingStatusLabel {
+                Text(orderingStatusLabel)
+                    .font(.system(size: 6.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .offset(y: 1)
+                    .accessibilityHidden(true)
+            }
+            #else
             if showsName {
                 FloatingItemName(name: presentation.displayName)
                     .offset(y: 5)
                     .transition(.opacity)
             }
+            #endif
         }
     }
 
@@ -1258,11 +1944,28 @@ private struct ApplicationBoardItem: View {
                     .dragPreview,
                     RoundedRectangle(cornerRadius: 8)
                 )
-                .draggable(item: payload)
+                .draggable(PolicyDragPayload.self) {
+                    currentDragPayload(fallback: payload)
+                }
                 .dragConfiguration(DragConfiguration(allowMove: true))
+                .id(payload.id)
         } else {
             policyIcon(presentation: presentation)
         }
+    }
+
+    private func currentDragPayload(fallback: PolicyDragPayload) -> PolicyDragPayload? {
+        #if DEBUG
+        guard let subjectID = model.orderingSubject(
+            forDragIdentifier: candidate.bundleIdentifier
+        ) else { return nil }
+        return model.beginOrderingDragPayload(
+            subjectID: subjectID,
+            sourcePolicy: policy
+        )
+        #else
+        return fallback
+        #endif
     }
 
     private func select() {
@@ -1270,6 +1973,40 @@ private struct ApplicationBoardItem: View {
             interaction.select(itemID)
         }
     }
+
+    #if DEBUG
+    private var orderingStateSymbol: String? {
+        guard !model.isBlenny(candidate.bundleIdentifier),
+              let row = model.orderingRow(for: candidate.bundleIdentifier) else {
+            return "questionmark.circle"
+        }
+        switch row.availability {
+        case .ready: return nil
+        case .needsMapping: return "link.badge.plus"
+        case .unverified: return "info.circle"
+        case .blocked: return "nosign"
+        }
+    }
+
+    private var orderingStateColor: Color {
+        guard let row = model.orderingRow(for: candidate.bundleIdentifier) else {
+            return .secondary
+        }
+        return row.availability == .blocked ? .red : .secondary
+    }
+
+    private var orderingStatusLabel: String? {
+        guard let row = model.orderingRow(for: candidate.bundleIdentifier) else {
+            return "Unverified"
+        }
+        switch row.availability {
+        case .ready: return nil
+        case .needsMapping: return "Needs mapping"
+        case .unverified: return "Unverified"
+        case .blocked: return "Blocked"
+        }
+    }
+    #endif
 
     private func handleSelectionKey(_ keyPress: KeyPress) -> KeyPress.Result {
         select()
@@ -1357,8 +2094,31 @@ private struct ApplicationBoardItem: View {
         let editability = blenny
             ? "Locked, required recovery control"
             : "Editable application item"
-        return "\(presentation.displayName), Policy: \(policy.interfaceTitle), Bundle ID: \(candidate.bundleIdentifier), \(count) menu bar \(itemWord), \(editability), \(iconSource)"
+        #if DEBUG
+        let ordering = orderingAccessibilityDescription
+        #else
+        let ordering = ""
+        #endif
+        return "\(presentation.displayName), Policy: \(policy.interfaceTitle), Bundle ID: \(candidate.bundleIdentifier), \(count) menu bar \(itemWord), \(editability), \(iconSource)\(ordering)"
     }
+
+    #if DEBUG
+    private var orderingAccessibilityDescription: String {
+        guard let row = model.orderingRow(for: candidate.bundleIdentifier) else {
+            return ", configuration position unverified"
+        }
+        switch row.availability {
+        case .ready:
+            return ", mapped for physical ordering"
+        case .needsMapping:
+            return ", configurable, needs physical ordering mapping"
+        case .unverified:
+            return ", configurable, mapping or observation unverified"
+        case .blocked:
+            return ", physical ordering unavailable: \(row.reason ?? "no supported ordering mapping")"
+        }
+    }
+    #endif
 
 }
 
@@ -1430,6 +2190,9 @@ private struct SystemBoardItem: View {
     let contrast: ColorSchemeContrast
     let actions: ProductInterfaceActions
     let onMove: (String, MenuBarBundlePolicy) -> Void
+    #if DEBUG
+    let orderingSubjectID: OrderingSubjectID?
+    #endif
     @FocusState private var isFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1444,8 +2207,8 @@ private struct SystemBoardItem: View {
                 contextMenuContent
             }
             .accessibilityActions {
-                if isControllable {
-                    ForEach(MenuBarBundlePolicy.allCases, id: \.self) { destination in
+                if !policyDestinations.isEmpty {
+                    ForEach(policyDestinations, id: \.self) { destination in
                         if destination != policy {
                             Button("Move to \(destination.interfaceTitle)") {
                                 onMove(observation.observationIdentifier, destination)
@@ -1453,8 +2216,11 @@ private struct SystemBoardItem: View {
                         }
                     }
                 }
+                #if DEBUG
+                orderingMoveActions
+                #endif
                 #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
-                if let target = sharedTrialTarget {
+                if !isControllable, let target = sharedTrialTarget {
                     sharedTrialButton(target)
                 }
                 #endif
@@ -1478,6 +2244,9 @@ private struct SystemBoardItem: View {
         )
         let hoverSurface = AnyView(
             inputSurface
+                .opacity(isDragSource ? 0.28 : 1)
+                .scaleEffect(isDragSource && !effectiveReduceMotion ? 0.96 : 1)
+                .animation(interactionAnimation, value: isDragSource)
                 .onChange(of: isFocused) {
                     withAnimation(.easeOut(duration: 0.10)) {
                         interaction.setFocused(itemID, isFocused: isFocused)
@@ -1495,8 +2264,10 @@ private struct SystemBoardItem: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(accessibilityLabel(for: presentation))
                 .accessibilityHint(
-                    isControllable || hasSharedTrialControl
-                        ? "Select for details and use a Move to action."
+                    isControllable
+                        ? "Select for details. Move between Visible, Revealable, and Hidden."
+                        : hasSharedTrialControl
+                        ? "Select for details and use the manual recovery action."
                         : "Select for details. This macOS item is read only."
                 )
                 .accessibilityValue(isSelected ? "Selected" : "Not selected")
@@ -1522,20 +2293,18 @@ private struct SystemBoardItem: View {
                     RoundedRectangle(cornerRadius: 9)
                         .stroke(itemOutline, lineWidth: itemOutlineWidth)
                 }
-            if isControllable {
+            if let dragPayload {
                 NaturalAspectSystemIcon(
                     presentation: presentation,
                     pointSize: 21,
                     frame: CGSize(width: 29, height: 25)
                 )
                 .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 8))
-                .draggable(
-                    item: model.dragPayload(
-                        bundleIdentifier: observation.observationIdentifier,
-                        sourcePolicy: policy
-                    )
-                )
+                .draggable(PolicyDragPayload.self) {
+                    currentSystemDragPayload()
+                }
                 .dragConfiguration(DragConfiguration(allowMove: true))
+                .id(dragPayload.id)
             } else {
                 NaturalAspectSystemIcon(
                     presentation: presentation,
@@ -1562,8 +2331,21 @@ private struct SystemBoardItem: View {
                 FloatingItemName(name: presentation.displayName)
                     .offset(y: 5)
                     .transition(.opacity)
+            } else if isOrderingDeferred {
+                Text("Area only")
+                    .font(.system(size: 7.5))
+                    .foregroundStyle(.secondary)
+                    .allowsHitTesting(false)
             }
         }
+    }
+
+    private var isOrderingDeferred: Bool {
+        #if DEBUG
+        ExactSystemOrderingItem(observationIdentifier: observation.observationIdentifier)?.isOrderingOffered == false
+        #else
+        false
+        #endif
     }
 
     private func select() {
@@ -1578,8 +2360,45 @@ private struct SystemBoardItem: View {
     }
 
     private var isSelected: Bool { interaction.selectedItem == itemID }
+    private var isDragSource: Bool {
+        #if DEBUG
+        guard let orderingSubjectID else { return false }
+        return interaction.draggedBundleIdentifier
+            == model.dragIdentifier(for: orderingSubjectID)
+        #else
+        return false
+        #endif
+    }
+    private func currentSystemDragPayload() -> PolicyDragPayload? {
+        #if DEBUG
+        if let orderingSubjectID {
+            return model.beginOrderingDragPayload(subjectID: orderingSubjectID, sourcePolicy: policy)
+        }
+        #endif
+        return model.systemPolicyDragPayload(
+            for: observation.observationIdentifier,
+            sourcePolicy: policy
+        )
+    }
+    private var dragPayload: PolicyDragPayload? {
+        #if DEBUG
+        if let orderingSubjectID {
+            return model.dragPayload(subjectID: orderingSubjectID, sourcePolicy: policy)
+        }
+        #endif
+        guard isControllable else { return nil }
+        return model.systemPolicyDragPayload(
+            for: observation.observationIdentifier,
+            sourcePolicy: policy
+        )
+    }
     private var isControllable: Bool {
-        model.isControllableSystemItem(observation.observationIdentifier)
+        !policyDestinations.isEmpty
+    }
+    private var policyDestinations: [MenuBarBundlePolicy] {
+        model.systemItemPolicyDestinations(
+            for: observation.observationIdentifier
+        )
     }
 
     private var hasSharedTrialControl: Bool {
@@ -1632,8 +2451,13 @@ private struct SystemBoardItem: View {
             MoveToCommands(
                 bundleIdentifier: observation.observationIdentifier,
                 currentPolicy: policy,
+                destinations: policyDestinations,
                 onMove: onMove
             )
+            #if DEBUG
+            Divider()
+            orderingMoveActions
+            #endif
         } else {
             #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
             if let target = sharedTrialTarget {
@@ -1646,6 +2470,27 @@ private struct SystemBoardItem: View {
             #endif
         }
     }
+
+    #if DEBUG
+    @ViewBuilder
+    private var orderingMoveActions: some View {
+        if let orderingSubjectID {
+            let identifier = model.dragIdentifier(for: orderingSubjectID)
+            Button("Move Left") {
+                model.requestOrderingMove(identifier, direction: .left, in: policy)
+            }
+            .disabled(!model.canRequestOrderingMove(
+                identifier, direction: .left, in: policy
+            ))
+            Button("Move Right") {
+                model.requestOrderingMove(identifier, direction: .right, in: policy)
+            }
+            .disabled(!model.canRequestOrderingMove(
+                identifier, direction: .right, in: policy
+            ))
+        }
+    }
+    #endif
     private var showsName: Bool { interaction.namePresentationItem == itemID }
 
     private var itemBackground: Color {
@@ -1678,7 +2523,18 @@ private struct SystemBoardItem: View {
     }
 
     private func tooltip(for presentation: ResolvedPolicyIcon) -> String {
-        "\(presentation.displayName)\n\(accessibilityLabel(for: presentation))"
+        let description = "\(presentation.displayName)\n\(accessibilityLabel(for: presentation))"
+        #if DEBUG
+        if ExactSystemOrderingItem(observationIdentifier: observation.observationIdentifier)?.isOrderingOffered == false {
+            return description + "\nSorting is not supported in this version. Moving between Visible, Revealable, and Hidden remains available."
+        }
+        if orderingSubjectID != nil {
+            return description + "\nThis exact system control participates independently in the reviewed configuration order."
+        }
+        return description + "\nThis system control has no exact ordering mapping."
+        #else
+        return description
+        #endif
     }
 
     private func accessibilityLabel(for presentation: ResolvedPolicyIcon) -> String {
@@ -1700,7 +2556,7 @@ private struct SystemBoardItem: View {
         }
         #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         return isControllable
-            ? "Experimental policy control"
+            ? "Three-state Visible, Revealable, and Hidden policy control"
             : "Experimental manual hide and exact restore control"
         #else
         return "Policy control enabled"
@@ -1721,7 +2577,11 @@ private struct SelectionDetailRail: View {
             selectionAction
         }
         .padding(.horizontal, 10)
+        #if DEBUG
+        .frame(minHeight: 42)
+        #else
         .frame(height: 42)
+        #endif
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Selection details")
     }
@@ -1747,6 +2607,12 @@ private struct SelectionDetailRail: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .help(applicationDetail(candidate, policy: policy, presentation: presentation))
+                    #if DEBUG
+                    Text(model.orderingExplanation(for: bundleIdentifier))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    #endif
                 }
                 if model.isBlenny(bundleIdentifier) {
                     Label("Locked Visible", systemImage: "lock.fill")
@@ -1771,8 +2637,14 @@ private struct SelectionDetailRail: View {
                         .font(.system(size: 9.5))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    #if DEBUG
+                    Text(systemPolicyDetail(for: observationIdentifier))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    #endif
                 }
-                if let policy = model.model?.effectiveSystemItemPolicy(
+                if let policy = model.effectiveSystemItemPolicy(
                     for: observationIdentifier
                 ) {
                     Label(policy.interfaceTitle, systemImage: "checkmark.shield")
@@ -1805,6 +2677,24 @@ private struct SelectionDetailRail: View {
         case .application(let bundleIdentifier):
             if let policy = model.model?.effectivePolicy(for: bundleIdentifier),
                !model.isBlenny(bundleIdentifier) {
+                #if DEBUG
+                Button {
+                    model.requestOrderingMove(bundleIdentifier, direction: .left, in: policy)
+                } label: {
+                    Image(systemName: "arrow.left")
+                }
+                .help("Move Left: preview one position to the left.")
+                .accessibilityLabel("Move Left")
+                .disabled(!model.canRequestOrderingMove(bundleIdentifier, direction: .left, in: policy))
+                Button {
+                    model.requestOrderingMove(bundleIdentifier, direction: .right, in: policy)
+                } label: {
+                    Image(systemName: "arrow.right")
+                }
+                .help("Move Right: preview one position to the right.")
+                .accessibilityLabel("Move Right")
+                .disabled(!model.canRequestOrderingMove(bundleIdentifier, direction: .right, in: policy))
+                #endif
                 MoveToMenu(
                     bundleIdentifier: bundleIdentifier,
                     currentPolicy: policy,
@@ -1812,10 +2702,11 @@ private struct SelectionDetailRail: View {
                 )
             }
         case .systemItem(let identifier):
-            if let policy = model.model?.effectiveSystemItemPolicy(for: identifier) {
+            if let policy = model.effectiveSystemItemPolicy(for: identifier) {
                 MoveToMenu(
                     bundleIdentifier: identifier,
                     currentPolicy: policy,
+                    destinations: model.systemItemPolicyDestinations(for: identifier),
                     onMove: onMove
                 )
             } else {
@@ -1888,18 +2779,51 @@ private struct SelectionDetailRail: View {
             : "\(observation.observationCount) observed"
         return "\(observation.ownerBundleIdentifier) · \(source) · macOS group"
     }
+
+    private func systemPolicyDetail(for identifier: String) -> String {
+        #if DEBUG
+        if ExactSystemOrderingItem(observationIdentifier: identifier)?.isOrderingOffered == false {
+            return "Sorting is not supported in this version. You can still move this item between Visible, Revealable, and Hidden; changing its area does not set its menu-bar position."
+        }
+        #endif
+        if model.systemItemPolicyDestinations(for: identifier)
+            == [.visible, .revealable, .hidden] {
+            return "Visible stays present; Revealable appears during ordinary reveal; Hidden remains concealed."
+        }
+        #if DEBUG
+        if let item = ExactSystemOrderingItem(observationIdentifier: identifier),
+           model.orderingRow(for: .systemItem(item)) != nil {
+            return "This exact system item can be reordered, but no three-state visibility policy is currently available."
+        }
+        #endif
+        return "This macOS item does not expose a three-state Blenny policy."
+    }
 }
 
 private struct MoveToMenu: View {
     let bundleIdentifier: String
     let currentPolicy: MenuBarBundlePolicy
+    let destinations: [MenuBarBundlePolicy]
     let onMove: (String, MenuBarBundlePolicy) -> Void
+
+    init(
+        bundleIdentifier: String,
+        currentPolicy: MenuBarBundlePolicy,
+        destinations: [MenuBarBundlePolicy] = MenuBarBundlePolicy.allCases,
+        onMove: @escaping (String, MenuBarBundlePolicy) -> Void
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        self.currentPolicy = currentPolicy
+        self.destinations = destinations
+        self.onMove = onMove
+    }
 
     var body: some View {
         Menu {
             MoveToCommands(
                 bundleIdentifier: bundleIdentifier,
                 currentPolicy: currentPolicy,
+                destinations: destinations,
                 onMove: onMove
             )
         } label: {
@@ -1913,10 +2837,23 @@ private struct MoveToMenu: View {
 private struct MoveToCommands: View {
     let bundleIdentifier: String
     let currentPolicy: MenuBarBundlePolicy
+    let destinations: [MenuBarBundlePolicy]
     let onMove: (String, MenuBarBundlePolicy) -> Void
 
+    init(
+        bundleIdentifier: String,
+        currentPolicy: MenuBarBundlePolicy,
+        destinations: [MenuBarBundlePolicy] = MenuBarBundlePolicy.allCases,
+        onMove: @escaping (String, MenuBarBundlePolicy) -> Void
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        self.currentPolicy = currentPolicy
+        self.destinations = destinations
+        self.onMove = onMove
+    }
+
     var body: some View {
-        ForEach(MenuBarBundlePolicy.allCases, id: \.self) { destination in
+        ForEach(destinations, id: \.self) { destination in
             Button {
                 onMove(bundleIdentifier, destination)
             } label: {
@@ -1956,7 +2893,17 @@ private struct ObservationAndDraftFooter: View {
                 }
                 .disabled(!model.controls.discardDraftEnabled)
 
-                Button(model.isApplying ? "Applying…" : "Apply", action: actions.applyDraft)
+                Button(model.isApplying ? "Applying…" : applyTitle) {
+                    #if DEBUG
+                    if model.orderingLayoutDraft?.hasChanges == true {
+                        model.requestCurrentOrderingConfigurationPreview()
+                    } else {
+                        actions.applyDraft()
+                    }
+                    #else
+                    actions.applyDraft()
+                    #endif
+                }
                     .buttonStyle(.borderedProminent)
                     .disabled(!model.controls.applyEnabled || !model.hasDraftChanges)
                     .keyboardShortcut(.defaultAction)
@@ -1983,6 +2930,13 @@ private struct ObservationAndDraftFooter: View {
         .background(.bar)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Draft and manual observation controls")
+    }
+
+    private var applyTitle: String {
+        #if DEBUG
+        if model.orderingLayoutDraft?.hasChanges == true { return "Review Changes…" }
+        #endif
+        return "Apply"
     }
 
     @ViewBuilder
@@ -2199,7 +3153,7 @@ private struct SettingsView: View {
 
     private var placementDescription: String {
         if model.nativeOverflowPlacementAvailable {
-            return "Use macOS Command-drag once. Blenny never moves the pointer or reorders other apps."
+            return "Use macOS Command-drag once to position Blenny’s own control. Blenny never moves the pointer."
         }
         return "Available when macOS shows one usable overflow arrow. Refresh after it appears."
     }

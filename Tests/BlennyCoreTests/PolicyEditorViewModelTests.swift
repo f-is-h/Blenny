@@ -244,6 +244,34 @@ struct PolicyEditorViewModelTests {
         #endif
     }
 
+    @Test("Composite persistent observations resolve to three-state policy identifiers")
+    func compositePersistentObservationsUseThreeStatePolicy() throws {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        var model = try PolicyEditorViewModel(
+            acceptedPolicy: try policy(),
+            candidateInventory: PolicyCandidateInventory(observations: [
+                observation(blenny, pid: 10), observation(revealable, pid: 20),
+            ]),
+            systemItems: [],
+            blennyBundleIdentifier: blenny
+        )
+        let composites = [
+            "com.apple.systemuiserver|:siri|axmenubaritem",
+            "com.apple.systemuiserver|:time machine|axmenubaritem",
+            "com.apple.controlcenter|:now playing|axmenubaritem",
+        ]
+        for composite in composites {
+            let canonical = try #require(
+                PersistentSystemItemPolicyCatalog.controllableItem(
+                    forObservationIdentifier: composite
+                )?.identifier
+            )
+            #expect(model.assignSystemItem(identifier: canonical, to: .revealable) == .changed)
+            #expect(model.effectiveSystemItemPolicy(for: canonical) == .revealable)
+        }
+        #endif
+    }
+
     @Test("Fixed and unknown Apple observations never acquire a policy control")
     func fixedAndUnknownSystemItemsStayReadOnly() throws {
         let clock = SystemMenuBarItemObservation(

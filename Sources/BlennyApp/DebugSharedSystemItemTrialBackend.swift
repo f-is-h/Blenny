@@ -76,6 +76,20 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
         _ visible: Bool,
         for target: SharedSystemItemTrialTarget
     ) async throws {
+        let started = ProcessInfo.processInfo.systemUptime
+        defer { recordTiming("set-visibility", target: target, started: started) }
+        try commitVisibility(visible, for: target)
+    }
+
+    /// Commits the target-local preference change and verifies the strongest
+    /// synchronous evidence available for that target. The writer performs the
+    /// independent post-commit capture and receipt update. A fixed delay here
+    /// did not observe physical adoption and made a multi-item plan wait once
+    /// per serial target.
+    private func commitVisibility(
+        _ visible: Bool,
+        for target: SharedSystemItemTrialTarget
+    ) throws {
         try validateRuntime()
         if target == .nowPlaying {
             let value = try ExactPreferenceValue(copy(
@@ -83,6 +97,7 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
             ))
             let flags = try value.unsignedFlags()
             let desired = (flags & ~UInt64(0xA)) | (visible ? UInt64(0x2) : UInt64(0x8))
+            guard desired != flags else { return }
             CFPreferencesSetValue(
                 "NowPlaying" as CFString,
                 NSNumber(value: desired),
@@ -97,20 +112,53 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
             ) else {
                 throw SharedSystemItemTrialError.verificationFailed
             }
-            try await Task.sleep(for: .seconds(1))
             return
         }
         let bridge = try bridge ?? ControlCenterPreferenceBridge()
         self.bridge = bridge
         try bridge.setVisibility(visible, for: target)
-        try await Task.sleep(for: .seconds(1))
     }
 
     func restoreExact(
         _ snapshot: SharedSystemItemPreferenceSnapshot
     ) async throws {
+        try await restoreSnapshot(snapshot, waitsForSettlement: true)
+    }
+
+    func restoreForOrdinaryReveal(
+        _ snapshot: SharedSystemItemPreferenceSnapshot
+    ) async throws {
+        #if DEBUG
+        // Owner-requested timing trial, confined to ordinary Time Machine
+        // reveal. Exact cleanup and compensation keep both recovery barriers.
+        try await restoreSnapshot(
+            snapshot, waitsForSettlement: snapshot.target != .timeMachine
+        )
+        #else
+        try await restoreExact(snapshot)
+        #endif
+    }
+
+    private func restoreSnapshot(
+        _ snapshot: SharedSystemItemPreferenceSnapshot,
+        waitsForSettlement: Bool
+    ) async throws {
+        let started = ProcessInfo.processInfo.systemUptime
+        defer {
+            recordTiming(
+                waitsForSettlement ? "restore-exact" : "ordinary-reveal-no-wait",
+                target: snapshot.target, started: started
+            )
+        }
         try snapshot.validate()
-        try await setVisibility(snapshot.effectiveVisible, for: snapshot.target)
+        try commitVisibility(snapshot.effectiveVisible, for: snapshot.target)
+        // The system owner may normalize its target-local preferences after
+        // its setter returns, including after a setter reports failure. Preserve
+        // the established bounded barrier before restoring exact bytes so a
+        // late setter write cannot immediately overwrite the recovery baseline.
+        if waitsForSettlement {
+            try await waitForOwnerNormalization(snapshot.target)
+        }
         let domain: String
         let host: CFString
         switch snapshot.target {
@@ -148,7 +196,40 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
                 deliverImmediately: true
             )
         }
+        // Retain the established post-write recovery settlement until native
+        // host behavior can be measured independently. The writer's following
+        // capture remains the exact restoration check.
+        if waitsForSettlement {
+            try await waitForExactRestorationSettlement(snapshot.target)
+        }
+    }
+
+    // No proven cross-target notification acknowledges owner normalization on
+    // this build. Keep the existing bounded recovery barrier rather than
+    // replacing it with a shorter magic delay or polling.
+    private func waitForOwnerNormalization(_ target: SharedSystemItemTrialTarget) async throws {
+        let started = ProcessInfo.processInfo.systemUptime
+        defer { recordTiming("owner-normalization-wait", target: target, started: started) }
         try await Task.sleep(for: .seconds(1))
+    }
+
+    private func waitForExactRestorationSettlement(
+        _ target: SharedSystemItemTrialTarget
+    ) async throws {
+        let started = ProcessInfo.processInfo.systemUptime
+        defer { recordTiming("exact-restoration-wait", target: target, started: started) }
+        try await Task.sleep(for: .seconds(1))
+    }
+
+    private func recordTiming(
+        _ stage: String, target: SharedSystemItemTrialTarget, started: TimeInterval
+    ) {
+        #if DEBUG
+        let milliseconds = (ProcessInfo.processInfo.systemUptime - started) * 1_000
+        DebugSessionTrace.shared.write(
+            "system-item-timing target=\(target.rawValue) stage=\(stage) milliseconds=\(String(format: "%.1f", milliseconds))"
+        )
+        #endif
     }
 
     private func copy(
@@ -216,7 +297,10 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
                     try Self.symbol("swift_release", in: handle),
                     to: ReleaseFunction.self
                 )
-                object = blenny_swift_call_shared(shared)
+                guard let sharedObject = blenny_swift_call_shared(shared) else {
+                    throw SharedSystemItemTrialError.unsupportedRuntime
+                }
+                object = sharedObject
             } catch {
                 dlclose(handle)
                 throw error

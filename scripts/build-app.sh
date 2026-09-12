@@ -5,16 +5,6 @@ set -euo pipefail
 script_directory=${0:A:h}
 repository_root=${script_directory:h}
 configuration=${1:-debug}
-build_root=${BLENNY_BUILD_ROOT:-"$repository_root/build/$configuration"}
-scratch_directory="$build_root/swift"
-swift_build_options=()
-
-if [[ "${BLENNY_SHARED_SYSTEM_ITEM_TRIAL:-NO}" == "YES" ]]; then
-  swift_build_options+=(
-    -Xswiftc -DBLENNY_SHARED_SYSTEM_ITEM_TRIAL
-    -Xcc -DBLENNY_SHARED_SYSTEM_ITEM_TRIAL=1
-  )
-fi
 
 case "$configuration" in
   debug|release) ;;
@@ -23,6 +13,46 @@ case "$configuration" in
     exit 64
     ;;
 esac
+
+ordering_trial=${BLENNY_ORDERING_TRIAL:-NO}
+shared_system_item_trial=${BLENNY_SHARED_SYSTEM_ITEM_TRIAL:-NO}
+
+if [[ "$ordering_trial" == "YES" ]]; then
+  if [[ "$configuration" != "release" ]]; then
+    print -u2 "BLENNY_ORDERING_TRIAL=YES requires the release configuration"
+    exit 64
+  fi
+
+  if [[ "$shared_system_item_trial" == "YES" ]]; then
+    print -u2 "BLENNY_ORDERING_TRIAL=YES cannot be combined with BLENNY_SHARED_SYSTEM_ITEM_TRIAL=YES"
+    exit 64
+  fi
+fi
+
+if [[ "$ordering_trial" == "YES" && -z "${BLENNY_BUILD_ROOT:-}" ]]; then
+  build_root="$repository_root/build/ordering-trial"
+else
+  build_root=${BLENNY_BUILD_ROOT:-"$repository_root/build/$configuration"}
+fi
+
+scratch_directory="$build_root/swift"
+swift_build_options=()
+
+if [[ "$shared_system_item_trial" == "YES" ]]; then
+  swift_build_options+=(
+    -Xswiftc -DBLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    -Xcc -DBLENNY_SHARED_SYSTEM_ITEM_TRIAL=1
+  )
+fi
+
+if [[ "$ordering_trial" == "YES" ]]; then
+  # This optimized owner test retains Debug capability gates; it is not public Release.
+  swift_build_options+=(
+    -Xswiftc -DDEBUG
+    -Xcc -DDEBUG=1
+  )
+  print -r -- "BLENNY_ORDERING_TRIAL=YES: optimized owner test retains Debug capability gates; not public Release."
+fi
 
 swift build --package-path "$repository_root" --scratch-path "$scratch_directory" --configuration "$configuration" --product Blenny "${swift_build_options[@]}"
 binary_directory=$(swift build --package-path "$repository_root" --scratch-path "$scratch_directory" --configuration "$configuration" --show-bin-path "${swift_build_options[@]}")

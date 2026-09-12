@@ -902,6 +902,19 @@ actor MemoryPolicyStore: PersistentBundlePolicyStoring {
         document = backup?.previousPolicy
         return document
     }
+
+    func restoreSnapshot(
+        document: PersistentBundlePolicyDocument,
+        backup: PersistentBundlePolicyBackup?,
+        expecting: PersistentBundlePolicyDocument
+    ) async throws {
+        if failure == .restore { throw MemoryPolicyStoreFailure.restore }
+        guard self.document == expecting || self.document == document else {
+            throw PersistentBundlePolicyStoreError.interruptedTransactionStateMismatch
+        }
+        self.document = document
+        self.backup = backup
+    }
 }
 
 private enum TransactionTestError: Error {
