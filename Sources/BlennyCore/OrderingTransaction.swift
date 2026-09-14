@@ -51,8 +51,18 @@ public enum OrderingRecoveryPhase: String, Codable, Sendable {
     case preferencesRestored
 }
 
+public struct OrderingPolicyUndo: Codable, Equatable, Sendable {
+    public let before: PersistentBundlePolicyDocument
+    public let after: PersistentBundlePolicyDocument
+    public let backup: PersistentBundlePolicyBackup?
+    public init(before: PersistentBundlePolicyDocument, after: PersistentBundlePolicyDocument,
+                backup: PersistentBundlePolicyBackup?) {
+        self.before = before; self.after = after; self.backup = backup
+    }
+}
+
 public struct OrderingRecoveryReceipt: Codable, Equatable, Sendable {
-    public let schemaVersion: Int
+    public var schemaVersion: Int
     public var plan: OrderingPlan
     public var phase: OrderingRecoveryPhase
     public var detail: String
@@ -65,6 +75,9 @@ public struct OrderingRecoveryReceipt: Codable, Equatable, Sendable {
     public var physicalVerificationStatus: OrderingPhysicalVerificationStatus?
     public var ownerBindings: [OrderingConfigurationOwnerTarget]?
     public var subjectBindings: [OrderingConfigurationSubjectTarget]?
+    public var undoPolicyWriteAttempted: Bool?
+    public var undoPolicyRestoreIntent: Bool?
+    public var undoPolicy: OrderingPolicyUndo?
     public var originalPolicy: PersistentBundlePolicyDocument?
     public var originalPolicyBackup: PersistentBundlePolicyBackup?
     public var proposedPolicy: PersistentBundlePolicyDocument?
@@ -137,11 +150,11 @@ public struct OrderingRecoveryReceipt: Codable, Equatable, Sendable {
             return
         }
         let bindingKeys: Set<String>
-        if schemaVersion == 2, plan.schemaVersion == 3,
+        if (schemaVersion == 2 || schemaVersion == 4), plan.schemaVersion == 3,
            let ownerBindings, subjectBindings == nil,
            Set(ownerBindings.map(\.bundleIdentifier)).count == ownerBindings.count {
             bindingKeys = Set(ownerBindings.flatMap(\.keys).map(\.key))
-        } else if schemaVersion == 3, plan.schemaVersion == 4,
+        } else if (schemaVersion == 3 || schemaVersion == 4), plan.schemaVersion == 4,
                   ownerBindings == nil, let subjectBindings,
                   Set(subjectBindings.map(\.subjectID)).count == subjectBindings.count {
             bindingKeys = Set(subjectBindings.flatMap(\.keys).map(\.key))
@@ -152,7 +165,7 @@ public struct OrderingRecoveryReceipt: Codable, Equatable, Sendable {
               sessionIdentifier != nil, let revision, revision > 0,
               let originalValues, let committedValues,
               let configurationVerified, physicalVerificationStatus != nil,
-              !originalValues.isEmpty,
+              (!originalValues.isEmpty || schemaVersion == 4),
               originalValues.count <= OrderingPlan.maximumConfigurationKeys,
               Set(originalValues.keys) == Set(committedValues.keys),
               pendingValues.map({ Set($0.keys) == Set(originalValues.keys) }) != false,
@@ -164,6 +177,7 @@ public struct OrderingRecoveryReceipt: Codable, Equatable, Sendable {
                 .isSubset(of: Set(originalValues.keys)) else {
             throw OrderingTransactionError.invalidReceipt
         }
+        guard (undoPolicy == nil && undoPolicyRestoreIntent == nil && undoPolicyWriteAttempted == nil) || schemaVersion == 4 else { throw OrderingTransactionError.invalidReceipt }
         try OrderingValue.dictionary(originalValues).validate()
         try OrderingValue.dictionary(committedValues).validate()
         if let pendingValues { try OrderingValue.dictionary(pendingValues).validate() }
@@ -201,7 +215,7 @@ public struct OrderingRecoveryReceipt: Codable, Equatable, Sendable {
     public var hasConfigurationUndo: Bool {
         schemaVersion >= 2 && !isPendingRestoration
             && phase == .applied && configurationVerified == true
-            && committedValues != originalValues
+            && (committedValues != originalValues || undoPolicy != nil)
     }
 
     /// Describes a clean Undo ledger whose committed positions no longer match
@@ -213,7 +227,7 @@ public struct OrderingRecoveryReceipt: Codable, Equatable, Sendable {
     ) throws -> OrderingUndoLedgerRebaseReview? {
         try validate()
         try snapshot.validate()
-        guard (schemaVersion == 2 || schemaVersion == 3),
+        guard (schemaVersion == 2 || schemaVersion == 3 || schemaVersion == 4),
               !isPendingRestoration, phase == .applied, configurationVerified == true,
               pendingValues == nil, let committedValues else {
             throw OrderingTransactionError.recoveryRequired

@@ -332,7 +332,7 @@ struct SystemOrderingCoreTests {
             plan, confirmedFingerprint: plan.fingerprint
         )
         let migrated = try #require(await recovery.receipt)
-        #expect(migrated.schemaVersion == 3)
+        #expect(migrated.schemaVersion == 4)
         #expect(migrated.originalValues?[fixture.applicationKey] == .integer(900))
         #expect(migrated.subjectBindings?.map(\.subjectID).contains(.systemItem(.siri)) == true)
         try migrated.validate()
@@ -349,7 +349,7 @@ struct SystemOrderingCoreTests {
             first, confirmedFingerprint: first.fingerprint
         )
         let clean = try #require(await recovery.receipt)
-        #expect(clean.schemaVersion == 3)
+        #expect(clean.schemaVersion == 4)
         try await backend.perturb(
             ExactSystemOrderingItem.bluetooth.configurationKey, to: .integer(777)
         )
@@ -368,7 +368,7 @@ struct SystemOrderingCoreTests {
             confirmedUndoRebaseToken: review.token
         )
         let rebased = try #require(await recovery.receipt)
-        #expect(rebased.schemaVersion == 3)
+        #expect(rebased.schemaVersion == 4)
         #expect(await recovery.archivedReceipt == clean)
         #expect(Set(try #require(rebased.subjectBindings).map(\.subjectID)) == Set([
             .systemItem(.siri), .application(fixture.application.bundleIdentifier!),

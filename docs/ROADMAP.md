@@ -1,10 +1,9 @@
 # Blenny roadmap
 
-Version 0.9.0 is the current local experimental milestone. Its implementation
-scope and owner-operated interaction results are accepted, and local closure
-completed on 2026-09-12. Version 0.10.0 focuses on final interface, copy and usability
-refinement. The first public source and binary release candidate stays in 0.11.0,
-retaining every distribution gate.
+Version 0.10.0 is the current local experimental milestone, completed on
+2026-09-15. It builds on the unchanged 0.9.0 milestone completed on 2026-09-12.
+The first public source and binary candidate remains 0.11.0, retaining every
+distribution gate and beginning with permissions/onboarding and final UI polish.
 
 The milestone accepts tested third-party ordering, the repaired drag flow and
 responsive three-state visibility for Siri, Time Machine and Control Center on
@@ -798,40 +797,38 @@ absolute-coordinate pinning, native-arrow takeover, synthetic input, continuous
 polling, automatic repair or ordinary Release promotion is included. See
 [the 0.9.0 spike](TECH_SPIKE_0.9.0.md) for the full contract and pending evidence.
 
-## 0.10.0 — Final interface, copy and usability refinement
+## 0.10.0 — Interface, supported ordering and unified Undo
 
-Start with an evidence-based audit of the current application. The AI proposes
-specific improvements before editing product behavior or visuals; the owner
-reviews priorities and approves the implementation scope. No new interface design
-or feature expansion is presumed by this roadmap change.
+Status: **Complete** as a local experimental milestone on 2026-09-15.
 
-Review scope:
+The owner accepts the tested compact Organize/Settings/Support flow, three-state
+management, supported ordering, native arrow/fish boundary placement and unified
+last-Apply Undo. Automatic post-Undo refresh is owner-confirmed. Successful Undo
+now uses concise primary feedback; independent physical-verification limits stay
+in Details. See [the release record](RELEASE_0.10.0.md) and
+[the technical spike](TECH_SPIKE_0.10.0.md) for evidence and superseded experiments.
 
-- Organize, Settings, Support, the status-item menu and relevant permission,
-  review, recovery and error states across the complete user journey.
-- Information hierarchy, density, spacing, alignment, readability and consistency
-  with the established compact native presentation.
-- Clear terminology and copy for Visible / Revealable / Hidden, draft versus
-  applied state, Apply, Stop, Resume, Refresh and explicit ordering Undo.
-- Drag affordances, insertion feedback, cancellation, no-op drops, pending writes,
-  unsupported items and actionable recovery without alarming technical messages.
-- First-use comprehension, permission guidance, keyboard/focus accessibility,
-  contrast, empty/loading states and limits of the current runtime/build flavors.
+Exit evidence:
 
-Advance when the owner-approved changes have concrete before/after acceptance
-criteria, focused automated checks where useful, and owner-operated interface
-validation. Preserve all backend safety, identity, recovery and three-state
-semantics. Document unresolved issues and distinguish observed behavior from
-source-level inference. Do not undertake new private-API research, signing,
-publication, or broad feature work as part of the initial interface pass.
+- Before/after UI revisions and runtime behavior were repeatedly owner-tested.
+- Deterministic coverage includes draft/drag gates, permissions-return refresh,
+  independent control recovery, stale-record review, and unified visibility/order
+  inverse with real durable stores, including Siri visibility.
+- The attended arrow-only experiment has an exact recorded inverse. Accepted
+  persistent placements are user configuration, not outstanding experiments.
+- Release checks cover Debug/Release builds, tests, privacy/history and build gates.
 
-License adoption and notices remain follow-up work after the interface review;
-the owner still prefers Apache-2.0. Local license drafts may remain excluded from
-Git. All distribution requirements below remain mandatory before public release.
+This closes the approved local functional scope, not distribution readiness or
+universal compatibility. Remaining onboarding, accessibility acceptance, final
+UI polish, restart/update lifecycle matrix and Release ordering promotion belong
+to 0.11.0. No new sorting support is claimed for Siri, Time Machine or Control
+Center; the Clock limitation remains accepted. License drafts remain excluded.
 
 ## 0.11.0 — First public release candidate
 
-Publish the repository and signed prerelease together when:
+First refine permissions/onboarding and final UI details, validate accessibility
+and restart/update recovery, and deliberately review promotion of ordering into
+Release. Publish the repository and signed prerelease together only when:
 
 - The established `xyz.fi5h.blenny` identifier remains stable through signing, installation and updates.
 - Developer ID signing and notarization succeed without embedding signing data in Git.
@@ -872,3 +869,11 @@ Release when:
 - Profiles, themes, visual customization, and automation rules.
 - macOS 26 or earlier compatibility.
 - Synthetic mouse movement or Command-drag reordering.
+
+0.10.0 owner-approved refinement: Undo Order is single-level and reverses the
+latest successful ordering Apply, preserving visibility policy. Failed Apply
+retains the previous Undo. Existing receipts are preserved until a new commit.
+
+The owner supersedes order-only Undo: Undo Changes reverses the latest successful
+Apply as one unit, including supported third-party and Apple visibility changes
+and offered ordering. This does not enable ordering for unsupported Apple items.

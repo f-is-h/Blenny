@@ -230,11 +230,12 @@ final class ProductInterfaceModel: ObservableObject {
             managementEnabled: model?.acceptedPolicy.managementEnabled,
             managementRuntimeState: managementRuntimeState,
             recoveryAvailable: recoveryAvailable,
-            hasDraftChanges: model?.hasDraftChanges == true,
+            hasDraftChanges: hasDraftChanges,
             isRefreshing: isRefreshing,
             isApplying: isApplying,
             accessibilityTrusted: accessibilityTrusted,
-            accessibilityPromptRequested: accessibilityPromptRequested
+            accessibilityPromptRequested: accessibilityPromptRequested,
+            requiresObservationRefresh: requiresObservationRefresh
         )
     }
 
@@ -248,7 +249,22 @@ final class ProductInterfaceModel: ObservableObject {
             nil
         }
     }
-    var hasDraftChanges: Bool { model?.hasDraftChanges == true }
+    var requiresObservationRefresh: Bool {
+        #if DEBUG
+        orderingPresentation.requiresObservationRefresh
+        #else
+        false
+        #endif
+    }
+
+    var hasDraftChanges: Bool {
+        if requiresObservationRefresh { return false }
+        #if DEBUG
+        return model?.hasDraftChanges == true || hasOrderingLayoutChanges
+        #else
+        return model?.hasDraftChanges == true
+        #endif
+    }
     var systemItems: [SystemMenuBarItemObservation] {
         var items = model?.systemItems ?? []
         #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
@@ -390,6 +406,9 @@ final class ProductInterfaceModel: ObservableObject {
             ? orderingLayoutDraft : nil
         #endif
         self.model = model
+        #if DEBUG
+        orderingPresentation.requiresObservationRefresh = false
+        #endif
         if !model.acceptedPolicy.managementEnabled {
             managementRuntimeState = .stopped
         }
@@ -458,8 +477,8 @@ final class ProductInterfaceModel: ObservableObject {
 
         setStatus(
             model.hasDraftChanges
-                ? "Draft changes are local and unapplied."
-                : "No policy changes. Newly observed apps remain effectively Visible.",
+                ? "Changes not applied"
+                : "",
             isError: false
         )
     }
@@ -589,12 +608,12 @@ final class ProductInterfaceModel: ObservableObject {
 
     func orderingExplanation(for subjectID: OrderingSubjectID) -> String {
         guard let row = orderingRow(for: subjectID) else {
-            return "Position unverified: no current ordering observation is available."
+            return "Refresh to check sorting availability."
         }
         switch row.availability {
         case .ready:
-            return "Mapped for ordering. The configuration can be freely arranged before Apply."
-                + (row.observedX == nil ? " Its current physical position is not separately observable." : "")
+            return "Sorting available."
+                + (row.observedX == nil ? " On-screen position could not be verified." : "")
         case .needsMapping:
             if case .systemItem = subjectID, row.systemKey == nil {
                 return "This system control has no current preferred-position key, so it is not added to the ordered lane. \(row.reason ?? "")"
@@ -603,7 +622,7 @@ final class ProductInterfaceModel: ObservableObject {
         case .unverified:
             return "Mapping or observation is not fully verified yet. Its configuration position can still be arranged. \(row.reason ?? "")"
         case .blocked:
-            return "This control is outside application ordering. \(row.reason ?? "")"
+            return "Sorting unavailable. \(row.reason ?? "")"
         }
     }
 
@@ -787,7 +806,14 @@ final class ProductInterfaceModel: ObservableObject {
     }
 
     func resetOrderingLayoutDraft() {
-        orderingLayoutDraft = orderingLayoutDraft?.resetting()
+        if let layout = orderingLayoutDraft {
+            orderingLayoutDraft = try? OrderingBoardLayoutDraft(
+                visible: layout.initialVisible,
+                revealable: layout.initialRevealable,
+                hidden: layout.initialHidden,
+                candidateGeneration: candidateGeneration
+            )
+        }
         orderingConsumedDragTokens.removeAll(keepingCapacity: true)
         orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
         orderingDragPayloads.clear()
@@ -825,10 +851,9 @@ final class ProductInterfaceModel: ObservableObject {
 
     func requestOrderingConfigurationDrop(
         payload: PolicyDragPayload,
-        destination: OrderingBoardLayoutDestination,
-        notifyPreview: Bool = true
+        destination: OrderingBoardLayoutDestination
     ) -> OrderingBoardConfigurationMutationOutcome {
-        guard !isApplying, !isRefreshing else {
+        guard !isApplying, !isRefreshing, !requiresObservationRefresh else {
             return .rejected("Wait for the current operation to finish.")
         }
         guard !orderingConsumedDragTokens.contains(payload.dragToken) else {
@@ -903,7 +928,7 @@ final class ProductInterfaceModel: ObservableObject {
                 }
             }
             model = editor
-            setStatus("Configuration changes are local and unapplied.", isError: false)
+            setStatus("Changes not applied", isError: false)
         }
 
         orderingConsumedDragTokens.insert(payload.dragToken)
@@ -911,13 +936,14 @@ final class ProductInterfaceModel: ObservableObject {
         orderingLayoutDraft = updatedLayout
         orderingDragPayloads.clear()
         orderingPresentation.isError = false
-        if notifyPreview { requestCurrentOrderingConfigurationPreview() }
+        // Editing never prepares or submits a system write. The Board is the preview.
+        orderingPresentation.preview = nil
+        orderingPresentation.requiresUndoReplacement = false
+        orderingPresentation.message = nil
+        orderingPresentation.technicalDetail = nil
+        setStatus("Changes not applied", isError: false)
+        if let model { orderingPresentation.onDraftChanged(model) }
         return .changed(policyChanged: policyChanged)
-    }
-
-    func requestCurrentOrderingConfigurationPreview() {
-        guard let currentOrderingConfigurationRequest else { return }
-        orderingPresentation.requestConfigurationPreview(currentOrderingConfigurationRequest)
     }
 
     private func orderingSeed(for subjectID: OrderingSubjectID) -> (kind: Int, value: Double) {
@@ -1248,7 +1274,7 @@ final class ProductInterfaceModel: ObservableObject {
         sourcePolicy: MenuBarBundlePolicy,
         destination: MenuBarBundlePolicy
     ) -> PolicyDraftAssignmentOutcome {
-        guard !isApplying, !isRefreshing else { return .rejected(.interactionInProgress) }
+        guard !isApplying, !isRefreshing, !requiresObservationRefresh else { return .rejected(.interactionInProgress) }
         guard let model else { return .rejected(.unknownCandidate) }
         return assignmentCoordinator.validate(
             payload: PolicyDragPayload(
@@ -1266,7 +1292,7 @@ final class ProductInterfaceModel: ObservableObject {
         payload: PolicyDragPayload,
         destination: MenuBarBundlePolicy
     ) -> PolicyDraftAssignmentOutcome {
-        guard !isApplying, !isRefreshing else { return .rejected(.interactionInProgress) }
+        guard !isApplying, !isRefreshing, !requiresObservationRefresh else { return .rejected(.interactionInProgress) }
         guard var editor = model else { return .rejected(.unknownCandidate) }
         let outcome = assignmentCoordinator.assign(
             payload: payload,
@@ -1278,7 +1304,7 @@ final class ProductInterfaceModel: ObservableObject {
             #if DEBUG
             orderingDragPayloads.clear()
             #endif
-            setStatus("Draft changes are local and unapplied.", isError: false)
+            setStatus("Changes not applied", isError: false)
         }
         return outcome
     }
@@ -1288,7 +1314,7 @@ final class ProductInterfaceModel: ObservableObject {
         bundleIdentifier: String,
         destination: MenuBarBundlePolicy
     ) -> PolicyDraftAssignmentOutcome {
-        guard !isApplying, !isRefreshing else { return .rejected(.interactionInProgress) }
+        guard !isApplying, !isRefreshing, !requiresObservationRefresh else { return .rejected(.interactionInProgress) }
         guard var editor = model else { return .rejected(.unknownCandidate) }
         let outcome = assignmentCoordinator.assign(
             bundleIdentifier: bundleIdentifier,
@@ -1300,7 +1326,7 @@ final class ProductInterfaceModel: ObservableObject {
             #if DEBUG
             orderingDragPayloads.clear()
             #endif
-            setStatus("Draft changes are local and unapplied.", isError: false)
+            setStatus("Changes not applied", isError: false)
         }
         return outcome
     }
@@ -1320,7 +1346,7 @@ final class ProductInterfaceModel: ObservableObject {
         identifier: String,
         destination: MenuBarBundlePolicy
     ) -> PolicyDraftAssignmentOutcome {
-        guard !isApplying, !isRefreshing else {
+        guard !isApplying, !isRefreshing, !requiresObservationRefresh else {
             return .rejected(.interactionInProgress)
         }
         guard let policyIdentifier = systemItemPolicyIdentifier(for: identifier) else {
@@ -1345,14 +1371,14 @@ final class ProductInterfaceModel: ObservableObject {
             #if DEBUG
             orderingDragPayloads.clear()
             #endif
-            setStatus("Draft changes are local and unapplied.", isError: false)
+            setStatus("Changes not applied", isError: false)
         }
         return outcome
     }
 
     @discardableResult
     func discardDraft() -> PolicyEditorViewModel? {
-        guard !isApplying, !isRefreshing else { return nil }
+        guard !isApplying, !isRefreshing, !requiresObservationRefresh else { return nil }
         guard var editor = model else { return nil }
         editor.discardDraft(
             using: BundlePolicyDraft(acceptedPolicy: editor.acceptedPolicy)
@@ -1362,9 +1388,13 @@ final class ProductInterfaceModel: ObservableObject {
         model = editor
         #if DEBUG
         resetOrderingLayoutDraft()
+        orderingPresentation.preview = nil
+        orderingPresentation.requiresUndoReplacement = false
+        orderingPresentation.message = nil
+        orderingPresentation.technicalDetail = nil
         #endif
         setStatus(
-            "Draft discarded. Newly observed apps remain effectively Visible.",
+            "Changes discarded",
             isError: false
         )
         return editor
@@ -1466,15 +1496,11 @@ final class ProductInterfaceModel: ObservableObject {
 
 @MainActor
 final class PolicyEditorWindowController: NSWindowController {
-    #if DEBUG
-    private static let organizePreferredContentSize = NSSize(width: 980, height: 560)
-    private static let organizeMinimumContentSize = NSSize(width: 800, height: 500)
-    #else
-    private static let organizePreferredContentSize = NSSize(width: 980, height: 410)
-    private static let organizeMinimumContentSize = NSSize(width: 800, height: 410)
-    #endif
-    private static let compactPreferredContentSize = NSSize(width: 680, height: 410)
-    private static let compactMinimumContentSize = NSSize(width: 560, height: 410)
+    private static let fixedContentHeight: CGFloat = 420
+    private static let organizePreferredContentSize = NSSize(width: 980, height: fixedContentHeight)
+    private static let organizeMinimumContentSize = NSSize(width: 800, height: fixedContentHeight)
+    private static let compactPreferredContentSize = NSSize(width: 680, height: fixedContentHeight)
+    private static let compactMinimumContentSize = NSSize(width: 560, height: fixedContentHeight)
     #if DEBUG
     private static let minimumSizeValidationEnvironmentKey =
         "BLENNY_VALIDATE_MINIMUM_WINDOW_SIZE"
@@ -1605,11 +1631,24 @@ final class PolicyEditorWindowController: NSWindowController {
         let version = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
         ) as? String ?? "0.5.0"
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_FALLBACK_POSITION_TRIAL
+        window.title = "Blenny \(version) · Arrow Position Trial"
+        #elseif BLENNY_NATIVE_BOUNDARY_TRIAL
+        window.title = "Blenny \(version) · Native Boundary Trial"
+        #elseif BLENNY_GROUPED_FALLBACK_TRIAL
+        window.title = "Blenny \(version) · Grouped Click Trial"
+        #else
+        window.title = "Blenny \(version) · Experimental"
+        #endif
+        #else
         window.title = "Blenny \(version)"
+        #endif
         window.toolbarStyle = .unified
         window.contentMinSize = Self.minimumContentSize(
             for: interfaceModel.navigation.section
         )
+        window.contentMaxSize = NSSize(width: .greatestFiniteMagnitude, height: Self.fixedContentHeight)
         window.isRestorable = false
         window.isReleasedWhenClosed = false
         window.contentViewController = hostingController
@@ -1623,7 +1662,9 @@ final class PolicyEditorWindowController: NSWindowController {
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] section in
-                self?.resizeWindow(for: section)
+                Task { @MainActor [weak self] in
+                    self?.resizeWindow(for: section)
+                }
             }
     }
 
@@ -1673,6 +1714,9 @@ final class PolicyEditorWindowController: NSWindowController {
     var candidateGeneration: UUID {
         interfaceModel.candidateGeneration
     }
+
+    var hasDraftChanges: Bool { interfaceModel.hasDraftChanges }
+    var requiresObservationRefresh: Bool { interfaceModel.requiresObservationRefresh }
 
     #if DEBUG
     var orderingPresentation: DebugOrderingPresentation {
@@ -1770,50 +1814,41 @@ final class PolicyEditorWindowController: NSWindowController {
 
     private func restoreUsableWindowSizeIfNeeded() {
         guard let window else { return }
-        let section = interfaceModel.navigation.section
-        let minimumContentSize = Self.minimumContentSize(for: section)
-        let preferredContentSize = Self.preferredContentSize(for: section)
-        window.contentMinSize = minimumContentSize
-        let contentSize = window.contentLayoutRect.size
-        guard contentSize.width < minimumContentSize.width
-                || contentSize.height < minimumContentSize.height else {
-            return
+        window.contentMinSize = NSSize(width: 560, height: Self.fixedContentHeight)
+        let size = window.contentLayoutRect.size
+        if size.width < 560 || abs(size.height - Self.fixedContentHeight) > 1 {
+            resizeWindow(for: interfaceModel.navigation.section)
         }
-
-        let visibleSize = (window.screen ?? NSScreen.main)?.visibleFrame.size
-        let targetSize = NSSize(
-            width: min(
-                preferredContentSize.width,
-                max(minimumContentSize.width, (visibleSize?.width ?? 980) - 80)
-            ),
-            height: min(
-                preferredContentSize.height,
-                max(minimumContentSize.height, (visibleSize?.height ?? 500) - 80)
-            )
-        )
-        window.setContentSize(targetSize)
-        window.center()
     }
 
     private func resizeWindow(for section: ProductInterfaceSection) {
         guard let window else { return }
-        let minimumContentSize = Self.minimumContentSize(for: section)
         let preferredContentSize = Self.preferredContentSize(for: section)
         let oldFrame = window.frame
         let targetContentSize = NSSize(
             width: preferredContentSize.width,
-            height: preferredContentSize.height
+            height: Self.fixedContentHeight
         )
         var contentRect = window.contentRect(forFrameRect: oldFrame)
         contentRect.size = targetContentSize
         var newFrame = window.frameRect(forContentRect: contentRect)
         newFrame.origin.x = oldFrame.origin.x
         newFrame.origin.y = oldFrame.maxY - newFrame.height
-        window.contentMinSize = minimumContentSize
+        window.contentMinSize = NSSize(width: 560, height: Self.fixedContentHeight)
+        let settleMinimumSize: @Sendable () -> Void = { [weak self, weak window] in
+            Task { @MainActor [weak self, weak window] in
+                guard let self, let window, interfaceModel.navigation.section == section,
+                      abs(window.contentLayoutRect.width - targetContentSize.width) < 1 else { return }
+                window.contentMinSize = NSSize(
+                    width: section == .organize ? 800 : 560, height: Self.fixedContentHeight
+                )
+            }
+        }
         if effectiveReduceMotion {
             window.setFrame(newFrame, display: true)
+            settleMinimumSize()
         } else {
-            NSAnimationContext.runAnimationGroup { context in
+            NSAnimationContext.runAnimationGroup({ context in
                 context.duration = 0.30
                 context.timingFunction = CAMediaTimingFunction(
                     controlPoints: 0.25,
@@ -1822,7 +1857,7 @@ final class PolicyEditorWindowController: NSWindowController {
                     1.00
                 )
                 window.animator().setFrame(newFrame, display: true)
-            }
+            }, completionHandler: settleMinimumSize)
         }
     }
 

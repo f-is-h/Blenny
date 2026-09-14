@@ -2,6 +2,9 @@ import AppKit
 import BlennyCore
 import Darwin
 import ServiceManagement
+#if DEBUG
+import CryptoKit
+#endif
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -22,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private var isRefreshing = false
     private var lastKnownAccessibilityTrust: Bool?
+    private var accessibilityGrantRefresh = AccessibilityGrantRefreshState()
     private var persistentStore: PersistentBundlePolicyStore?
     private var interfaceStore: PolicyInterfaceStore?
     private var editorModel: PolicyEditorViewModel?
@@ -78,7 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return CoordinatedPolicyWriter(
                 assertionWriter: assertionWriter, persistentWriter: persistentWriter,
                 orderingBackend: backend, orderingRecovery: recovery,
-                orderingPolicyStore: orderingPolicyStore
+                orderingPolicyStore: orderingPolicyStore,
+                fallbackRecovery: await self.fallbackTrialRecovery
             )
             #else
             return CoordinatedPolicyWriter(
@@ -106,10 +111,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preparedBoardPolicy: PreparedPolicyEdit?
     private var preparedBoardRequest: DebugOrderingConfigurationRequest?
     private var preparedBoardFingerprint: String?
+    private var preparedUnsortedNames: [String] = []
     private var preparedUndoRebaseToken: String?
     private var lastOrderingSnapshot: OrderingSnapshot?
+    private var boundaryCaptureInProgress = false
+    private var boundaryCaptureTask: Task<Void, Never>?
+    private var boundaryEvidenceDirectory: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Blenny/LocalData/BoundaryDiagnostics")
+    }
     private var activeOrderingPlan: OrderingPlan?
     private var orderingRecoveryKnown = false
+    private lazy var fallbackRecoveryStore = FallbackPositionRecoveryStore(
+        directory: FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Blenny/LocalData/FallbackPositionExperiment")
+    )
+    private var fallbackTrialRecovery: (any FallbackPositionRecoveryStoring)? {
+        #if DEBUG
+        fallbackRecoveryStore
+        #else
+        nil
+        #endif
+    }
     private lazy var orderingRecoveryStore = OrderingRecoveryStore(
         directory: FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Blenny/DebugOrdering")
@@ -119,6 +142,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.orderingRuntimeContext() ?? MacOS27MenuBarOrderingContext(
                 policyFingerprint: "unavailable", orderingAllowedBundleIdentifiers: [], lifecycleGeneration: 0
             )
+        },
+        fallbackIdentityProvider: { [weak self] in
+            #if DEBUG
+            self?.statusItemController.debugFallbackNativeIdentity
+            #else
+            nil
+            #endif
         }
     )
     #endif
@@ -169,9 +199,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(permissionWindowDidBecomeKey(_:)),
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
         configureMainMenu()
         #if DEBUG
         configureOrderingInterface()
+        statusItemController.debugConfigureBoundaryCapture(directory: boundaryEvidenceDirectory) { [weak self] in
+            self?.captureBoundaryEvidence()
+        }
+        #if DEBUG
+        statusItemController.debugMoveFallback = { [weak self] in self?.positionRevealArrow(restoring: false) }
+        statusItemController.debugRestoreFallback = { [weak self] in self?.positionRevealArrow(restoring: true) }
+        #endif
         #endif
         _ = statusItemController
         updatePermissionPresentation()
@@ -280,22 +323,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
+    @objc private func permissionWindowDidBecomeKey(_ notification: Notification) {
+        applicationDidBecomeActive(notification)
+    }
+
     func applicationDidBecomeActive(_ notification: Notification) {
         let previouslyTrusted = lastKnownAccessibilityTrust
         updatePermissionPresentation()
         updateLaunchAtLoginPresentation()
         updateNativeOverflowObservation()
         let shouldRefreshAfterGrant = AccessibilityPermissionRefreshPolicy.shouldRefresh(
-            previouslyTrusted: previouslyTrusted,
+            previouslyTrusted: accessibilityGrantRefresh.pending ? false : previouslyTrusted,
             isTrusted: lastKnownAccessibilityTrust == true,
             isRefreshing: isRefreshing,
-            hasDraftChanges: editorModel?.hasDraftChanges == true
+            hasDraftChanges: editorWindowController.hasDraftChanges
         )
         if shouldRefreshAfterGrant {
             refresh()
         } else if previouslyTrusted == false,
                   lastKnownAccessibilityTrust == true,
-                  editorModel?.hasDraftChanges == true {
+                  editorWindowController.hasDraftChanges {
             editorWindowController.setStatus(
                 "Accessibility is granted. Apply or discard the local Draft before refreshing.",
                 isError: false
@@ -360,7 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refresh() {
         guard !isRefreshing, !interactionGate.isBusy, !interactionGate.isTerminating,
-              editorModel?.hasDraftChanges != true, connectionInvalidationTask == nil else { return }
+              !editorWindowController.hasDraftChanges, connectionInvalidationTask == nil else { return }
         updatePermissionPresentation()
         guard AccessibilityAuthorization.isTrusted else {
             editorWindowController.setStatus(
@@ -371,6 +418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard beginManagementInteraction() else { return }
+        accessibilityGrantRefresh.didBeginRefresh()
         ordinaryReveal.suspend()
         isRefreshing = true
         let descriptors = runningApplicationDescriptors()
@@ -507,7 +555,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             editorModel = model
             observedRunningBundleIdentifiers = runningIdentifiers
             recoveryAvailable = hasBackup
-            statusItemController.setDraftHasChanges(model.hasDraftChanges)
+            statusItemController.setDraftHasChanges(
+                editorWindowController.hasDraftChanges,
+                requiresObservationRefresh: editorWindowController.requiresObservationRefresh
+            )
             editorWindowController.display(
                 model: model,
                 observationCount: candidateInventory.candidates.count,
@@ -983,9 +1034,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func resumeManaging() { performPolicyAction(.resume) }
     private func applyDraftChanges() {
         #if DEBUG
-        if editorWindowController.hasOrderingLayoutChanges,
-           let request = editorWindowController.currentOrderingConfigurationRequest {
-            previewBoardConfiguration(request)
+        if let request = editorWindowController.currentOrderingConfigurationRequest {
+            previewBoardConfiguration(request, applyWhenReady: true)
             return
         }
         #endif
@@ -1000,7 +1050,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         discardOrderingPreview()
         #endif
-        statusItemController.setDraftHasChanges(model.hasDraftChanges)
+        statusItemController.setDraftHasChanges(
+            editorWindowController.hasDraftChanges,
+            requiresObservationRefresh: editorWindowController.requiresObservationRefresh
+        )
     }
 
     private func beginManagementInteraction() -> Bool {
@@ -1021,6 +1074,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleApplicationLaunchAssessment()
         if !interactionGate.isTerminating { ordinaryReveal.resume() }
         editorWindowController.setApplying(false)
+        statusItemController.setDraftHasChanges(
+            editorWindowController.hasDraftChanges,
+            requiresObservationRefresh: editorWindowController.requiresObservationRefresh
+        )
         statusItemController.setInteractionBusy(interactionGate.isTerminating)
         #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         refreshSharedSystemItemTrialPresentation()
@@ -1031,12 +1088,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessionDiagnostic("arrowHasDedicatedNativeButton=\(statusItemController.debugOrdinaryRevealHasDedicatedButton)")
         #endif
         drainOrdinaryRevealRequest()
+        if accessibilityGrantRefresh.pending {
+            Task { @MainActor [weak self] in
+                guard let self, NSApplication.shared.isActive,
+                      accessibilityGrantRefresh.pending else { return }
+                refresh()
+            }
+        }
+
     }
 
     private func performPolicyAction(_ action: PolicyActionAuditTrail.Action) {
         guard !isReadOnlyValidation, let model = editorModel,
+              action == .stop || !editorWindowController.requiresObservationRefresh,
               action != .apply || model.hasDraftChanges,
-              !model.hasDraftChanges || action == .apply || action == .stop,
+              !editorWindowController.hasDraftChanges || action == .apply || action == .stop,
               beginManagementInteraction() else { return }
         ordinaryReveal.suspend()
         actionAudit.record(action, phase: .preparing)
@@ -1151,6 +1217,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     phase: outcome.result == .noChange ? .unchanged : .committed,
                     prepared: outcome.effectivePrepared
                 )
+                if outcome.result != .noChange {
+                    editorWindowController.setStatus(
+                        action == .apply ? "Changes applied" : "Done", isError: false
+                    )
+                }
+                #if DEBUG
+                if action == .apply, let failure = await updateAcceptedControlBoundary() {
+                    editorWindowController.setStatus("Changes applied. \(failure)", isError: true)
+                }
+                #endif
             } catch {
                 actionAudit.record(
                     action, phase: .failed, prepared: preparedForAudit,
@@ -1298,7 +1374,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hasBackup = try await persistentStore?.loadBackup() != nil
         editorModel = synchronized
         recoveryAvailable = hasBackup
-        statusItemController.setDraftHasChanges(synchronized.hasDraftChanges)
+        statusItemController.setDraftHasChanges(
+            editorWindowController.hasDraftChanges,
+            requiresObservationRefresh: editorWindowController.requiresObservationRefresh
+        )
         editorWindowController.display(
             model: synchronized,
             observationCount: synchronized.candidateInventory.candidates.count,
@@ -1335,34 +1414,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func toggleOrdinaryReveal() {
+        #if DEBUG
+        let id = statusItemController.debugDispatchClickCheckID
+        statusItemController.debugRecordClickStage("toggle entry", id: id)
+        #endif
         guard !interactionGate.isBusy, !interactionGate.isTerminating,
-              !isRefreshing, connectionInvalidationTask == nil else { return }
+              !isRefreshing, connectionInvalidationTask == nil else {
+            #if DEBUG
+            statusItemController.debugRecordClickStage(
+                "rejected busy=\(interactionGate.isBusy) terminating=\(interactionGate.isTerminating) refreshing=\(isRefreshing) connectionInvalidating=\(connectionInvalidationTask != nil)",
+                id: id, finished: true)
+            #endif
+            return
+        }
         ordinaryReveal.requestBlennyToggle()
+        #if DEBUG
+        drainOrdinaryRevealRequest(diagnosticID: id)
+        #else
         drainOrdinaryRevealRequest()
+        #endif
     }
 
-    private func drainOrdinaryRevealRequest() {
+    private func drainOrdinaryRevealRequest(diagnosticID: UUID? = nil) {
         guard AccessibilityAuthorization.isTrusted else {
+            #if DEBUG
+            statusItemController.debugRecordClickStage("rejected: accessibility unavailable",
+                id: diagnosticID, finished: true)
+            #endif
             handleLifecycleEvent(.permissionLost)
             return
         }
         guard !interactionGate.isBusy, !interactionGate.isTerminating, !isRefreshing,
               connectionInvalidationTask == nil,
-              let transition = ordinaryReveal.takePendingTransition() else { return }
+              let transition = ordinaryReveal.takePendingTransition() else {
+            #if DEBUG
+            statusItemController.debugRecordClickStage(
+                "not consumed: busy=\(interactionGate.isBusy) refreshing=\(isRefreshing) coordinator=\(ordinaryReveal.diagnosticSummary)",
+                id: diagnosticID, finished: true)
+            #endif
+            return
+        }
         guard let baseline = activeBaselinePlan,
               let reveal = activeRevealPlan,
               let accepted = editorModel?.acceptedPolicy,
-              beginManagementInteraction() else { return }
+              beginManagementInteraction() else {
+            #if DEBUG
+            statusItemController.debugRecordClickStage("rejected: missing active plan/policy or interaction unavailable",
+                id: diagnosticID, finished: true)
+            #endif
+            return
+        }
+        #if DEBUG
+        statusItemController.debugRecordClickStage("consumed=\(transition.presentation.rawValue)", id: diagnosticID)
+        #endif
         sessionDiagnostic("intent consumed=\(transition.presentation.rawValue) owner=\(transition.owner.rawValue) reason=\(ordinaryReveal.lastConsumedReason ?? "none") \(ordinaryReveal.diagnosticSummary)")
         ordinaryRevealTimeoutTask?.cancel()
         ordinaryRevealTimeoutTask = nil
         managementInteractionTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { finishManagementInteraction() }
+            #if DEBUG
+            var diagnosticOutcome = "transition ended without a state result"
+            #endif
+            defer {
+                #if DEBUG
+                statusItemController.debugRecordClickStage(diagnosticOutcome, id: diagnosticID, finished: true)
+                #endif
+                finishManagementInteraction()
+            }
             do {
                 switch transition.presentation {
                 case .revealed:
                     try await managementLoop.beginOrdinaryReveal(reveal)
+                    #if DEBUG
+                    diagnosticOutcome = "result=\(await managementLoop.state)"
+                    #endif
                     presentManagementState(
                         await managementLoop.state,
                         persistedManagementEnabled: accepted.managementEnabled
@@ -1382,8 +1507,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         baseline: baseline,
                         persistedManagementEnabled: accepted.managementEnabled
                     )
+                    #if DEBUG
+                    diagnosticOutcome = "result=\(await managementLoop.state)"
+                    #endif
                 }
             } catch {
+                #if DEBUG
+                diagnosticOutcome = "failed=\(error.localizedDescription) state=\(await managementLoop.state)"
+                #endif
                 // The writer keeps a preceding baseline after a failed reveal.
                 // Do not throw that proven safety state away at the UI boundary.
                 presentManagementState(
@@ -1900,6 +2031,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         updatePermissionPresentation()
         showEditor()
+        if accessibilityGrantRefresh.pending { refresh() }
     }
 
     private func openAccessibilitySettings() {
@@ -1935,6 +2067,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if lastKnownAccessibilityTrust == true && !trusted {
             handleLifecycleEvent(.permissionLost)
         }
+        accessibilityGrantRefresh.observe(trusted: trusted)
         lastKnownAccessibilityTrust = trusted
         let requested = UserDefaults.standard.bool(
             forKey: Self.accessibilityPromptRequestedKey
@@ -1981,11 +2114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Place Blenny beside the System Arrow"
-        alert.informativeText =
-            "Hold Command and drag the fish immediately to the right of macOS’s "
-                + "double-chevron overflow control, then release it. macOS owns and saves "
-                + "this order. Blenny will not move the pointer or reorder other apps."
+        alert.messageText = "Move Blenny in the Menu Bar"
+        alert.informativeText = "Hold Command and drag the fish to your preferred position. macOS controls the final placement; staying beside the system arrow is not guaranteed."
         alert.addButton(withTitle: "Done")
         alert.runModal()
     }
@@ -2272,6 +2402,7 @@ extension AppDelegate {
         presentation.onRefresh = { [weak self] in self?.refresh() }
         presentation.onPreview = { [weak self] bundles in self?.previewOrdering(bundles) }
         presentation.onReorder = { [weak self] bundles in self?.previewBoardOrdering(bundles) }
+        presentation.onDraftChanged = { [weak self] model in self?.draftDidChange(model) }
         presentation.onPreviewConfiguration = { [weak self] request in
             self?.previewBoardConfiguration(request)
         }
@@ -2298,9 +2429,11 @@ extension AppDelegate {
         preparedBoardPolicy = nil
         preparedBoardRequest = nil
         preparedBoardFingerprint = nil
+        preparedUnsortedNames = []
         preparedUndoRebaseToken = nil
         let presentation = editorWindowController.orderingPresentation
         presentation.preview = nil
+        presentation.requiresUndoReplacement = false
         presentation.canApply = false
     }
 
@@ -2321,7 +2454,9 @@ extension AppDelegate {
         presentation.canRefresh = false
         presentation.canApply = false
         presentation.isError = false
+        presentation.technicalDetail = nil
         presentation.message = message
+        editorWindowController.setStatus(message, isError: false)
         return true
     }
 
@@ -2344,16 +2479,169 @@ extension AppDelegate {
         }
     }
 
+    private func captureBoundaryEvidence() {
+        guard !boundaryCaptureInProgress, !isReadOnlyValidation,
+              !interactionGate.isBusy, !interactionGate.isTerminating, !isRefreshing,
+              connectionInvalidationTask == nil, let model = editorModel,
+              AccessibilityAuthorization.isTrusted else {
+            editorWindowController.setStatus("Snapshot unavailable. Finish the current operation and check Accessibility.", isError: true)
+            return
+        }
+        boundaryCaptureInProgress = true
+        statusItemController.debugSetBoundaryCaptureBusy(true)
+        let policy = model.acceptedPolicy
+        let generation = lifecycleGeneration
+        let ownBefore = statusItemController.debugOwnControls
+        let startedAt = Date()
+        let descriptors = runningApplicationDescriptors()
+        boundaryCaptureTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                boundaryCaptureInProgress = false
+                boundaryCaptureTask = nil
+                statusItemController.debugSetBoundaryCaptureBusy(false)
+            }
+            let stateBefore = String(describing: await managementLoop.state)
+            do {
+                // This does not enter the management gate, suspend a reveal,
+                // refresh the Board, create a coordinator, or touch recovery.
+                let report = await inventory.capture(applications: descriptors, accessibilityTrusted: true)
+                let snapshot = try await orderingBackend.capture()
+                guard !Task.isCancelled, !interactionGate.isTerminating else { return }
+                let ownAfter = statusItemController.debugOwnControls
+                let stateAfter = String(describing: await managementLoop.state)
+                let unchanged = generation == lifecycleGeneration
+                    && policy == editorModel?.acceptedPolicy
+                    && ownBefore == ownAfter && stateBefore == stateAfter
+                    && !interactionGate.isBusy && !isRefreshing
+                guard let executable = Bundle.main.executableURL else {
+                    throw OrderingError.invalidSnapshot("missing executable identity")
+                }
+                let digest = SHA256.hash(data: try Data(contentsOf: executable))
+                    .map { String(format: "%02x", $0) }.joined()
+                let evidence = DebugBoundaryEvidence(
+                    id: UUID(), startedAt: startedAt, finishedAt: Date(),
+                    appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+                    appPath: Bundle.main.bundleURL.path, executableSHA256: digest,
+                    processIdentifier: ProcessInfo.processInfo.processIdentifier,
+                    stateBefore: stateBefore, stateAfter: stateAfter, contextUnchanged: unchanged,
+                    ownControlsBefore: ownBefore, ownControlsAfter: ownAfter,
+                    ownKeyEvidence: OwnControlKeyEvidence(
+                        tableKeys: Set(try snapshot.table().keys),
+                        bundleIdentifier: Bundle.main.bundleIdentifier ?? "unknown",
+                        autosaveNames: ownAfter.compactMap(\.autosaveName)),
+                    clickCheck: statusItemController.debugClickCheck,
+                    acceptedPolicy: policy, inventory: report, ordering: snapshot,
+                    singleItemCandidates: try OrderingIdentityResolver.resolve(snapshot: snapshot),
+                    notes: [
+                        "Read-only evidence, not a placement plan or restoration receipt.",
+                        "Own frames use AppKit screen coordinates; AX inventory frames use Accessibility coordinates. Do not compare Y without conversion.",
+                        "Inventory and preference captures are sequential, not an atomic screen snapshot.",
+                        "Stored keys and configuration eligibility do not establish a live per-item identity; retain unresolved and historical keys separately.",
+                        "Own key evidence matches canonical bundle keys to instantiated autosave names; alternative namespaces still require verification.",
+                        "localContentVisible is AppKit content state, not proof of physical screen visibility.",
+                        "No complete physical partition or write eligibility is claimed by this export.",
+                        unchanged ? "Context unchanged at sampled endpoints." : "Context changed during capture; do not use for boundary conclusions."
+                    ])
+                let directory = boundaryEvidenceDirectory
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: 0o700])
+                guard directory.resolvingSymlinksInPath().pathComponents.contains("LocalData") else {
+                    throw OrderingError.invalidSnapshot("evidence destination must remain inside LocalData")
+                }
+                let url = directory.appendingPathComponent("boundary-\(evidence.id.uuidString).json")
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let data = try encoder.encode(evidence)
+                guard data.count <= 16 * 1_024 * 1_024 else { throw OrderingError.propertyListLimitExceeded }
+                try data.write(to: url, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url.path, forType: .string)
+                editorWindowController.setStatus(unchanged
+                    ? "Boundary snapshot saved. File path copied."
+                    : "Snapshot saved, but state changed during capture. File path copied.", isError: !unchanged)
+            } catch {
+                editorWindowController.setStatus("Could not save boundary snapshot: \(error.localizedDescription)", isError: true)
+            }
+        }
+    }
+
+    #if DEBUG
+    private func positionRevealArrow(restoring: Bool) {
+        guard !boundaryCaptureInProgress, !isReadOnlyValidation, !isRefreshing,
+              !interactionGate.isTerminating, AccessibilityAuthorization.isTrusted,
+              let model = editorModel,
+              (restoring || !editorWindowController.hasDraftChanges),
+              beginOrderingInteraction(message: restoring ? "Restoring control positions…" : "Preparing control positions…") else { return }
+        let policy = model.acceptedPolicy
+        managementInteractionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { finishOrderingInteraction() }
+            do {
+                let coordinator = try await orderingCoordinator(forRecovery: restoring)
+                if restoring {
+                    let result = try await coordinator.restoreFallbackPosition()
+                    editorWindowController.setStatus(result == nil ? "No control placement to undo." : "Previous control positions restored.", isError: false)
+                    return
+                }
+                let previousReceipt = try await fallbackRecoveryStore.load()
+                guard previousReceipt?.isPendingRestoration != true else {
+                    throw OrderingTransactionError.recoveryRequired
+                }
+                let snapshot = try await orderingBackend.capture()
+                let identity = try await orderingBackend.fallbackIdentity()
+                let candidate = try FallbackBoundaryCandidate.make(snapshot: snapshot, policy: policy, includeFish: true)
+                let alert = NSAlert()
+                alert.messageText = "Position Blenny’s controls?"
+                alert.informativeText = "Place the double arrow and fish between Revealable and Visible items, with the arrow on the left. Other apps’ saved positions stay unchanged.\n\nThis placement stays after Stop or Quit and follows changes you apply in Organize. Undo Control Placement restores the previous positions and turns off automatic adjustment."
+                if let previousReceipt, !previousReceipt.delta.canBeReplaced(by: candidate.delta) {
+                    alert.informativeText += "\n\nThe saved control positions have changed. This replaces the old control Undo record with the current positions. The old record is archived; Undo Control Placement will return to the positions before this operation."
+                }
+                alert.addButton(withTitle: "Position Controls")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                _ = try await coordinator.applyFallbackPosition(candidate.delta,
+                    baseline: snapshot, identity: identity, persistsAfterQuit: true,
+                    reviewedPreviousReceipt: previousReceipt)
+                editorWindowController.setStatus("Control positions saved.", isError: false)
+            } catch FallbackPositionDelta.Failure.unchangedPosition {
+                editorWindowController.setStatus("Blenny’s controls are already positioned.", isError: false)
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Couldn’t update Blenny’s controls"
+                alert.informativeText = error.localizedDescription
+                    + "\n\nIf restoration is needed, choose Undo Control Placement."
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                editorWindowController.setStatus("Control positions could not be updated.", isError: true)
+            }
+        }
+    }
+    #endif
+
+    private func updateAcceptedControlBoundary() async -> String? {
+        guard let policy = editorModel?.acceptedPolicy, !interactionGate.isTerminating else { return nil }
+        do {
+            guard try await fallbackRecoveryStore.load() != nil else { return nil }
+            let coordinator = try await orderingCoordinator()
+            _ = try await coordinator.updateAcceptedControlBoundary(policy: policy)
+            return nil
+        } catch {
+            return "Blenny’s controls could not be positioned: \(error.localizedDescription) Use Position Blenny Controls to review the placement."
+        }
+    }
+
     private func readOrderingForBoard() async {
         discardOrderingPreview()
         do {
             let snapshot = try await orderingBackend.capture()
             guard !interactionGate.isTerminating else { return }
-            presentOrderingCandidates(snapshot)
-            editorWindowController.orderingPresentation.isError = false
-            editorWindowController.orderingPresentation.needsDataAccess = false
-            editorWindowController.orderingPresentation.message =
-                "Drag to any position in any area, then review the layout. Configuration order and observed placement are reported separately."
+            guard presentOrderingCandidates(snapshot) else {
+                await updateOrderingRecoveryPresentation()
+                return
+            }
+            editorWindowController.orderingPresentation.finishSuccessfulRead()
         } catch {
             lastOrderingSnapshot = nil
             editorWindowController.orderingPresentation.hasObservation = false
@@ -2398,16 +2686,17 @@ extension AppDelegate {
         editorWindowController.orderingPresentation.hasObservation = false
     }
 
-    private func previewBoardConfiguration(_ request: DebugOrderingConfigurationRequest) {
+    private func previewBoardConfiguration(_ request: DebugOrderingConfigurationRequest, applyWhenReady: Bool = false) {
         guard !orderingRecoveryKnown,
               let model = editorModel,
               request.sourceCandidateGeneration == editorWindowController.candidateGeneration,
-              beginOrderingInteraction(message: "Reviewing area assignments and preferred order…") else { return }
+              beginOrderingInteraction(message: "Checking changes…") else { return }
         discardOrderingPreview()
         let generation = lifecycleGeneration
         managementInteractionTask = Task { [weak self] in
             guard let self else { return }
-            defer { finishOrderingInteraction() }
+            var handoffToApply = false
+            defer { if !handoffToApply { finishOrderingInteraction() } }
             do {
                 let current = try await orderingBackend.capture()
                 guard generation == lifecycleGeneration,
@@ -2432,7 +2721,14 @@ extension AppDelegate {
                 }
                 let selectedSet = Set(selected)
                 let omitted = request.orderedSubjects.filter { !selectedSet.contains($0) }
-                let plan = selected.isEmpty ? nil : try OrderingPlan.makeConfigurationOrdering(
+                let unavailable = request.unavailableOrderChanges(
+                    eligibleSubjects: selectedSet, blenny: model.blennyBundleIdentifier
+                )
+                guard unavailable.isEmpty else {
+                    let names = unavailable.map { bySubject[$0]?.displayName ?? $0.boardID }
+                    throw OrderingError.staleSnapshot("Cannot apply this order: \(names.joined(separator: ", ")). Discard changes and refresh to check these items.")
+                }
+                let plan: OrderingPlan? = try OrderingPlan.makeConfigurationOrdering(
                     snapshot: current, orderedSubjects: selected
                 )
                 var policy: PreparedPolicyEdit?
@@ -2473,40 +2769,26 @@ extension AppDelegate {
                 preparedBoardPolicy = policy
                 preparedBoardRequest = request
                 preparedBoardFingerprint = fingerprint
+                preparedUnsortedNames = omitted.filter {
+                    request.originalPolicies[$0] != request.draftSubjectPolicies[$0]
+                }.map { bySubject[$0]?.displayName ?? $0.boardID }
                 preparedUndoRebaseToken = undoRebaseReview?.token
-                let before = candidates.filter { selected.contains($0.subjectID) }.sorted {
-                    func position(_ candidate: OrderingConfigurationSubjectCandidate) -> Double {
-                        candidate.keys.compactMap { key -> Double? in
-                            switch key.value {
-                            case let .integer(value): Double(value)
-                            case let .real(value): value
-                            default: nil
-                            }
-                        }.max() ?? -.infinity
-                    }
-                    let lhs = position($0), rhs = position($1)
-                    return lhs == rhs ? $0.subjectID.boardID < $1.subjectID.boardID : lhs > rhs
-                }.map(\.displayName)
-                let omittedNames = omitted.map { bySubject[$0]?.displayName ?? $0.boardID }
-                let keys = plan?.configurationKeyTargets ?? []
-                let hasSystemSubjects = selected.contains { if case .systemItem = $0 { true } else { false } }
-                editorWindowController.orderingPresentation.preview = DebugOrderingPreview(
-                    id: plan?.id ?? policy!.reviewIdentifier, fingerprint: fingerprint, title: "Review changes",
-                    detail: "Hidden → Revealable → Visible. Application keys move as whole-owner blocks; each mapped system control moves independently. macOS determines drawing and native overflow."
-                        + (undoRebaseReview.map { " " + $0.userDescription } ?? "")
-                        + (hasSystemSubjects ? " System ordering is experimental; confirm its actual placement after Apply. Undo restores the recorded original positions." : "")
-                        + (omittedNames.isEmpty ? "" : " Preferred positions unchanged for owners needing mapping or excluded controls: \(omittedNames.joined(separator: ", "))."),
-                    visibleScope: "\(selected.count) items · \(keys.count) keys · area changes included",
-                    targetBundleIdentifiers: selected.compactMap { if case let .application(bundle) = $0 { bundle } else { nil } },
-                    beforeOrder: before,
-                    afterOrder: selected.map { bySubject[$0]?.displayName ?? $0.boardID },
-                    technicalDetails: keys.map {
-                        DebugOrderingTechnicalDetail(key: $0.key,
-                            value: "\(orderingPositionLabel($0.before)) → \(orderingPositionLabel($0.after))")
-                    }
-                )
-                editorWindowController.orderingPresentation.message =
-                    "Apply Changes commits the reviewed area assignments and preferred order together. Committed order remains after Stop or Quit; visibility restrictions are released."
+                let presentation = editorWindowController.orderingPresentation
+                if let undoRebaseReview {
+                    // Replacing stale Undo history still requires explicit consent.
+                    presentation.requiresUndoReplacement = true
+                    presentation.preview = DebugOrderingPreview(
+                        fingerprint: fingerprint, title: "Replace previous Undo?",
+                        detail: undoRebaseReview.userDescription, visibleScope: "",
+                        targetBundleIdentifiers: [], beforeOrder: [], afterOrder: []
+                    )
+                    presentation.message = "The menu bar changed outside Blenny. Applying will replace the previous Undo history."
+                    presentation.technicalDetail = undoRebaseReview.userDescription
+                } else if applyWhenReady {
+                    // Synchronous handoff: no user event can change the draft between gates.
+                    handoffToApply = true
+                    applyBoardConfiguration(fingerprint, continuingInteraction: true)
+                }
             } catch { presentOrderingError(error) }
         }
     }
@@ -2645,16 +2927,20 @@ extension AppDelegate {
         }
     }
 
-    private func applyBoardConfiguration(_ fingerprint: String) {
+    private func applyBoardConfiguration(_ fingerprint: String, continuingInteraction: Bool = false) {
         guard !isReadOnlyValidation, !orderingRecoveryKnown,
               let request = preparedBoardRequest,
               let model = editorModel,
               preparedBoardFingerprint == fingerprint,
-              request == editorWindowController.currentOrderingConfigurationRequest,
-              beginOrderingInteraction(message: "Saving reviewed layout…") else { return }
+              request == editorWindowController.currentOrderingConfigurationRequest else {
+            if continuingInteraction { finishOrderingInteraction() }
+            return
+        }
+        guard continuingInteraction || beginOrderingInteraction(message: "Applying changes…") else { return }
         let plan = preparedOrderingPlan
         let policy = preparedBoardPolicy
         let undoRebaseToken = preparedUndoRebaseToken
+        let unsortedNames = preparedUnsortedNames
         let generation = lifecycleGeneration
         discardOrderingPreview()
         managementInteractionTask = Task { [weak self] in
@@ -2662,24 +2948,6 @@ extension AppDelegate {
             defer { finishOrderingInteraction() }
             var configurationCommitted = false
             do {
-                if plan == nil, let policy {
-                    let core = try await makeCore(scope: model.validationScope, permitsReviewedActivation: true)
-                    _ = try await apply(policy, using: core, previousModel: model, action: .apply)
-                    configurationCommitted = true
-                    guard editorWindowController.installCommittedOrderingLayout(
-                        from: request
-                    ) else {
-                        throw OrderingError.staleSnapshot(
-                            "the committed candidate scope changed; refresh the board"
-                        )
-                    }
-                    presentOrderingCandidates(try await orderingBackend.capture())
-                    editorWindowController.initializeOrderingLayoutFromCurrentRows(force: true)
-                    editorWindowController.orderingPresentation.message =
-                        "Area assignments saved. No attributable preferred-position keys were available, so menu-bar ordering was unchanged."
-                    await updateOrderingRecoveryPresentation()
-                    return
-                }
                 guard let plan else { throw OrderingError.invalidSelection }
                 if case .ordinaryRevealSession = await managementLoop.state,
                    let baseline = activeBaselinePlan {
@@ -2741,14 +3009,20 @@ extension AppDelegate {
                 let visual: String
                 switch result.physicalVerificationStatus {
                 case .verified:
-                    visual = "The observed relative order agrees."
+                    visual = "Order verified."
                 case .mismatch:
-                    visual = "The current visual observation differs; macOS may not have adopted every position. No automatic correction was attempted."
+                    visual = "The menu bar does not yet match the saved order."
                 case .unavailable:
-                    visual = "Some physical positions are not separately observable, so visual adoption is unverified."
+                    visual = "Some on-screen positions could not be verified."
                 }
                 editorWindowController.orderingPresentation.message =
-                    "Preferred configuration saved. \(visual) You can keep arranging; Undo restores the recorded original preferred positions."
+                    "Changes applied. \(visual)"
+                    + (unsortedNames.isEmpty ? "" : " Visibility only: \(unsortedNames.joined(separator: ", ")).")
+                if let failure = await updateAcceptedControlBoundary() {
+                    editorWindowController.orderingPresentation.message =
+                        (editorWindowController.orderingPresentation.message ?? "") + " \(failure)"
+                    editorWindowController.orderingPresentation.isError = true
+                }
             } catch {
                 if configurationCommitted {
                     presentCommittedOrderingRefreshFailure(error)
@@ -2763,29 +3037,72 @@ extension AppDelegate {
 
     private func restoreOrdering() {
         guard !isReadOnlyValidation,
-              beginOrderingInteraction(message: "Checking the recovery record and original positions…") else { return }
+              beginOrderingInteraction(message: "Checking the saved order…") else { return }
         discardOrderingPreview()
         managementInteractionTask = Task { [weak self] in
             guard let self else { return }
-            defer { finishOrderingInteraction() }
+            var needsAutomaticRefresh = false
+            defer {
+                finishOrderingInteraction()
+                // One read-only follow-up after releasing the interaction gate.
+                // Refresh does not reapply the transaction or schedule retries.
+                if needsAutomaticRefresh { refresh() }
+            }
             var preferencesRestored = false
             do {
                 let writer = try await orderingCoordinator(forRecovery: true)
-                let result = try await writer.restoreOrdering()
+                var inverse: PreparedPolicyEdit?
+                let priorModel = editorModel
+                if let undo = try await orderingRecoveryStore.load()?.undoPolicy,
+                   let model = priorModel {
+                    let observation = try await captureApplyPreflight()
+                    let core = try await makeCore(scope: model.validationScope, permitsReviewedActivation: true)
+                    inverse = try await core.preview(
+                        draft: BundlePolicyDraft(acceptedPolicy: undo.before),
+                        candidates: observation.candidates,
+                        observedRunningBundleIdentifiers: observation.runningBundleIdentifiers,
+                        candidateGeneration: editorWindowController.candidateGeneration,
+                        runtimeContractFingerprint: runtimeContractFingerprint
+                    ).1
+                    let currentPolicy = try await persistentStore?.load()
+                    guard inverse != nil || currentPolicy == undo.before else {
+                        throw PolicyEditingCoreError.staleReviewedPlan
+                    }
+                }
+                let result = try await writer.restoreOrdering(policyStore: persistentStore, policyUndo: inverse)
                 guard result.preferencesRestored else {
                     throw OrderingTransactionError.restorationNotVerified
                 }
                 preferencesRestored = true
+                if let inverse, let model = priorModel {
+                    activeBaselinePlan = inverse.report.newBaselinePlan
+                    activeRevealPlan = inverse.report.newRevealPlan
+                    try await managementLoop.synchronizeCommittedPolicy(
+                        inverse.newPolicy, baseline: activeBaselinePlan)
+                    try await synchronizeInterfaceAfterCommit(inverse.newPolicy, previousModel: model)
+                }
+                editorWindowController.setStatus("Changes undone.", isError: false)
                 activeOrderingPlan = nil
-                presentOrderingCandidates(try await orderingBackend.capture())
+                guard presentOrderingCandidates(try await orderingBackend.capture()) else {
+                    needsAutomaticRefresh = true
+                    await updateOrderingRecoveryPresentation()
+                    return
+                }
+                editorWindowController.orderingPresentation.requiresObservationRefresh = false
                 editorWindowController.initializeOrderingLayoutFromCurrentRows(force: true)
-                editorWindowController.orderingPresentation.message =
-                    result.relativeOrderVerified
-                        ? "Original preferred positions and observed relative order are restored."
-                        : "Original preferred positions are restored. Physical order is not separately verified."
+                editorWindowController.orderingPresentation.message = "Changes undone."
+                editorWindowController.orderingPresentation.technicalDetail = result.relativeOrderVerified
+                    ? nil : "Saved settings were restored and verified. On-screen positions were not independently verified."
+                if let failure = await updateAcceptedControlBoundary() {
+                    editorWindowController.orderingPresentation.message =
+                        (editorWindowController.orderingPresentation.message ?? "") + " \(failure)"
+                    editorWindowController.orderingPresentation.isError = true
+                }
             } catch {
                 if preferencesRestored {
                     presentCommittedOrderingRefreshFailure(error, restored: true)
+                    editorWindowController.orderingPresentation.message = "Changes undone. Updating the Board…"
+                    needsAutomaticRefresh = true
                 } else {
                     presentOrderingError(error)
                 }
@@ -2804,7 +3121,7 @@ extension AppDelegate {
                 || receipt?.hasConfigurationUndo == true
             if let receipt {
                 if receipt.isPendingRestoration && (receipt.phase != .applied || activeOrderingPlan == nil) {
-                    presentation.message = "An ordering recovery record needs attention. \(receipt.detail) Choose Restore Order to inspect it."
+                    presentation.message = "An unfinished change needs recovery. Choose Recover Changes."
                 }
                 if receipt.isPendingRestoration { presentation.canApply = false }
             }
@@ -2816,7 +3133,8 @@ extension AppDelegate {
         }
     }
 
-    private func presentOrderingCandidates(_ snapshot: OrderingSnapshot) {
+    @discardableResult
+    private func presentOrderingCandidates(_ snapshot: OrderingSnapshot) -> Bool {
         do {
             let knownBundles = Set(editorModel?.candidateInventory.candidates.map(\.bundleIdentifier) ?? [])
             let candidates = try OrderingConfigurationIdentityResolver.resolve(snapshot: snapshot).filter {
@@ -2900,7 +3218,13 @@ extension AppDelegate {
                 )
             }
             editorWindowController.initializeOrderingLayoutFromCurrentRows()
-        } catch { presentOrderingError(error) }
+            return true
+        } catch {
+            lastOrderingSnapshot = nil
+            editorWindowController.orderingPresentation.hasObservation = false
+            presentOrderingError(error)
+            return false
+        }
     }
 
     private func orderingPositionLabel(_ value: OrderingValue) -> String {
@@ -2914,6 +3238,7 @@ extension AppDelegate {
     private func presentOrderingError(_ error: Error) {
         sessionDiagnostic("ordering-failure \(error.localizedDescription)")
         let presentation = editorWindowController.orderingPresentation
+        presentation.needsDataAccess = false
         if let backendError = error as? MacOS27MenuBarOrderingBackendError {
             switch backendError {
             case let .groupFileOpenFailed(code), let .groupFileMetadataReadFailed(code),
@@ -2923,7 +3248,16 @@ extension AppDelegate {
             }
         }
         presentation.isError = true
-        presentation.message = error.localizedDescription
+        presentation.message = presentation.needsDataAccess
+            ? "Allow access in System Settings, then try again."
+            : "The operation could not finish. See Details before trying again."
+        if let backendError = error as? MacOS27MenuBarOrderingBackendError,
+           backendError == .runtimeUnsupported || backendError == .runtimeContractDiffers {
+            presentation.message = "Ordering is unavailable on this macOS build."
+        } else if case .staleSnapshot = error as? OrderingError {
+            presentation.message = "The menu bar changed. Discard changes and refresh before trying again."
+        }
+        presentation.technicalDetail = error.localizedDescription
         presentation.canApply = false
     }
 
@@ -2936,8 +3270,10 @@ extension AppDelegate {
         presentation.hasObservation = false
         presentation.isError = false
         presentation.canApply = false
-        presentation.message = (restored ? "Original preferred positions restored." : "Reviewed configuration saved.")
-            + " The Board could not refresh: \(error.localizedDescription) Use Refresh to read the current state; the operation does not need to be repeated."
+        presentation.requiresObservationRefresh = true
+        presentation.message = (restored ? "Changes undone." : "Changes applied.")
+            + " Refresh to update the Board. Do not apply again."
+        presentation.technicalDetail = error.localizedDescription
     }
 }
 #endif

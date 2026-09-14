@@ -1,5 +1,170 @@
 import Foundation
 
+#if DEBUG
+extension CoordinatedPolicyWriter {
+    /// Follow an explicit successful Apply/Undo only after the owner has enabled
+    /// persistent placement. This is not a timer or a reveal reconciliation loop.
+    /// The final mutation reacquires the shared gate and repeats fresh preflight.
+    public func updateAcceptedControlBoundary(
+        policy: PersistentBundlePolicyDocument
+    ) async throws -> OrderingSnapshot? {
+        guard let recovery = fallbackRecovery, let receipt = try await recovery.load() else { return nil }
+        guard !receipt.isPendingRestoration, receipt.phase == .applied,
+              receipt.persistsAfterQuit == true,
+              let backend = orderingBackend as? any FallbackPositionWriting else {
+            throw OrderingTransactionError.recoveryRequired
+        }
+        let snapshot = try await backend.capture()
+        let candidate: FallbackBoundaryCandidate
+        do {
+            candidate = try FallbackBoundaryCandidate.make(snapshot: snapshot, policy: policy,
+                includeFish: receipt.delta.fishOriginal != nil)
+        } catch FallbackPositionDelta.Failure.unchangedPosition {
+            return nil
+        } catch FallbackBoundaryCandidate.Failure.noRevealableItems {
+            return nil
+        }
+        let identity = try await backend.fallbackIdentity()
+        return try await applyFallbackPosition(candidate.delta, baseline: snapshot,
+            identity: identity, persistsAfterQuit: true)
+    }
+
+    private func requireNoFallbackExperiment() async throws {
+        if let fallbackRecovery, try await fallbackRecovery.load()?.isPendingRestoration == true {
+            throw OrderingTransactionError.recoveryRequired
+        }
+    }
+
+    /// Explicit placement shares the existing writer and retains an independent
+    /// Undo. Legacy temporary experiments still require restoration on cleanup.
+    public func applyFallbackPosition(
+        _ delta: FallbackPositionDelta, baseline: OrderingSnapshot,
+        identity: FallbackNativeIdentity, persistsAfterQuit: Bool = false,
+        reviewedPreviousReceipt: FallbackPositionReceipt? = nil
+    ) async throws -> OrderingSnapshot {
+        await acquireOperation()
+        defer { releaseOperation() }
+        guard !stopped, let backend = orderingBackend as? any FallbackPositionWriting,
+              let recovery = fallbackRecovery, let orderingRecovery else {
+            throw OrderingTransactionError.unavailable
+        }
+        var receipt = try FallbackPositionReceipt(delta: delta, baseline: baseline,
+                                                  persistsAfterQuit: persistsAfterQuit)
+        try await orderingRecovery.acquireLease()
+        do {
+            guard try await orderingRecovery.load()?.isPendingRestoration != true else {
+                throw OrderingTransactionError.recoveryRequired
+            }
+            try await recovery.acquireLease()
+            let previousReceipt = try await recovery.load()
+            if let previousReceipt {
+                guard persistsAfterQuit, !previousReceipt.isPendingRestoration,
+                      previousReceipt.phase == .applied else {
+                    throw OrderingTransactionError.recoveryRequired
+                }
+                guard previousReceipt.delta.canBeReplaced(by: delta)
+                        || reviewedPreviousReceipt == previousReceipt else {
+                    throw FallbackPositionDelta.Failure.targetDrift
+                }
+            }
+            let current = try await backend.capture()
+            guard !stopped, current.group == baseline.group,
+                  current.policyFingerprint == baseline.policyFingerprint,
+                  current.lifecycleGeneration == baseline.lifecycleGeneration,
+                  current.displaySignature == baseline.displaySignature,
+                  current.afterProcesses == baseline.afterProcesses,
+                  Date().timeIntervalSince(baseline.capturedAt) >= 0,
+                  Date().timeIntervalSince(baseline.capturedAt) <= 60,
+                  try await backend.fallbackIdentity() == identity else {
+                throw OrderingTransactionError.contextInvalidated
+            }
+            // Save failure may be ambiguous. Once attempted, keep both leases
+            // and let the explicit recovery path inspect the durable record.
+            if let previousReceipt {
+                try await recovery.supersedeCommitted(previousReceipt, with: receipt,
+                    reviewedDrift: reviewedPreviousReceipt == previousReceipt)
+            } else {
+                try await recovery.save(receipt)
+            }
+            do {
+                guard !stopped else { throw OrderingTransactionError.contextInvalidated }
+                let proposed = try delta.applying(to: current.table())
+                try await backend.writeFallbackPosition(proposed, expecting: current, identity: identity)
+                let observed = try await backend.capture()
+                guard try observed.table() == proposed,
+                      try await backend.fallbackIdentity() == identity, !stopped else {
+                    throw OrderingTransactionError.movementNotVerified
+                }
+                receipt.phase = .applied
+                try await recovery.save(receipt)
+                if persistsAfterQuit {
+                    await recovery.releaseLease()
+                    await orderingRecovery.releaseLease()
+                }
+                return observed
+            } catch {
+                let failure = error
+                _ = try await restoreFallbackPositionLocked()
+                throw failure
+            }
+        } catch {
+            // Do not release an uncertain intent. A failed read also retains it.
+            if (try? await recovery.load()?.isPendingRestoration != true) == true {
+                await recovery.releaseLease()
+                await orderingRecovery.releaseLease()
+            }
+            throw error
+        }
+    }
+
+    public func restoreFallbackPosition() async throws -> OrderingSnapshot? {
+        await acquireOperation()
+        defer { releaseOperation() }
+        return try await restoreFallbackPositionLocked()
+    }
+
+    private func restoreFallbackPositionLocked() async throws -> OrderingSnapshot? {
+        guard let backend = orderingBackend as? any FallbackPositionWriting,
+              let recovery = fallbackRecovery, let orderingRecovery else {
+            throw OrderingTransactionError.unavailable
+        }
+        try await orderingRecovery.acquireLease()
+        try await recovery.acquireLease()
+        guard var receipt = try await recovery.load() else {
+            await recovery.releaseLease()
+            await orderingRecovery.releaseLease()
+            return nil
+        }
+        try receipt.validate()
+        let current = try await backend.capture()
+        let identity = try await backend.fallbackIdentity()
+        let restored = try receipt.delta.restoring(in: current.table())
+        if try current.table() != restored {
+            // A crash after restoreIntent must not cause another blind write.
+            guard receipt.phase != .restoreIntent && receipt.phase != .restored else {
+                throw OrderingTransactionError.restorationAlreadyAttempted
+            }
+            receipt.phase = .restoreIntent
+            try await recovery.save(receipt)
+            try await backend.writeFallbackPosition(restored, expecting: current, identity: identity)
+        } else if receipt.phase != .restoreIntent && receipt.phase != .restored {
+            receipt.phase = .restoreIntent
+            try await recovery.save(receipt)
+        }
+        let verified = try await backend.capture()
+        guard try verified.table() == restored else {
+            throw OrderingTransactionError.restorationNotVerified
+        }
+        receipt.phase = .restored
+        try await recovery.save(receipt)
+        try await recovery.complete(receipt)
+        await recovery.releaseLease()
+        await orderingRecovery.releaseLease()
+        return verified
+    }
+}
+#endif
+
 public enum CoordinatedPolicyWriterError: Error, Equatable, Sendable {
     case restorationFailed
 }
@@ -34,6 +199,7 @@ public actor CoordinatedPolicyWriter: PolicyAssertionWriting {
     private var orderingPolicyStore: (any PersistentBundlePolicyStoring)?
     private var consumedOrderingPlans = Set<UUID>()
     private var orderingRecoveryPending = false
+    private var fallbackRecovery: (any FallbackPositionRecoveryStoring)?
     #endif
 
     public init(
@@ -50,13 +216,15 @@ public actor CoordinatedPolicyWriter: PolicyAssertionWriting {
         persistentWriter: any PersistentSystemItemPlanWriting,
         orderingBackend: any MenuBarOrderingBackend,
         orderingRecovery: any OrderingRecoveryStoring,
-        orderingPolicyStore: (any PersistentBundlePolicyStoring)? = nil
+        orderingPolicyStore: (any PersistentBundlePolicyStoring)? = nil,
+        fallbackRecovery: (any FallbackPositionRecoveryStoring)? = nil
     ) {
         self.assertionWriter = assertionWriter
         self.persistentWriter = persistentWriter
         self.orderingBackend = orderingBackend
         self.orderingRecovery = orderingRecovery
         self.orderingPolicyStore = orderingPolicyStore
+        self.fallbackRecovery = fallbackRecovery
     }
     #endif
 
@@ -134,6 +302,18 @@ public actor CoordinatedPolicyWriter: PolicyAssertionWriting {
     private func cleanupLocked(connectionLost: Bool) async {
         guard !cleanupAttempted else { return }
         cleanupAttempted = true
+        #if DEBUG
+        if let fallbackRecovery {
+            do {
+                if try await fallbackRecovery.load()?.isPendingRestoration == true {
+                    _ = try await restoreFallbackPositionLocked()
+                }
+            } catch {
+                // The independent journal remains pending and visible through
+                // hasPendingRestoration. Visibility cleanup must still proceed.
+            }
+        }
+        #endif
         if connectionLost { await assertionWriter.connectionInvalidated() }
         else { await assertionWriter.restoreAndStop() }
         let persistentRestored = await persistentWriter.restoreAllManagedItems()
@@ -156,6 +336,10 @@ public actor CoordinatedPolicyWriter: PolicyAssertionWriting {
 
     public func hasPendingRestoration() async -> Bool {
         #if DEBUG
+        if let fallbackRecovery {
+            do { if try await fallbackRecovery.load()?.isPendingRestoration == true { return true } }
+            catch { return true }
+        }
         if orderingRecoveryPending { return true }
         #endif
         return restorationPending || activePlan != nil
@@ -271,12 +455,16 @@ extension CoordinatedPolicyWriter {
     ) async throws -> OrderingConfigurationCommitResult {
         await acquireOperation()
         defer { releaseOperation() }
+        try await requireNoFallbackExperiment()
         guard !stopped, (plan.schemaVersion == 3 || plan.schemaVersion == 4),
               let backend = orderingBackend,
               let recovery = orderingRecovery else { throw OrderingTransactionError.unavailable }
         try plan.validate()
         guard confirmedFingerprint == plan.fingerprint else {
             throw OrderingTransactionError.confirmationMismatch
+        }
+        guard !plan.configurationKeyTargets.isEmpty || policyChange != nil else {
+            throw OrderingTransactionError.invalidReceipt
         }
         var policyBackup: PersistentBundlePolicyBackup?
         if let policyChange {
@@ -301,7 +489,7 @@ extension CoordinatedPolicyWriter {
         try await recovery.acquireLease()
         let existing = try await recovery.load()
         if let existing {
-            guard (existing.schemaVersion == 2 || existing.schemaVersion == 3),
+            guard (existing.schemaVersion == 2 || existing.schemaVersion == 3 || existing.schemaVersion == 4),
                   !existing.isPendingRestoration,
                   existing.phase == .applied else {
                 orderingRecoveryPending = true
@@ -399,6 +587,10 @@ extension CoordinatedPolicyWriter {
                     ? "Configuration revision is about to be written."
                     : "A reviewed external configuration change superseded the previous clean Undo ledger; this new session is about to be written."
             )
+        }
+        if plan.schemaVersion == 4 || policyChange != nil || existing?.schemaVersion == 4 {
+            receipt.schemaVersion = 4
+            receipt.undoPolicy = existing?.undoPolicy
         }
         if let policyChange {
             receipt.originalPolicy = policyChange.oldPolicy
@@ -513,6 +705,16 @@ extension CoordinatedPolicyWriter {
             committedReceipt.detail = physical == .verified
                 ? "Exact configuration and observed physical order verified."
                 : "Exact configuration verified; physical order remains \(physical.rawValue)."
+            // Advance the single-level Undo baseline only after verification.
+            // Until this point the previous Undo survives a failed revision.
+            if before != after || policyChange != nil {
+                committedReceipt.originalValues = receipt.committedValues
+            }
+            if before != after || policyChange != nil {
+                committedReceipt.undoPolicy = policyChange.map {
+                    OrderingPolicyUndo(before: $0.oldPolicy, after: $0.newPolicy, backup: policyBackup)
+                }
+            }
             committedReceipt.committedValues = receipt.pendingValues
             committedReceipt.pendingValues = nil
             committedReceipt.configurationVerified = true
@@ -523,7 +725,13 @@ extension CoordinatedPolicyWriter {
             committedReceipt.originalPolicyBackup = nil
             committedReceipt.proposedPolicy = nil
             committedReceipt.policyPersistenceCommitted = nil
-            try await recovery.save(committedReceipt)
+            do {
+                try await recovery.save(committedReceipt)
+            } catch {
+                // A lost acknowledgement is not a failed commit when the exact
+                // verified record can be read back. Do not roll back past it.
+                guard (try? await recovery.load()) == committedReceipt else { throw error }
+            }
             orderingRecoveryPending = false
             return OrderingConfigurationCommitResult(
                 snapshot: finalObserved, configurationVerified: true,
@@ -582,6 +790,7 @@ extension CoordinatedPolicyWriter {
     ) async throws -> OrderingSnapshot {
         await acquireOperation()
         defer { releaseOperation() }
+        try await requireNoFallbackExperiment()
         guard !stopped, let backend = orderingBackend,
               let recovery = orderingRecovery else { throw OrderingTransactionError.unavailable }
         try plan.validate()
@@ -645,17 +854,20 @@ extension CoordinatedPolicyWriter {
     }
 
     public func restoreOrdering(
-        policyStore: (any PersistentBundlePolicyStoring)? = nil
+        policyStore: (any PersistentBundlePolicyStoring)? = nil,
+        policyUndo: PreparedPolicyEdit? = nil
     ) async throws -> OrderingRestoreResult {
         await acquireOperation()
         defer { releaseOperation() }
+        try await requireNoFallbackExperiment()
         // Explicit recovery is permitted on a stopped coordinator. It can never
         // re-enable that coordinator's assertion or ordering Apply path.
-        return try await restoreOrderingLocked(policyStore: policyStore)
+        return try await restoreOrderingLocked(policyStore: policyStore, policyUndo: policyUndo)
     }
 
     private func restoreOrderingLocked(
-        policyStore: (any PersistentBundlePolicyStoring)? = nil
+        policyStore: (any PersistentBundlePolicyStoring)? = nil,
+        policyUndo: PreparedPolicyEdit? = nil
     ) async throws -> OrderingRestoreResult {
         guard let backend = orderingBackend, let recovery = orderingRecovery else {
             throw OrderingTransactionError.unavailable
@@ -673,10 +885,10 @@ extension CoordinatedPolicyWriter {
         }
         orderingRecoveryPending = true
         try receipt.validate()
-        if receipt.schemaVersion == 2 || receipt.schemaVersion == 3 {
+        if receipt.schemaVersion == 2 || receipt.schemaVersion == 3 || receipt.schemaVersion == 4 {
             return try await restoreConfigurationReceiptLocked(
                 &receipt, backend: backend, recovery: recovery,
-                policyStore: policyStore ?? orderingPolicyStore
+                policyStore: policyStore ?? orderingPolicyStore, policyUndo: policyUndo
             )
         }
         let current = try await backend.capture()
@@ -768,9 +980,10 @@ extension CoordinatedPolicyWriter {
         guard expected.allSatisfy({ table[$0.key] == $0.value }) else {
             throw OrderingTransactionError.movementNotVerified
         }
-        try plan.baseline.validateConfigurationProcessScope(
-            for: Set(plan.configurationKeyTargets.map(\.key)), against: observed
-        )
+        if !plan.configurationKeyTargets.isEmpty {
+            try plan.baseline.validateConfigurationProcessScope(
+                for: Set(plan.configurationKeyTargets.map(\.key)), against: observed)
+        }
         let resolved = try OrderingConfigurationIdentityResolver.resolve(snapshot: observed)
         let applicationTargets: [OrderingConfigurationOwnerTarget] =
             plan.configurationTargets
@@ -883,7 +1096,7 @@ extension CoordinatedPolicyWriter {
             try? await recovery.save(receipt)
             throw OrderingTransactionError.restorationNotVerified
         }
-        if receipt.schemaVersion == 3 {
+        if receipt.schemaVersion == 3 || receipt.schemaVersion == 4 {
             var expectedGroup = current.group
             expectedGroup[OrderingSnapshot.tableKey] = .dictionary(restoredTable)
             guard observed.group == expectedGroup else {
@@ -910,12 +1123,29 @@ extension CoordinatedPolicyWriter {
         _ receipt: inout OrderingRecoveryReceipt,
         backend: any MenuBarOrderingBackend,
         recovery: any OrderingRecoveryStoring,
-        policyStore: (any PersistentBundlePolicyStoring)?
+        policyStore: (any PersistentBundlePolicyStoring)?,
+        policyUndo: PreparedPolicyEdit?
     ) async throws -> OrderingRestoreResult {
         guard let original = receipt.originalValues,
               let committed = receipt.committedValues,
               let bindings = configurationBindings(receipt) else {
             throw OrderingTransactionError.invalidReceipt
+        }
+        if let undo = receipt.undoPolicy, receipt.originalPolicy == nil {
+            guard let policyStore, let policyUndo, !stopped,
+                  policyUndo.oldPolicy == undo.after,
+                  policyUndo.newPolicy == undo.before,
+                  try await policyStore.load() == undo.after,
+                  policyUndo.report.newBaselinePlan != nil else {
+                throw OrderingTransactionError.contextInvalidated
+            }
+            // Persist policy recovery metadata before either inverse mutation.
+            receipt.undoPolicyRestoreIntent = true
+            receipt.originalPolicy = undo.before
+            receipt.originalPolicyBackup = undo.backup
+            receipt.proposedPolicy = undo.after
+            receipt.policyPersistenceCommitted = true
+            try await recovery.save(receipt)
         }
         let current = try await backend.capture()
         try validateConfigurationRecoveryIdentity(bindings, current: current)
@@ -965,7 +1195,7 @@ extension CoordinatedPolicyWriter {
             try? await recovery.save(receipt)
             throw OrderingTransactionError.restorationAlreadyAttempted
         }
-        if receipt.schemaVersion == 3 {
+        if receipt.schemaVersion == 3 || receipt.schemaVersion == 4 {
             var expectedGroup = current.group
             expectedGroup[OrderingSnapshot.tableKey] = .dictionary(restoredTable)
             guard observed.group == expectedGroup else {
@@ -988,15 +1218,36 @@ extension CoordinatedPolicyWriter {
                 throw OrderingTransactionError.contextInvalidated
             }
             if currentPolicy == proposedPolicy {
+                if receipt.undoPolicyRestoreIntent == true {
+                    guard let baseline = policyUndo?.report.newBaselinePlan, !stopped else {
+                        throw OrderingTransactionError.contextInvalidated
+                    }
+                    if receipt.undoPolicyWriteAttempted != true {
+                        receipt.undoPolicyWriteAttempted = true
+                        try await recovery.save(receipt)
+                        try await transition(to: baseline, baselineReplacement: true)
+                    }
+                    // An interrupted inverse may be verified, never replayed blindly.
+                    guard try await assertionWriter.verifyActivePlan(baseline),
+                          try await persistentWriter.verifyManagedPlan(baseline.persistentSystemItems) else {
+                        throw OrderingTransactionError.restorationNotVerified
+                    }
+                }
                 try await policyStore.restoreSnapshot(
                     document: originalPolicy,
                     backup: receipt.originalPolicyBackup,
                     expecting: proposedPolicy
                 )
+                if let baseline = policyUndo?.report.newBaselinePlan {
+                    await persistentWriter.finalizeCommittedPlan(baseline.persistentSystemItems)
+                }
             }
             receipt.policyPersistenceCommitted = false
         }
         let physical = receipt.plan.physicalVerificationStatus(in: observed, phase: .baseline)
+        receipt.undoPolicy = nil
+        receipt.undoPolicyRestoreIntent = nil
+        receipt.undoPolicyWriteAttempted = nil
         receipt.phase = .preferencesRestored
         receipt.detail = physical == .verified
             ? "Exact original configuration and observed physical order restored."

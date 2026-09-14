@@ -34,7 +34,7 @@ struct OrderingInsertionTransactionTests {
     }
 
     @Test(
-        "Final receipt failure rolls back a completed combined policy transition",
+        "Final receipt failure rolls back unless the exact committed record is durable",
         arguments: [false, true]
     )
     func finalReceiptFailureRollsBackCombinedCommit(persistBeforeFailure: Bool) async throws {
@@ -52,6 +52,15 @@ struct OrderingInsertionTransactionTests {
         let writer = makeWriter(backend, recovery)
         let plan = try configurationPlan(fixture.baseline)
 
+        if persistBeforeFailure {
+            _ = try await writer.applyConfigurationOrdering(
+                plan, confirmedFingerprint: plan.fingerprint,
+                policyChange: prepared, policyStore: policyStore)
+            #expect(await policyStore.document == prepared.newPolicy)
+            #expect(await recovery.receipt?.isPendingRestoration == false)
+            #expect(await recovery.receipt?.undoPolicy?.before == prepared.oldPolicy)
+            return
+        }
         await #expect(throws: OrderingTransactionError.receiptStorageUnavailable) {
             _ = try await writer.applyConfigurationOrdering(
                 plan, confirmedFingerprint: plan.fingerprint,
@@ -463,7 +472,7 @@ struct OrderingInsertionTransactionTests {
         #expect(loaded?.ownerBindings?.count == 3)
         try loaded?.validate()
         _ = try await writer.restoreOrdering()
-        #expect(await backend.current.group == fixture.baseline.group)
+        #expect(await backend.current.group == secondBaseline.group)
         #expect(try await OrderingRecoveryStore(directory: directory).load() == nil)
     }
 
@@ -499,7 +508,7 @@ struct OrderingInsertionTransactionTests {
         #expect(await recovery.receipt == nil)
     }
 
-    @Test("Configuration commits advance one receipt and merge first-seen owner scope")
+    @Test("Undo reverses only the latest successful configuration commit")
     func repeatedConfigurationCommits() async throws {
         let fixture = try InsertionTransactionFixture()
         let backend = InsertionTransactionBackend(fixture: fixture)
@@ -528,7 +537,7 @@ struct OrderingInsertionTransactionTests {
         #expect(await recovery.receipt?.ownerBindings?.count == 3)
         #expect(await recovery.receipt?.isPendingRestoration == false)
         _ = try await writer.restoreOrdering()
-        #expect(await backend.current.group == fixture.baseline.group)
+        #expect(await backend.current.group == secondBaseline.group)
     }
 
     @Test("Partial configuration failure performs one journaled rollback")
@@ -677,6 +686,34 @@ struct OrderingInsertionTransactionTests {
         )
     }
 
+    @Test("Unified Undo restores visibility and order, including a policy-only Apply", arguments: [false, true], [false, true])
+    func unifiedUndo(policyOnly: Bool, siri: Bool) async throws {
+        let fixture = try InsertionTransactionFixture()
+        let backend = InsertionTransactionBackend(fixture: fixture)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("unified-undo-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recovery = OrderingRecoveryStore(directory: directory)
+        let forward = try preparedPolicyChange(siri: siri)
+        let store = MemoryPolicyStore(document: forward.oldPolicy)
+        let writer = CoordinatedPolicyWriter(assertionWriter: InsertionAssertionWriter(),
+            persistentWriter: InsertionPersistentWriter(), orderingBackend: backend,
+            orderingRecovery: recovery)
+        let plan = policyOnly
+            ? try OrderingPlan.makeConfigurationOrdering(snapshot: fixture.baseline, orderedSubjects: [])
+            : try configurationPlan(fixture.baseline)
+        _ = try await writer.applyConfigurationOrdering(plan, confirmedFingerprint: plan.fingerprint,
+            policyChange: forward, policyStore: store)
+        #expect(try await recovery.load()?.hasConfigurationUndo == true)
+        #expect(try await recovery.load()?.isPendingRestoration == false)
+        #expect(await store.document == forward.newPolicy)
+        let inverse = try preparedPolicyChange(inverse: true, siri: siri)
+        _ = try await writer.restoreOrdering(policyStore: store, policyUndo: inverse)
+        #expect(await store.document == forward.oldPolicy)
+        #expect(await backend.current.group == fixture.baseline.group)
+        #expect(try await recovery.load() == nil)
+        #expect(await writer.activePlanSnapshot() == inverse.report.newBaselinePlan)
+    }
+
     private func configurationPlan(_ snapshot: OrderingSnapshot) throws -> OrderingPlan {
         try OrderingPlan.makeConfigurationOrdering(
             snapshot: snapshot,
@@ -687,7 +724,7 @@ struct OrderingInsertionTransactionTests {
     }
 
     private func preparedPolicyChange(
-        recoveryBackupFingerprint: String? = nil
+        recoveryBackupFingerprint: String? = nil, inverse: Bool = false, siri: Bool = false
     ) throws -> PreparedPolicyEdit {
         let blenny = "xyz.fi5h.blenny"
         let owners = (0..<3).map { "com.example.owner\($0)" }
@@ -711,7 +748,8 @@ struct OrderingInsertionTransactionTests {
             draft: BundlePolicyDraft(
                 visible: [blenny, owners[2]],
                 revealable: [owners[1]],
-                hidden: [owners[0]]
+                hidden: [owners[0]],
+                systemItemPolicies: siri ? [ExactSystemOrderingItem.siri.observationIdentifier: .revealable] : [:]
             ),
             managementEnabled: true,
             candidates: inventory,
@@ -720,7 +758,16 @@ struct OrderingInsertionTransactionTests {
             blennyBundleIdentifier: blenny,
             recoveryBackupFingerprint: recoveryBackupFingerprint
         )
-        return try #require(prepared.prepared)
+        let forward = try #require(prepared.prepared)
+        guard inverse else { return forward }
+        return try #require(PolicyDryRunner.prepare(
+            oldPolicy: forward.newPolicy, draft: BundlePolicyDraft(acceptedPolicy: old),
+            managementEnabled: true, candidates: inventory,
+            observedRunningBundleIdentifiers: Set([blenny] + owners),
+            scope: PolicyValidationScope(approvedBundleIdentifiers: [blenny] + owners),
+            blennyBundleIdentifier: blenny,
+            recoveryBackupFingerprint: recoveryBackupFingerprint
+        ).prepared)
     }
 }
 

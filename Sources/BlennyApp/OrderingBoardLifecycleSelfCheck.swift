@@ -10,6 +10,21 @@ enum OrderingBoardLifecycleSelfCheck {
     }
 
     static func run() throws {
+        #if BLENNY_GROUPED_FALLBACK_TRIAL
+        guard GroupedStatusItemContent.validateDetachedLayout() else {
+            throw CheckFailure(message: "Grouped native controls must retain separate, adjacent hit targets")
+        }
+        #endif
+        let staleError = DebugOrderingPresentation()
+        staleError.isError = true
+        staleError.needsDataAccess = true
+        staleError.technicalDetail = "Earlier file access refusal"
+        staleError.finishSuccessfulRead()
+        guard !staleError.isError, !staleError.needsDataAccess,
+              staleError.technicalDetail == nil else {
+            throw CheckFailure(message: "Successful reads must clear obsolete permission diagnostics")
+        }
+
         let blenny = "xyz.fi5h.blenny"
         let alpha = "com.example.OrderingAlpha"
         let beta = "com.example.OrderingBeta"
@@ -80,6 +95,13 @@ enum OrderingBoardLifecycleSelfCheck {
         )
 
         try runUnchangedDropCheck(model: model, alpha: alpha, beta: beta)
+        try runUnavailableOrderChecks(blenny: blenny, alpha: alpha, beta: beta, gamma: gamma)
+
+        try runLocalDraftChecks(
+            accepted: accepted, inventory: inventory,
+            observationsCount: observations.count, blenny: blenny,
+            alpha: alpha, beta: beta, gamma: gamma
+        )
 
         try runDeferredSystemPolicyApplyCheck(
             accepted: accepted,
@@ -130,13 +152,13 @@ enum OrderingBoardLifecycleSelfCheck {
             )
             try requireRejected(
                 model.requestOrderingConfigurationDrop(
-                    payload: stale, destination: destination, notifyPreview: false
+                    payload: stale, destination: destination
                 ),
                 "revision \(revision): a payload from the preceding layout was accepted"
             )
             try requireChanged(
                 model.requestOrderingConfigurationDrop(
-                    payload: current, destination: destination, notifyPreview: false
+                    payload: current, destination: destination
                 ),
                 expectedPolicyChange: false,
                 message: "revision \(revision): the first drag after Apply was rejected"
@@ -185,8 +207,7 @@ enum OrderingBoardLifecycleSelfCheck {
         )
         try requireRejected(
             model.requestOrderingConfigurationDrop(
-                payload: staleCrossLane, destination: crossLaneDestination,
-                notifyPreview: false
+                payload: staleCrossLane, destination: crossLaneDestination
             ),
             "a payload from the preceding accepted model was accepted"
         )
@@ -198,8 +219,7 @@ enum OrderingBoardLifecycleSelfCheck {
         )
         try requireChanged(
             model.requestOrderingConfigurationDrop(
-                payload: freshCrossLane, destination: crossLaneDestination,
-                notifyPreview: false
+                payload: freshCrossLane, destination: crossLaneDestination
             ),
             expectedPolicyChange: true,
             message: "fresh cross-lane drag after accepted-model display was rejected"
@@ -213,6 +233,41 @@ enum OrderingBoardLifecycleSelfCheck {
             alpha: alpha,
             beta: beta
         )
+    }
+
+    private static func runUnavailableOrderChecks(
+        blenny: String, alpha: String, beta: String, gamma: String
+    ) throws {
+        // Pure layout fixtures only: no observation, preferences or writer.
+        let layout = try OrderingBoardLayoutDraft(
+            visible: [alpha, beta, blenny], revealable: [gamma], hidden: [],
+            candidateGeneration: UUID()
+        )
+        let eligible: Set<OrderingSubjectID> = [.application(beta), .application(gamma)]
+        let initialRequest = DebugOrderingConfigurationRequest(draft: layout)
+        try require(initialRequest.unavailableOrderChanges(
+            eligibleSubjects: eligible, blenny: blenny
+        ).isEmpty, "unchanged layout reported an unsupported ordering change")
+
+        let source = OrderingBoardLayoutItemID(
+            bundleIdentifier: alpha, sourcePolicy: .visible,
+            candidateGeneration: layout.candidateGeneration,
+            layoutGeneration: layout.layoutGeneration
+        )
+        let visibilityOnly = try layout.moving(
+            source, to: .init(policy: .hidden, position: .end)
+        ).get()
+        try require(DebugOrderingConfigurationRequest(draft: visibilityOnly)
+            .unavailableOrderChanges(eligibleSubjects: eligible, blenny: blenny).isEmpty,
+            "valid visibility-only move required unsupported sorting")
+
+        let reordered = try layout.moving(
+            source, to: .init(policy: .visible, position: .after(beta))
+        ).get()
+        try require(DebugOrderingConfigurationRequest(draft: reordered)
+            .unavailableOrderChanges(eligibleSubjects: eligible, blenny: blenny)
+            == [.application(alpha)],
+            "unsupported same-area ordering could be silently omitted")
     }
 
     private static func runUnchangedDropCheck(
@@ -256,8 +311,7 @@ enum OrderingBoardLifecycleSelfCheck {
         try requireRejected(
             model.requestOrderingConfigurationDrop(
                 payload: payload,
-                destination: .init(policy: .visible, position: .after(beta)),
-                notifyPreview: false
+                destination: .init(policy: .visible, position: .after(beta))
             ),
             "an unchanged delivery token could be reused"
         )
@@ -283,8 +337,7 @@ enum OrderingBoardLifecycleSelfCheck {
         try requireRejected(
             model.requestOrderingConfigurationDrop(
                 payload: fresh,
-                destination: .init(policy: .visible, position: .after(beta)),
-                notifyPreview: false
+                destination: .init(policy: .visible, position: .after(beta))
             ),
             "a payload from a cancelled native drag could be delivered"
         )
@@ -318,13 +371,112 @@ enum OrderingBoardLifecycleSelfCheck {
         try requireChanged(
             model.requestOrderingConfigurationDrop(
                 payload: freshAfterSameItem,
-                destination: .init(policy: .visible, position: .after(beta)),
-                notifyPreview: false
+                destination: .init(policy: .visible, position: .after(beta))
             ),
             expectedPolicyChange: false,
             message: "a real order change was rejected after an unchanged drop"
         )
         model.resetOrderingLayoutDraft()
+    }
+
+    private static func runLocalDraftChecks(
+        accepted: PersistentBundlePolicyDocument,
+        inventory: PolicyCandidateInventory,
+        observationsCount: Int,
+        blenny: String,
+        alpha: String,
+        beta: String,
+        gamma: String
+    ) throws {
+        let editor = try PolicyEditorViewModel(
+            acceptedPolicy: accepted, candidateInventory: inventory,
+            blennyBundleIdentifier: blenny
+        )
+        let model = ProductInterfaceModel()
+        model.display(model: editor, observationCount: observationsCount, recoveryAvailable: true)
+        model.setAccessibilityTrusted(true, hasRequestedSystemPrompt: true)
+        model.setManagementRuntimeState(.stopped, developmentMutationAvailable: true)
+        setRows(model, alphaFirst: true)
+        model.initializeOrderingLayoutFromCurrentRows(force: true)
+        let initialLayout = try require(model.orderingLayoutDraft, "local-draft layout unavailable")
+        var previewCount = 0
+        var applyCount = 0
+        var draftCount = 0
+        model.orderingPresentation.onPreviewConfiguration = { _ in previewCount += 1 }
+        model.orderingPresentation.onApply = { _ in applyCount += 1 }
+        model.orderingPresentation.onDraftChanged = { _ in draftCount += 1 }
+        try require(model.controls.refreshEnabled && model.controls.resumeEnabled
+            && model.controls.restoreEnabled, "clean fixture controls were not available")
+
+        let orderPayload = try require(
+            model.beginOrderingDragPayload(subjectID: .application(alpha), sourcePolicy: .visible),
+            "local same-area drag unavailable"
+        )
+        try requireChanged(
+            model.requestOrderingConfigurationDrop(
+                payload: orderPayload,
+                destination: .init(policy: .visible, position: .after(beta))
+            ),
+            expectedPolicyChange: false, message: "local same-area drop rejected"
+        )
+        try require(model.model?.hasDraftChanges == false && model.hasDraftChanges,
+            "pure ordering was not represented as an unapplied draft")
+        try requireDraftControls(model)
+        try require(previewCount == 0 && applyCount == 0 && draftCount == 1,
+            "same-area drop requested preview or Apply instead of a local draft update")
+
+        let crossPayload = try require(
+            model.beginOrderingDragPayload(subjectID: .application(gamma), sourcePolicy: .revealable),
+            "local cross-area drag unavailable"
+        )
+        try requireChanged(
+            model.requestOrderingConfigurationDrop(
+                payload: crossPayload,
+                destination: .init(policy: .visible, position: .end)
+            ),
+            expectedPolicyChange: true, message: "local cross-area drop rejected"
+        )
+        try require(model.model?.hasDraftChanges == true && model.hasDraftChanges,
+            "cross-area drop did not retain a combined draft")
+        try requireDraftControls(model)
+        try require(previewCount == 0 && applyCount == 0 && draftCount == 2,
+            "cross-area drop requested preview or Apply instead of a local draft update")
+
+        _ = try require(model.discardDraft(), "combined draft could not be discarded")
+        try require(!model.hasDraftChanges && model.model?.hasDraftChanges == false,
+            "Discard left policy or ordering changes pending")
+        try require(model.orderingLayoutDraft?.visible == initialLayout.visible
+            && model.orderingLayoutDraft?.revealable == initialLayout.revealable
+            && model.orderingLayoutDraft?.hidden == initialLayout.hidden,
+            "Discard did not restore the original Board layout")
+        try require(model.controls.refreshEnabled && model.controls.resumeEnabled
+            && model.controls.restoreEnabled && !model.controls.discardDraftEnabled,
+            "Discard did not restore clean-state controls")
+        try require(previewCount == 0 && applyCount == 0,
+            "Discard requested a preview or system Apply")
+
+        let afterDiscard = try require(
+            model.beginOrderingDragPayload(subjectID: .application(alpha), sourcePolicy: .visible),
+            "Discard did not restore a fresh drag authority"
+        )
+        try requireChanged(
+            model.requestOrderingConfigurationDrop(
+                payload: afterDiscard,
+                destination: .init(policy: .visible, position: .after(beta))
+            ),
+            expectedPolicyChange: false,
+            message: "first same-area drag immediately after Discard was rejected"
+        )
+        try requireDraftControls(model)
+        try require(previewCount == 0 && applyCount == 0 && draftCount == 3,
+            "post-Discard drag did not remain a local draft update")
+    }
+
+    private static func requireDraftControls(_ model: ProductInterfaceModel) throws {
+        try require(!model.controls.refreshEnabled && !model.controls.resumeEnabled
+            && !model.controls.restoreEnabled && model.controls.applyEnabled
+            && model.controls.discardDraftEnabled,
+            "unapplied changes did not consistently gate the editor controls")
     }
 
     private static func runDeferredSystemPolicyApplyCheck(
@@ -403,8 +555,7 @@ enum OrderingBoardLifecycleSelfCheck {
         try requireRejected(
             model.requestOrderingConfigurationDrop(
                 payload: oldPayload,
-                destination: .init(policy: .visible, position: .after(beta)),
-                notifyPreview: false
+                destination: .init(policy: .visible, position: .after(beta))
             ),
             "Siri-only Apply accepted its pre-Apply drag token"
         )
@@ -417,8 +568,7 @@ enum OrderingBoardLifecycleSelfCheck {
         try requireChanged(
             model.requestOrderingConfigurationDrop(
                 payload: freshPayload,
-                destination: .init(policy: .visible, position: .after(beta)),
-                notifyPreview: false
+                destination: .init(policy: .visible, position: .after(beta))
             ),
             expectedPolicyChange: false,
             message: "first ordering drag after Siri-only Apply was rejected"
@@ -485,8 +635,7 @@ enum OrderingBoardLifecycleSelfCheck {
         try requireRejected(
             model.requestOrderingConfigurationDrop(
                 payload: beforeFailedResume,
-                destination: .init(policy: .visible, position: .after(beta)),
-                notifyPreview: false
+                destination: .init(policy: .visible, position: .after(beta))
             ),
             "successful Resume accepted a pre-transition drag token"
         )
@@ -503,8 +652,7 @@ enum OrderingBoardLifecycleSelfCheck {
         try requireChanged(
             model.requestOrderingConfigurationDrop(
                 payload: afterResume,
-                destination: .init(policy: .visible, position: .after(beta)),
-                notifyPreview: false
+                destination: .init(policy: .visible, position: .after(beta))
             ),
             expectedPolicyChange: false,
             message: "first ordering drag after Resume was rejected"
@@ -544,8 +692,7 @@ enum OrderingBoardLifecycleSelfCheck {
         try requireRejected(
             model.requestOrderingConfigurationDrop(
                 payload: beforeStop,
-                destination: .init(policy: .visible, position: .before(beta)),
-                notifyPreview: false
+                destination: .init(policy: .visible, position: .before(beta))
             ),
             "successful Stop accepted a pre-transition drag token"
         )
@@ -601,8 +748,7 @@ enum OrderingBoardLifecycleSelfCheck {
         try requireChanged(
             model.requestOrderingConfigurationDrop(
                 payload: rebuiltAfterMissingLayout,
-                destination: .init(policy: .visible, position: .after(beta)),
-                notifyPreview: false
+                destination: .init(policy: .visible, position: .after(beta))
             ),
             expectedPolicyChange: false,
             message: "first ordering drag after missing-layout recovery was rejected"

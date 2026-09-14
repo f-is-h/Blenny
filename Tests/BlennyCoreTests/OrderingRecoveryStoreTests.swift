@@ -301,6 +301,36 @@ struct OrderingRecoveryStoreTests {
         return OrderingRecoveryReceipt(plan: plan, phase: .applyIntent)
     }
 
+    @Test("Only a verified pending commit can advance the single-level Undo baseline")
+    func verifiedCommitAdvancesUndo() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = OrderingRecoveryStore(directory: directory)
+        try await store.acquireLease()
+        let (clean, _) = try makeCleanAndReplacementReceipts()
+        try await store.save(clean)
+        var intent = clean
+        intent.phase = .applyIntent
+        intent.revision = (clean.revision ?? 1) + 1
+        intent.pendingValues = clean.originalValues
+        intent.configurationVerified = false
+        try await store.save(intent)
+        var committed = intent
+        committed.phase = .applied
+        committed.originalValues = intent.committedValues
+        committed.committedValues = intent.pendingValues
+        committed.pendingValues = nil
+        committed.configurationVerified = true
+        try await store.save(committed)
+        #expect(try await store.load() == committed)
+        var unauthorized = committed
+        unauthorized.originalValues = clean.originalValues
+        await #expect(throws: OrderingTransactionError.recoveryRequired) {
+            try await store.save(unauthorized)
+        }
+        await store.releaseLease()
+    }
+
     private func makeCleanAndReplacementReceipts() throws -> (
         OrderingRecoveryReceipt, OrderingRecoveryReceipt
     ) {

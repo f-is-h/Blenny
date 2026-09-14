@@ -2,7 +2,7 @@
 
 ## Experimental ordering scope
 
-Version 0.9.0 ordering is available in Debug and the explicitly enabled optimized
+Version 0.10.0 ordering is available in Debug and the explicitly enabled optimized
 owner-test build on the admitted macOS 27 runtime. Ordinary Release excludes it.
 It is not a general guarantee for every application, monitor or future OS build.
 Unknown identities and incomplete owner scope remain unsupported.
@@ -51,3 +51,12 @@ for the exact cause and the [investigation record](NOTIFICATION_CENTER_RESEARCH_
 for the bounded searches and rejected alternatives. No compatible repair was
 found in the final round; further parameter and delay trials are deferred beyond
 0.9.0 unless new backend evidence changes the premises.
+
+## 0.10.0 local milestone
+
+See [the release record](RELEASE_0.10.0.md) for accepted scope and remaining 0.11.0
+validation. Saved-setting verification is distinct from independent physical
+position verification. A stale accepted control-placement record needs explicit
+review; it is not automatically overwritten. Unified Undo restores the latest
+Apply but fails closed when policy or runtime identity has changed and does not
+automatically resume management. Old order-only receipts retain their old scope.

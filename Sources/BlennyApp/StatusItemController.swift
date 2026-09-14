@@ -22,15 +22,29 @@ final class StatusItemController: NSObject {
     private static let ordinaryStatusItemLength: CGFloat = 22
     private let statusItem: NSStatusItem
     private var revealStatusItem: NSStatusItem?
+    #if DEBUG && BLENNY_GROUPED_FALLBACK_TRIAL
+    private var groupedStatusContent: GroupedStatusItemContent?
+    #endif
+    #if DEBUG
+    private let fallbackDiagnosticSession = UUID().uuidString
+    private var fallbackCreationCount = 0
+    private(set) var debugClickCheck = NativeControlClickCheck()
+    private(set) var debugDispatchClickCheckID: UUID?
+    private var debugBoundaryCapture: (() -> Void)?
+    private var debugBoundaryDirectory: URL?
+    private let debugSaveBoundaryItem = NSMenuItem(title: "Save Boundary Snapshot",
+        action: #selector(debugSaveBoundarySnapshot), keyEquivalent: "")
+    #endif
     private let permissionItem = NSMenuItem(title: "Accessibility: Checking…", action: nil, keyEquivalent: "")
     private let managementStateItem = NSMenuItem(title: "Management: Checking…", action: nil, keyEquivalent: "")
-    private let ordinaryRevealItem = NSMenuItem(title: "Reveal Revealable Items", action: #selector(toggleOrdinaryReveal), keyEquivalent: "")
+    private let ordinaryRevealItem = NSMenuItem(title: "Expand Revealable Items", action: #selector(toggleOrdinaryReveal), keyEquivalent: "")
     private let refreshItem = NSMenuItem(title: "Refresh Menu Bar Items", action: #selector(refresh), keyEquivalent: "r")
     private let resumeManagingItem = NSMenuItem(title: "Resume Managing", action: #selector(resumeManaging), keyEquivalent: "")
     private let stopManagingItem = NSMenuItem(title: "Stop Managing", action: #selector(stopManaging), keyEquivalent: "")
-    private let restorePreviousPolicyItem = NSMenuItem(title: "Restore Previous Policy", action: #selector(restorePreviousPolicy), keyEquivalent: "")
+    private let restorePreviousPolicyItem = NSMenuItem(title: "Restore Previous Visibility", action: #selector(restorePreviousPolicy), keyEquivalent: "")
     private let menu = NSMenu()
     private var hasDraftChanges = false
+    private var requiresObservationRefresh = false
     private var interactionBusy = false
     private var accessibilityTrusted = false
     private var currentManagementState: ManagementLoopState = .unknown
@@ -185,11 +199,12 @@ final class StatusItemController: NSObject {
         refreshItem.title = refreshing ? "Refreshing Menu Bar Items…" : "Refresh Menu Bar Items"
     }
 
-    func setDraftHasChanges(_ hasChanges: Bool) {
+    func setDraftHasChanges(_ hasChanges: Bool, requiresObservationRefresh: Bool = false) {
         hasDraftChanges = hasChanges
+        self.requiresObservationRefresh = requiresObservationRefresh
         refreshItem.isEnabled = !hasChanges && !interactionBusy
         updateResumeAvailability()
-        restorePreviousPolicyItem.isEnabled = currentRecoveryAvailable && !interactionBusy && !hasChanges
+        restorePreviousPolicyItem.isEnabled = currentRecoveryAvailable && !interactionBusy && !hasChanges && !requiresObservationRefresh
     }
 
     func setManagementState(
@@ -202,36 +217,25 @@ final class StatusItemController: NSObject {
         currentManagementEnabled = persistedManagementEnabled
         currentRecoveryAvailable = recoveryAvailable
         self.hasRevealableBundles = hasRevealableBundles
-        switch state {
-        case .active, .baselineVerified, .ordinaryRevealSession:
-            managementStateItem.title = "Management: On"
-        case .stopped:
-            managementStateItem.title = "Management: Stopped"
-        case .unsupportedRuntimeContract:
-            managementStateItem.title = "Management: Unsupported"
-        case .failClosedUnrestricted, .connectionInvalidated:
-            managementStateItem.title = "Management: Restored"
-        case .restorationFailed:
-            managementStateItem.title = "Management: Cleanup Failed"
-        default:
-            managementStateItem.title = "Management: Preparing"
-        }
+        let presentation = ProductManagementPresentation(state: state)
+        managementStateItem.title = presentation.title
+        managementStateItem.toolTip = presentation.detail
         switch state {
         case .active:
-            ordinaryRevealItem.title = "Reveal Revealable Items"
+            ordinaryRevealItem.title = "Expand Revealable Items"
             ordinaryRevealItem.isEnabled = true
         case .ordinaryRevealSession:
-            ordinaryRevealItem.title = "Conceal Revealable Items"
+            ordinaryRevealItem.title = "Collapse Revealable Items"
             ordinaryRevealItem.isEnabled = true
         default:
-            ordinaryRevealItem.title = "Reveal Revealable Items"
+            ordinaryRevealItem.title = "Expand Revealable Items"
             ordinaryRevealItem.isEnabled = false
         }
         ordinaryRevealItem.isEnabled = ordinaryRevealItem.isEnabled
             && hasRevealableBundles && !interactionBusy
         updateResumeAvailability()
         stopManagingItem.isEnabled = persistedManagementEnabled && !interactionBusy
-        restorePreviousPolicyItem.isEnabled = recoveryAvailable && !interactionBusy && !hasDraftChanges
+        restorePreviousPolicyItem.isEnabled = recoveryAvailable && !interactionBusy && !hasDraftChanges && !requiresObservationRefresh
         updateNormalButton()
     }
 
@@ -248,7 +252,7 @@ final class StatusItemController: NSObject {
 
     private func updateResumeAvailability() {
         resumeManagingItem.isEnabled = currentManagementState.canResume
-            && accessibilityTrusted && !interactionBusy && !hasDraftChanges
+            && accessibilityTrusted && !interactionBusy && !hasDraftChanges && !requiresObservationRefresh
     }
 
     #if DEBUG
@@ -284,12 +288,31 @@ final class StatusItemController: NSObject {
                 || slotUpdate.allocation != lastFallbackSlotAllocation else { return }
         lastRenderedPresentation = normalPresentation
         lastFallbackSlotAllocation = slotUpdate.allocation
+        #if !(DEBUG && BLENNY_GROUPED_FALLBACK_TRIAL)
         button.image = blennyImage
         button.title = blennyImage == nil ? "B" : ""
         statusItem.length = Self.ordinaryStatusItemLength
+        #endif
         let arrowImage = NSImage(systemSymbolName: normalPresentation.nativeArrowSymbolName, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: ManagementStatusPresentation.arrowPointSize, weight: .medium))
         arrowImage?.isTemplate = true
+        #if DEBUG && BLENNY_GROUPED_FALLBACK_TRIAL
+        let grouped = ensureGroupedStatusContent(in: button)
+        let reservesArrow = slotUpdate.allocation == .reserved
+        let length = reservesArrow ? Self.ordinaryStatusItemLength * 2
+            : Self.ordinaryStatusItemLength
+        if statusItem.length != length { statusItem.length = length }
+        button.image = nil
+        button.title = ""
+        button.action = nil
+        grouped.update(
+            fishImage: blennyImage, arrowImage: arrowImage,
+            reservesArrow: reservesArrow,
+            showsArrow: reservesArrow && normalPresentation.showsInlineArrow,
+            canToggle: normalPresentation.canToggleReveal,
+            arrowHelp: normalPresentation.nativeArrowHelp
+        )
+        #else
         if slotUpdate.allocation == .absent {
             if let item = revealStatusItem {
                 NSStatusBar.system.removeStatusItem(item)
@@ -312,6 +335,7 @@ final class StatusItemController: NSObject {
             item.button?.setAccessibilityLabel(normalPresentation.nativeArrowHelp)
             item.button?.toolTip = normalPresentation.nativeArrowHelp
         }
+        #endif
         #if DEBUG
         if previousSlotAllocation != slotUpdate.allocation,
            DebugSessionTrace.shared.enabled {
@@ -323,7 +347,7 @@ final class StatusItemController: NSObject {
         #endif
         ordinaryRevealItem.isEnabled = normalPresentation.canToggleReveal
         button.setAccessibilityLabel("Open Blenny")
-        button.setAccessibilityHelp("Right-click to open Blenny, stop managing, or restore the previous policy.")
+        button.setAccessibilityHelp("Right-click for management and recovery actions.")
         button.toolTip = "Open Blenny — right-click for menu"
         if slotUpdate.requestsVerification {
             onVerifyNativeOverflowAfterSlotCompaction()
@@ -350,6 +374,16 @@ final class StatusItemController: NSObject {
             DebugSessionTrace.shared.write("statusControl=\(control.rawValue) action=\(action.rawValue)")
         }
         #endif
+        #if DEBUG
+        let diagnosticID: UUID?
+        if event?.type != .rightMouseUp && event?.type != .rightMouseDown {
+            diagnosticID = debugClickCheck.begin(source: control.rawValue,
+                event: String(describing: event?.type))
+        } else { diagnosticID = nil }
+        debugDispatchClickCheckID = diagnosticID
+        defer { debugDispatchClickCheckID = nil }
+        debugRecordClickStage("route=\(action.rawValue)", id: diagnosticID)
+        #endif
         switch action {
         case .toggleReveal:
             // Exactly the same entry point as the working safety-menu action.
@@ -358,7 +392,13 @@ final class StatusItemController: NSObject {
             _ = openNormalMenu()
         case .openEditor:
             onOpenDiagnostics()
+            #if DEBUG
+            debugRecordClickStage("editor action invoked", id: diagnosticID, finished: true)
+            #endif
         case .ignore:
+            #if DEBUG
+            debugRecordClickStage("rejected: canToggleReveal=false", id: diagnosticID, finished: true)
+            #endif
             break
         }
     }
@@ -431,30 +471,143 @@ final class StatusItemController: NSObject {
     }
 
     /// Read-only installed validation of the actual AppKit control, not pixels.
-    var debugOrdinaryRevealButtonEnabled: Bool { revealStatusItem?.button?.isEnabled == true }
+    var debugOrdinaryRevealButtonEnabled: Bool {
+        #if BLENNY_GROUPED_FALLBACK_TRIAL
+        groupedStatusContent?.arrow.isEnabled == true
+        #else
+        revealStatusItem?.button?.isEnabled == true
+        #endif
+    }
     /// Local AppKit presentation only; this does not prove physical visibility
     /// outside macOS overflow.
     var debugOrdinaryRevealButtonVisible: Bool {
+        #if BLENNY_GROUPED_FALLBACK_TRIAL
+        statusItem.isVisible && groupedStatusContent?.arrow.isHidden == false
+            && groupedStatusContent?.arrow.image != nil
+        #else
         revealStatusItem?.isVisible == true && revealStatusItem?.button?.isHidden == false
             && revealStatusItem?.button?.image != nil
+        #endif
     }
     var debugOrdinaryRevealButtonReservedWidth: CGFloat {
+        #if BLENNY_GROUPED_FALLBACK_TRIAL
+        groupedStatusContent?.reservesArrow == true ? Self.ordinaryStatusItemLength : 0
+        #else
         revealStatusItem?.length ?? 0
+        #endif
     }
     var debugOrdinaryRevealSlotMode: String {
+        #if BLENNY_GROUPED_FALLBACK_TRIAL
+        switch lastFallbackSlotAllocation {
+        case .reserved: return "reserved"
+        case .compact: return "compact"
+        default: return "absent"
+        }
+        #else
         guard revealStatusItem != nil else { return "absent" }
         return revealStatusItem?.length == Self.ordinaryStatusItemLength
             ? "reserved" : "compact"
+        #endif
     }
     var debugFallbackSlotSummary: String {
+        #if BLENNY_GROUPED_FALLBACK_TRIAL
+        return "session=\(fallbackDiagnosticSession) topology=single-status-item"
+            + " nativeOverflowUsable=\(nativeOverflow.isUsable)"
+            + " allocation=\(debugOrdinaryRevealSlotMode)"
+            + " hostFrame=\(Self.debugFrameSummary(statusItem.button?.window?.frame))"
+            + " hostAutosave=\(statusItem.autosaveName ?? "none")"
+            + " arrowVisible=\(groupedStatusContent?.arrow.isHidden == false)"
+            + " arrowEnabled=\(groupedStatusContent?.arrow.isEnabled == true)"
+            + " arrowClicks=[\(groupedStatusContent?.arrow.clickDiagnostic ?? "none")]"
+            + " fishClicks=[\(groupedStatusContent?.fish.clickDiagnostic ?? "none")]"
+            + " separateFallbackCreated=\(revealStatusItem != nil)"
+        #else
         let fishFrame = Self.debugFrameSummary(statusItem.button?.window?.frame)
         let fallbackFrame = Self.debugFrameSummary(revealStatusItem?.button?.window?.frame)
-        return "allocation=\(debugOrdinaryRevealSlotMode)"
+        return "session=\(fallbackDiagnosticSession)"
+            + " fallbackCreations=\(fallbackCreationCount)"
+            + " fallbackInstance=\(revealStatusItem == nil ? "none" : String(fallbackCreationCount))"
+            + " nativeOverflowUsable=\(nativeOverflow.isUsable)"
+            + " allocation=\(debugOrdinaryRevealSlotMode)"
             + " fishLength=\(statusItem.length) fishFrame=\(fishFrame)"
             + " fishAutosave=\(statusItem.autosaveName ?? "none")"
+            + " fishPreferred=\(debugPreferredPosition(statusItem))"
+            + " fallbackPreferred=\(debugPreferredPosition(revealStatusItem))"
             + " fallbackLength=\(revealStatusItem?.length ?? 0)"
             + " fallbackFrame=\(fallbackFrame)"
             + " fallbackAutosave=\(revealStatusItem?.autosaveName ?? "none")"
+        #endif
+    }
+
+    func debugRecordClickStage(_ message: String, id: UUID?, finished: Bool = false) {
+        debugClickCheck.record(id: id, stage: message, finished: finished)
+    }
+
+    var debugOwnControls: [DebugOwnControlEvidence] {
+        var result = [DebugOwnControlEvidence(role: "fish", item: statusItem)]
+        if let item = revealStatusItem {
+            result.append(DebugOwnControlEvidence(role: "fallback", item: item))
+        }
+        return result
+    }
+
+    #if DEBUG
+    var debugMoveFallback: (() -> Void)?
+    var debugRestoreFallback: (() -> Void)?
+
+    var debugFallbackNativeIdentity: FallbackNativeIdentity? {
+        guard !nativeOverflow.isUsable, let item = revealStatusItem,
+              item.autosaveName == "Item-1", item.length == Self.ordinaryStatusItemLength,
+              item.button?.window != nil, item.button?.isHidden == false,
+              statusItem.autosaveName == "Blenny.Fish",
+              statusItem.length == Self.ordinaryStatusItemLength,
+              statusItem.button?.window != nil, statusItem.button?.isHidden == false,
+              let session = UUID(uuidString: fallbackDiagnosticSession) else { return nil }
+        return FallbackNativeIdentity(pid: ProcessInfo.processInfo.processIdentifier,
+            session: session, instance: fallbackCreationCount)
+    }
+
+    @objc private func debugMoveFallbackAction() { debugMoveFallback?() }
+    @objc private func debugRestoreFallbackAction() { debugRestoreFallback?() }
+    #endif
+
+    func debugConfigureBoundaryCapture(directory: URL, capture: @escaping () -> Void) {
+        debugBoundaryDirectory = directory
+        debugBoundaryCapture = capture
+    }
+
+    func debugSetBoundaryCaptureBusy(_ busy: Bool) {
+        debugSaveBoundaryItem.isEnabled = !busy
+        debugSaveBoundaryItem.title = busy ? "Capturing Boundary…" : "Save Boundary Snapshot"
+    }
+
+    @objc private func debugArmClickCheck() {
+        debugClickCheck.arm()
+    }
+
+    @objc private func debugSaveBoundarySnapshot() {
+        debugBoundaryCapture?()
+    }
+
+    @objc private func debugOpenBoundarySnapshots() {
+        guard let directory = debugBoundaryDirectory,
+              FileManager.default.fileExists(atPath: directory.path) else { return }
+        NSWorkspace.shared.open(directory)
+    }
+
+    private func debugPreferredPosition(_ item: NSStatusItem?) -> String {
+        guard ProcessInfo.processInfo.operatingSystemVersionString.contains("26A5425a") else {
+            return "unsupported-runtime"
+        }
+        guard let item else { return "absent" }
+        let selector = NSSelectorFromString("_currentPreferredPosition")
+        guard let method = class_getInstanceMethod(type(of: item), selector),
+              let encoding = method_getTypeEncoding(method),
+              String(cString: encoding) == "f16@0:8" else { return "unsupported-contract" }
+        typealias Getter = @convention(c) (AnyObject, Selector) -> Float
+        let getter = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+        let value = getter(item, selector)
+        return value.isFinite ? String(value) : "unavailable"
     }
 
     private static func debugFrameSummary(_ frame: NSRect?) -> String {
@@ -462,11 +615,21 @@ final class StatusItemController: NSObject {
         return "\(frame.origin.x),\(frame.origin.y),\(frame.size.width),\(frame.size.height)"
     }
 
+    @objc private func copyFallbackSlotDiagnostic(_ sender: NSMenuItem) {
+        let summary = "Fallback slot: \(debugOrdinaryRevealSlotMode)\n\(debugFallbackSlotSummary)\n\(debugClickCheck.summary)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(summary, forType: .string)
+    }
+
     private func updateFallbackSlotDiagnosticItem() {
+        #if BLENNY_GROUPED_FALLBACK_TRIAL
+        fallbackSlotDiagnosticItem.title = "Fallback slot: grouped · \(debugOrdinaryRevealSlotMode)"
+        #else
         let fishFrame = Self.debugCompactFrameSummary(statusItem.button?.window?.frame)
         let fallbackFrame = Self.debugCompactFrameSummary(revealStatusItem?.button?.window?.frame)
         fallbackSlotDiagnosticItem.title = "Fallback slot: \(debugOrdinaryRevealSlotMode)"
             + " · fish=\(fishFrame) · fallback=\(fallbackFrame)"
+        #endif
     }
 
     private static func debugCompactFrameSummary(_ frame: NSRect?) -> String {
@@ -520,6 +683,14 @@ final class StatusItemController: NSObject {
                   ordinaryRevealItem.isEnabled == normalPresentation.canToggleReveal,
                   statusItem.isVisible,
                   statusItem.button?.isHidden == false else { return false }
+            #if BLENNY_GROUPED_FALLBACK_TRIAL
+            let showsFallback = expectedMode == "reserved" && normalPresentation.showsInlineArrow
+            guard revealStatusItem == nil, let content = groupedStatusContent,
+                  content.arrow.isHidden == !showsFallback,
+                  content.arrow.isEnabled == (showsFallback && normalPresentation.canToggleReveal),
+                  statusItem.length == (expectedMode == "reserved" ? 44 : 22),
+                  debugOrdinaryRevealHasDedicatedButton else { return false }
+            #else
             if expectedMode == "absent" {
                 guard revealStatusItem == nil else { return false }
             } else {
@@ -533,20 +704,36 @@ final class StatusItemController: NSObject {
                       button.isEnabled == (showsFallback && normalPresentation.canToggleReveal)
                     else { return false }
             }
+            #endif
         }
         return true
     }
     var debugOrdinaryRevealArrowOnLeft: Bool {
+        #if BLENNY_GROUPED_FALLBACK_TRIAL
+        guard let content = groupedStatusContent, content.reservesArrow else { return false }
+        content.layoutSubtreeIfNeeded()
+        return content.arrow.frame.midX < content.fish.frame.midX
+        #else
         guard let arrowFrame = revealStatusItem?.button?.window?.frame,
               let artworkFrame = statusItem.button?.window?.frame else { return false }
         return arrowFrame.midX < artworkFrame.midX
+        #endif
     }
     var debugOrdinaryRevealHasDedicatedButton: Bool {
+        #if BLENNY_GROUPED_FALLBACK_TRIAL
+        guard let content = groupedStatusContent else { return false }
+        return content.arrow !== content.fish
+            && content.arrow.target as? StatusItemController === self
+            && content.fish.target as? StatusItemController === self
+            && content.arrow.action == #selector(handleRevealStatusButton(_:))
+            && content.fish.action == #selector(handleNormalStatusButton(_:))
+        #else
         guard let arrow = revealStatusItem?.button else { return false }
         return arrow !== statusItem.button
             && arrow.target as? StatusItemController === self
             && arrow.action == #selector(handleRevealStatusButton(_:))
             && statusItem.button?.action == #selector(handleNormalStatusButton(_:))
+        #endif
     }
 
     func configureDebugRevealPrototype(
@@ -661,9 +848,42 @@ final class StatusItemController: NSObject {
         // Create the fallback before the first inventory. It is removed or
         // recreated only by the bounded native-overflow fallback tiers, never on
         // ordinary management transitions.
+        #if !(DEBUG && BLENNY_GROUPED_FALLBACK_TRIAL)
         _ = ensureRevealStatusItem()
+        #endif
         updateNormalButton()
     }
+
+    #if DEBUG && BLENNY_GROUPED_FALLBACK_TRIAL
+    private func ensureGroupedStatusContent(in button: NSStatusBarButton)
+        -> GroupedStatusItemContent {
+        if let groupedStatusContent { return groupedStatusContent }
+        let content = GroupedStatusItemContent()
+        content.fish.target = self
+        content.fish.action = #selector(handleNormalStatusButton(_:))
+        content.arrow.target = self
+        content.arrow.action = #selector(handleRevealStatusButton(_:))
+        for control in [content.fish, content.arrow] {
+            control.setAccessibilityCustomActions([
+                NSAccessibilityCustomAction(name: "Open Blenny menu", target: self,
+                    selector: #selector(openNormalMenu))
+            ])
+        }
+        button.addSubview(content)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: button.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: button.trailingAnchor),
+            content.topAnchor.constraint(equalTo: button.topAnchor),
+            content.bottomAnchor.constraint(equalTo: button.bottomAnchor)
+        ])
+        // Expose two native controls, not the otherwise empty host button.
+        button.setAccessibilityRole(.group)
+        button.setAccessibilityChildren([content.arrow, content.fish])
+        groupedStatusContent = content
+        return content
+    }
+    #endif
 
     private func ensureRevealStatusItem() -> NSStatusItem {
         if let revealStatusItem { return revealStatusItem }
@@ -671,6 +891,9 @@ final class StatusItemController: NSObject {
             withLength: Self.ordinaryStatusItemLength
         )
         revealStatusItem = item
+        #if DEBUG
+        fallbackCreationCount += 1
+        #endif
         item.button?.target = self
         item.button?.action = #selector(handleRevealStatusButton(_:))
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -683,7 +906,7 @@ final class StatusItemController: NSObject {
 
     private func configureMenu() {
         let openItem = NSMenuItem(title: "Open Blenny", action: #selector(openDiagnostics), keyEquivalent: "o")
-        let requestItem = NSMenuItem(title: "Accessibility Setup…", action: #selector(requestAccess), keyEquivalent: "")
+        let requestItem = NSMenuItem(title: "Set Up Accessibility…", action: #selector(requestAccess), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Blenny", action: #selector(quit), keyEquivalent: "q")
 
         for item in [
@@ -704,14 +927,45 @@ final class StatusItemController: NSObject {
         resumeManagingItem.isEnabled = false
         restorePreviousPolicyItem.isEnabled = false
         permissionItem.isEnabled = false
+        stopManagingItem.toolTip = "Release visibility restrictions. Applied order stays unchanged."
+        resumeManagingItem.toolTip = "Use your saved visibility settings."
+        restorePreviousPolicyItem.toolTip = "Restore the previous visibility settings. Order stays unchanged."
+        quitItem.toolTip = "Quit and release visibility restrictions. Applied order stays unchanged."
 
         menu.addItem(openItem)
         menu.addItem(refreshItem)
         menu.addItem(.separator())
         menu.addItem(managementStateItem)
         #if DEBUG
-        fallbackSlotDiagnosticItem.isEnabled = false
+        fallbackSlotDiagnosticItem.target = self
+        fallbackSlotDiagnosticItem.action = #selector(copyFallbackSlotDiagnostic(_:))
+        fallbackSlotDiagnosticItem.isEnabled = true
+        fallbackSlotDiagnosticItem.toolTip = "Click to copy the current fallback diagnostic."
         menu.addItem(fallbackSlotDiagnosticItem)
+        let diagnosticMenu = NSMenu(title: "Boundary Diagnostics")
+        diagnosticMenu.autoenablesItems = false
+        let arm = NSMenuItem(title: "Arm Next Click Check",
+            action: #selector(debugArmClickCheck), keyEquivalent: "")
+        let open = NSMenuItem(title: "Open Saved Snapshots",
+            action: #selector(debugOpenBoundarySnapshots), keyEquivalent: "")
+        for item in [arm, debugSaveBoundaryItem, open] {
+            item.target = self
+            diagnosticMenu.addItem(item)
+        }
+        #if DEBUG
+        let move = NSMenuItem(title: "Position Blenny Controls…",
+            action: #selector(debugMoveFallbackAction), keyEquivalent: "")
+        let restore = NSMenuItem(title: "Undo Control Placement",
+            action: #selector(debugRestoreFallbackAction), keyEquivalent: "")
+        for item in [move, restore] {
+            item.target = self
+            item.isEnabled = true
+            menu.addItem(item)
+        }
+        #endif
+        let diagnosticParent = NSMenuItem(title: "Boundary Diagnostics", action: nil, keyEquivalent: "")
+        diagnosticParent.submenu = diagnosticMenu
+        menu.addItem(diagnosticParent)
         #endif
         menu.addItem(ordinaryRevealItem)
         menu.addItem(resumeManagingItem)
@@ -872,6 +1126,11 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func toggleOrdinaryReveal() {
+        #if DEBUG
+        debugDispatchClickCheckID = debugDispatchClickCheckID
+            ?? debugClickCheck.begin(source: "menu", event: "menu action")
+        defer { debugDispatchClickCheckID = nil }
+        #endif
         fallbackSlotCompaction.beginUserRevealAttempt()
         onToggleOrdinaryReveal()
     }

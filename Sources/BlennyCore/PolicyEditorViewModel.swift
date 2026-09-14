@@ -16,6 +16,22 @@ public enum AccessibilityOnboardingPolicy {
     }
 }
 
+/// Retains a grant event even when presentation reads trust before activation.
+public struct AccessibilityGrantRefreshState: Sendable {
+    public private(set) var pending = false
+    private var previousTrust: Bool?
+
+    public init() {}
+
+    public mutating func observe(trusted: Bool) {
+        if !trusted { pending = false }
+        else if previousTrust == false { pending = true }
+        previousTrust = trusted
+    }
+
+    public mutating func didBeginRefresh() { pending = false }
+}
+
 public enum AccessibilityPermissionRefreshPolicy {
     public static func shouldRefresh(
         previouslyTrusted: Bool?,

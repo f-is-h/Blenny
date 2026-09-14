@@ -1566,7 +1566,7 @@ public struct OrderingPlan: Codable, Equatable, Sendable {
         id: UUID = UUID()
     ) throws -> OrderingPlan {
         try snapshot.validate()
-        guard (1...maximumReorderingTargets).contains(orderedSubjects.count),
+        guard (0...maximumReorderingTargets).contains(orderedSubjects.count),
               Set(orderedSubjects).count == orderedSubjects.count else {
             throw OrderingError.invalidSelection
         }
@@ -1616,8 +1616,7 @@ public struct OrderingPlan: Codable, Equatable, Sendable {
         case 4:
             targets.isEmpty && configurationTargets == nil
                 && configurationSubjectTargets.map {
-                    (1...Self.maximumReorderingTargets).contains($0.count)
-                        && !$0.isEmpty
+                    (0...Self.maximumReorderingTargets).contains($0.count)
                         && $0.flatMap(\.keys).count <= Self.maximumConfigurationKeys
                 } == true
         default: false
@@ -1740,9 +1739,9 @@ public struct OrderingPlan: Codable, Equatable, Sendable {
         }
         if configurationPlan {
             let targetKeys = Set(configurationKeyTargets.map(\.key))
-            try baseline.validateConfigurationProcessScope(
-                for: targetKeys, against: snapshot
-            )
+            if !targetKeys.isEmpty {
+                try baseline.validateConfigurationProcessScope(for: targetKeys, against: snapshot)
+            }
             if schemaVersion == 3 {
                 let resolved = try OrderingConfigurationIdentityResolver.resolve(snapshot: snapshot)
                 for target in configurationTargets ?? [] {
@@ -2061,10 +2060,11 @@ public struct OrderingPlan: Codable, Equatable, Sendable {
         snapshot: OrderingSnapshot,
         orderedSubjects: [OrderingSubjectID]
     ) throws -> [OrderingConfigurationSubjectTarget] {
-        guard (1...maximumReorderingTargets).contains(orderedSubjects.count),
+        guard (0...maximumReorderingTargets).contains(orderedSubjects.count),
               Set(orderedSubjects).count == orderedSubjects.count else {
             throw OrderingError.invalidSelection
         }
+        if orderedSubjects.isEmpty { return [] }
         let applications = try OrderingConfigurationIdentityResolver.resolve(snapshot: snapshot)
         let systems = try OrderingSystemConfigurationIdentityResolver.resolve(snapshot: snapshot)
 

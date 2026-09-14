@@ -1,5 +1,9 @@
 # Blenny
 
+> Version 0.10.0 completes the locally accepted interface, ordering and unified Undo milestone.
+> See [the release record](docs/RELEASE_0.10.0.md) for evidence and remaining limits.
+
+
 Blenny is a minimal, native menu bar organizer for macOS 27 and later. It uses
 three explicit intent areas:
 
@@ -8,7 +12,7 @@ three explicit intent areas:
   a bounded reveal session.
 - **Hidden** items stay out of ordinary reveal sessions.
 
-Policy is owned at the application bundle level. The current experimental 0.9.0
+Policy is owned at the application bundle level. The current experimental 0.10.0
 configuration also retains reviewed preferred-position changes for attributable
 third-party owners. Every configured key associated with one owner moves as a
 block, and the same serial coordinator, durable receipt and bounded verification
@@ -16,9 +20,9 @@ contract protect policy and ordering writes.
 
 ## Current status
 
-Version `0.9.0` completed as a local experimental milestone on 2026-09-12.
+Version `0.10.0` completed as a local experimental milestone on 2026-09-15.
 Verification is recorded in
-[the 0.9.0 release record](docs/RELEASE_0.9.0.md). It is not a distribution or
+[the 0.10.0 release record](docs/RELEASE_0.10.0.md). It is not a distribution or
 public-release candidate.
 
 Owner-operated testing on macOS 27.0 build `26A5425a` confirms the current
@@ -34,16 +38,20 @@ Menu retain their separately attributed experimental ordering route. The native
 overflow arrow has no established writable ordering identity, so Blenny does not
 guarantee that the fish or any managed item remains adjacent to it.
 
-Version 0.10.0 focuses on final interface, copy and usability refinement, starting
-with an evidence-based review before implementation. Distribution requirements
-remain gates for the first public source and binary
-release candidate is scheduled for 0.11.0. Keeping one canonical repository is
-the accepted publication model; changing repository visibility or publishing
-any ref remains a separate action.
+In the 0.10.0 ordering-enabled build, **Position Blenny Controls…** in Blenny's menu
+places its double arrow and fish at the configured Revealable/Visible boundary,
+with the arrow on the left. The saved placement stays after Stop or Quit;
+**Undo Control Placement** restores their previous positions independently of
+ordinary ordering Undo. Once enabled, placement follows successful Organize Apply
+and ordering Undo; Undo Control Placement turns this adjustment off. Expansion and collapse do
+not reposition it, and a fixed screen coordinate is not promised.
 
-Detailed current evidence and historical candidate results are in
-[the 0.9.0 technical spike](docs/TECH_SPIKE_0.9.0.md) and
-[the historical development notes](docs/HISTORICAL_DEVELOPMENT_NOTES.md).
+Version 0.11.0 begins with permissions/onboarding and final UI polish, followed
+by the remaining distribution gates. One canonical repository remains the
+publication model; changing visibility or publishing any ref is a separate action.
+Current evidence is in [the 0.10.0 technical spike](docs/TECH_SPIKE_0.10.0.md).
+Earlier results remain in [the 0.9.0 spike](docs/TECH_SPIKE_0.9.0.md) and
+[the historical notes](docs/HISTORICAL_DEVELOPMENT_NOTES.md).
 
 ## Known limitation
 
@@ -64,7 +72,7 @@ All system mutation runs through one serial writer. A reviewed change uses fresh
 identity and configuration checks, a durable private recovery record, one bounded
 verification and bounded rollback. Stop and Quit release Blenny's active
 visibility restrictions while retaining a successfully committed user order.
-Explicit Undo restores the recorded ordering baseline. Incomplete writes remain
+Undo Changes reverses the last successful Apply, including visibility and ordering changes. It is single-level Undo. Incomplete writes remain
 recoverable and unexpected target drift fails closed.
 
 ## Repository layout
@@ -113,3 +121,31 @@ development tool, not part of the shipped application.
 License adoption and distribution notices remain follow-up work after the
 0.10.0 interface review. No license files are tracked in this milestone. The project is a clean implementation and
 does not use or link Ice or Thaw code or binaries.
+
+## Using Blenny
+
+Drag icons in Organize to edit your draft, then choose Apply. Discard Changes
+returns to the accepted configuration. Icons belonging to one app move together.
+Use an icon's context menu or accessibility actions to move it without dragging;
+Item controls opens the complete selection controls.
+
+Visible stays available, Revealable appears when expanded, and Hidden is excluded
+from expansion. macOS may still put Visible items into its own overflow.
+Stop and Quit release visibility controls but retain accepted ordering. Resume
+uses saved visibility settings. Undo Changes reverses the last successful Apply, including visibility and ordering. If the menu bar changed outside Blenny, Replace Undo & Apply
+explicitly replaces the previous Undo history before applying the draft.
+
+Clock is fixed: it cannot be sorted or moved between groups. On the tested macOS
+27 build, clicking Clock cannot open Notification Center while Blenny manages
+visibility; swipe left from the trackpad's right edge instead. Siri, Time Machine
+and Control Center sorting remains unverified. Exact coordinates and adjacent
+arrows are not guaranteed. See [known limitations](docs/KNOWN_LIMITATIONS.md).
+
+### Move Blenny's own icon
+
+Hold Command and drag the fish in the macOS menu bar. macOS controls its final
+placement; Blenny does not guarantee adjacency to the overflow arrow.
+
+If saved control positions have changed, **Position Blenny Controls** can review
+a new placement and replace its stale Undo baseline. The previous record is
+archived; Undo Control Placement then restores the positions before that action.

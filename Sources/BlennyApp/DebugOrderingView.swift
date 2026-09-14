@@ -118,6 +118,8 @@ struct DebugExactSystemBoardItem: Identifiable {
 
 struct DebugOrderingConfigurationRequest: Equatable {
     let orderedSubjects: [OrderingSubjectID]
+    let originalOrderedSubjects: [OrderingSubjectID]
+    let originalPolicies: [OrderingSubjectID: MenuBarBundlePolicy]
     let draftPolicies: [String: MenuBarBundlePolicy]
     let draftSubjectPolicies: [OrderingSubjectID: MenuBarBundlePolicy]
     let sourceCandidateGeneration: UUID
@@ -125,10 +127,31 @@ struct DebugOrderingConfigurationRequest: Equatable {
 
     init(draft: OrderingBoardLayoutDraft) {
         orderedSubjects = draft.physicalSubjects
+        originalOrderedSubjects = draft.resetting().physicalSubjects
+        originalPolicies = draft.resetting().draftSubjectPolicies
         draftPolicies = draft.draftPolicies
         draftSubjectPolicies = draft.draftSubjectPolicies
         sourceCandidateGeneration = draft.candidateGeneration
         sourceLayoutGeneration = draft.layoutGeneration
+    }
+
+    /// Cross-area visibility changes remain valid for an owner without sorting support.
+    /// Only an explicitly changed relative order within one unchanged area needs keys.
+    func unavailableOrderChanges(eligibleSubjects: Set<OrderingSubjectID>, blenny: String) -> [OrderingSubjectID] {
+        orderedSubjects.filter { subject in
+            guard !eligibleSubjects.contains(subject), subject != .application(blenny),
+                  originalPolicies[subject] == draftSubjectPolicies[subject],
+                  let before = originalOrderedSubjects.firstIndex(of: subject),
+                  let after = orderedSubjects.firstIndex(of: subject) else { return false }
+            return orderedSubjects.contains { other in
+                guard other != .application(blenny),
+                      originalPolicies[other] == originalPolicies[subject],
+                      draftSubjectPolicies[other] == draftSubjectPolicies[subject],
+                      let old = originalOrderedSubjects.firstIndex(of: other),
+                      let new = orderedSubjects.firstIndex(of: other) else { return false }
+                return (before < old) != (after < new)
+            }
+        }
     }
 
     var orderedBundleIdentifiers: [String] {
@@ -190,6 +213,9 @@ final class DebugOrderingPresentation: ObservableObject {
     @Published var rows: [DebugOrderingRow] = []
     @Published var preview: DebugOrderingPreview?
     @Published var message: String?
+    @Published var technicalDetail: String?
+    @Published var requiresUndoReplacement = false
+    @Published var requiresObservationRefresh = false
     @Published var isError = false
     @Published var isBusy = false
     @Published var hasRecovery = false
@@ -199,6 +225,7 @@ final class DebugOrderingPresentation: ObservableObject {
     @Published var canRefresh = true
     @Published var canApply = false
 
+    var onDraftChanged: (PolicyEditorViewModel) -> Void = { _ in }
     var onRefresh: () -> Void = {}
     var onPreview: ([String]) -> Void = { _ in }
     var onReorder: ([String]) -> Void = { _ in }
@@ -207,6 +234,13 @@ final class DebugOrderingPresentation: ObservableObject {
     var onRestore: () -> Void = {}
     var onDiscard: () -> Void = {}
     var onOpenDataAccess: () -> Void = {}
+
+    func finishSuccessfulRead() {
+        isError = false
+        needsDataAccess = false
+        technicalDetail = nil
+        message = "Drag to arrange, then choose Apply."
+    }
 
     func requestRefresh() { onRefresh() }
     func requestPreview(for bundleIdentifiers: [String]) { onPreview(bundleIdentifiers) }
@@ -231,6 +265,8 @@ final class DebugOrderingPresentation: ObservableObject {
 struct DebugOrderingStatusBar: View {
     @ObservedObject var presentation: DebugOrderingPresentation
     var managementEnabled: Bool? = nil
+    var hasDraftChanges = false
+    @State private var showsDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -243,42 +279,38 @@ struct DebugOrderingStatusBar: View {
                 }
                 Spacer(minLength: 8)
                 orderingButtons
-            }
-
-            if let preview = presentation.preview {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(preview.visibleScope)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    orderLine("Before", values: preview.beforeOrder)
-                    orderLine("After", values: preview.afterOrder)
-                    Text(preview.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                if let detail = presentation.technicalDetail, !detail.isEmpty {
+                    Button("Details…") { showsDetails = true }
+                        .popover(isPresented: $showsDetails) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Menu bar order details").font(.headline)
+                                ScrollView {
+                                    Text(detail)
+                                        .font(.callout)
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .frame(maxHeight: 240)
+                                Button("Copy details") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(detail, forType: .string)
+                                }
+                            }
+                            .padding(16)
+                            .frame(width: 440)
+                        }
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(
-                    "Ordering preview. Before: \(preview.beforeOrder.joined(separator: ", ")). After: \(preview.afterOrder.joined(separator: ", "))."
-                )
             }
 
-            if let message = presentation.message, !message.isEmpty {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(presentation.isError ? .red : .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                    .accessibilityLabel(message)
-            }
-            if presentation.hasObservation {
-                Text(managementEnabled == true
-                    ? "All areas can be arranged as a local configuration. Apply checks which mapped owners can be written and reports the rest."
-                    : "All areas can be arranged as a local configuration. Missing mapping and unverified observation stay informational until Apply.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(statusMessage)
+                .font(.callout)
+                .lineLimit(2)
+                .help(statusMessage)
+                .foregroundStyle(presentation.isError ? .red : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(minHeight: 17, alignment: .leading)
+                .textSelection(.enabled)
+
         }
         .controlSize(.small)
         .padding(.horizontal, 10)
@@ -289,6 +321,13 @@ struct DebugOrderingStatusBar: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(statusOutline, lineWidth: 0.75)
         }
+    }
+
+    private var statusMessage: String {
+        if let message = presentation.message, !message.isEmpty { return message }
+        if hasDraftChanges { return "Changes not applied." }
+        if presentation.hasObservation { return "No pending changes." }
+        return "Refresh to read the current order."
     }
 
     @ViewBuilder
@@ -312,45 +351,26 @@ struct DebugOrderingStatusBar: View {
     }
 
     private var statusTitle: String {
-        if presentation.hasPendingRecovery {
-            return "Restore needed before another order or policy apply"
-        }
-        if presentation.preview != nil {
-            return "Review one combined area and order change"
-        }
-        if presentation.hasObservation {
-            let mapped = presentation.rows.filter {
-                $0.isEligible
-            }.count
-            return "Configuration order ready · \(mapped) applications available to arrange"
-        }
-        if presentation.rows.contains(where: { $0.observedX != nil }) {
-            return "Observed placement shown; ordering eligibility is unverified"
-        }
-        return "Menu-bar placement and ordering eligibility are unverified"
+        if presentation.isBusy { return "Working…" }
+        if presentation.requiresObservationRefresh { return "Refresh needed" }
+        if presentation.hasPendingRecovery { return "Recovery needed" }
+        if presentation.isError { return "Needs attention" }
+        if presentation.requiresUndoReplacement { return "Replace previous Undo?" }
+        return presentation.hasObservation ? "Menu bar order" : "Order unavailable"
     }
 
     @ViewBuilder
     private var orderingButtons: some View {
-        if presentation.preview != nil {
-            Button("Cancel", action: presentation.discardPreview)
-                .disabled(presentation.isBusy)
-            Button("Apply Changes", action: applyPreview)
-                .buttonStyle(.borderedProminent)
-                .disabled(!canApply)
-        }
         if presentation.hasRecovery {
-            Button(presentation.hasPendingRecovery ? "Restore Order" : "Undo Order", action: presentation.requestRestore)
-                .disabled(presentation.isBusy)
-                .help("Restore the exact preferred-position values in the ordering recovery receipt.")
+            Button(presentation.hasPendingRecovery ? "Recover Changes" : "Undo Changes", action: presentation.requestRestore)
+                .disabled(presentation.isBusy || hasDraftChanges)
+                .help(presentation.hasPendingRecovery
+                    ? "Recover an unfinished change."
+                    : "Undo the last Apply, including visibility and order changes.")
         }
         if presentation.needsDataAccess {
-            Button("Data Access…", action: presentation.onOpenDataAccess)
-                .help("Open Privacy & Security > Files & Folders so Blenny can read the menu-bar preference container used for ordering review.")
+            Button("Open System Settings", action: presentation.onOpenDataAccess)
         }
-        Button("Refresh", action: presentation.requestRefresh)
-            .disabled(!presentation.canRefresh || presentation.isBusy)
-            .help("Run one bounded, read-only observation of the current menu-bar order.")
     }
 
     private func orderLine(_ label: String, values: [String]) -> some View {

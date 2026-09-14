@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 
 /// Private recovery storage only. This actor never calls a system-layout API.
-public actor OrderingRecoveryStore: OrderingRecoveryStoring {
+public actor FallbackPositionRecoveryStore: FallbackPositionRecoveryStoring {
     private let directory: URL
     private var directoryDescriptor: Int32 = -1
     private var lease: Int32 = -1
@@ -28,7 +28,7 @@ public actor OrderingRecoveryStore: OrderingRecoveryStoring {
         defer { if closesDirectory { close(boundDirectory) } }
 
         let descriptor = openat(
-            boundDirectory, "ordering.lock",
+            boundDirectory, "fallback.lock",
             O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600
         )
         guard descriptor >= 0 else {
@@ -61,7 +61,7 @@ public actor OrderingRecoveryStore: OrderingRecoveryStoring {
         }
     }
 
-    public func load() throws -> OrderingRecoveryReceipt? {
+    public func load() throws -> FallbackPositionReceipt? {
         let descriptor: Int32
         let closesAfterRead: Bool
         if directoryDescriptor >= 0 {
@@ -77,38 +77,21 @@ public actor OrderingRecoveryStore: OrderingRecoveryStoring {
         return try loadReceipt(directoryDescriptor: descriptor)
     }
 
-    public func save(_ receipt: OrderingRecoveryReceipt) throws {
+    public func save(_ receipt: FallbackPositionReceipt) throws {
         guard lease >= 0, directoryDescriptor >= 0 else {
             throw OrderingTransactionError.writerOccupied
         }
         try validateDirectory(descriptor: directoryDescriptor)
         try receipt.validate()
         if let existing = try loadReceipt(directoryDescriptor: directoryDescriptor) {
-            if existing.schemaVersion == 1 || receipt.schemaVersion == 1 {
-                guard existing.plan == receipt.plan else {
-                    throw OrderingTransactionError.recoveryRequired
-                }
-            } else {
-                let verifiedCommitAdvancesUndo = existing.phase == .applyIntent
-                    && existing.plan == receipt.plan
-                    && existing.revision == receipt.revision
-                    && existing.pendingValues != nil
-                    && receipt.phase == .applied
-                    && receipt.configurationVerified == true
-                    && receipt.pendingValues == nil
-                    && receipt.committedValues == existing.pendingValues
-                    && receipt.originalValues == existing.committedValues
-                guard existing.sessionIdentifier == receipt.sessionIdentifier,
-                      (verifiedCommitAdvancesUndo || existing.originalValues?.allSatisfy({
-                          receipt.originalValues?[$0.key] == $0.value
-                      }) == true),
-                      (receipt.revision ?? 0) >= (existing.revision ?? 0) else {
-                    throw OrderingTransactionError.recoveryRequired
-                }
+            guard existing.permitsSuccessor(receipt) else {
+                throw OrderingTransactionError.recoveryRequired
             }
+        } else if receipt.phase != .applyIntent {
+            throw OrderingTransactionError.invalidReceipt
         }
         try write(
-            receipt, name: "ordering-recovery.json",
+            receipt, name: "fallback-recovery.json",
             directoryDescriptor: directoryDescriptor
         )
         guard try loadReceipt(directoryDescriptor: directoryDescriptor) == receipt else {
@@ -116,76 +99,54 @@ public actor OrderingRecoveryStore: OrderingRecoveryStoring {
         }
     }
 
-    public func supersedeClean(
-        _ existing: OrderingRecoveryReceipt,
-        with replacement: OrderingRecoveryReceipt
-    ) async throws {
+    public func supersedeCommitted(_ existing: FallbackPositionReceipt,
+                                   with replacement: FallbackPositionReceipt, reviewedDrift: Bool) throws {
         guard lease >= 0, directoryDescriptor >= 0 else {
             throw OrderingTransactionError.writerOccupied
         }
-        try validateDirectory(descriptor: directoryDescriptor)
         try existing.validate()
         try replacement.validate()
-        guard (existing.schemaVersion == 2 || existing.schemaVersion == 3 || existing.schemaVersion == 4),
-              existing.phase == .applied, !existing.isPendingRestoration,
-              (replacement.schemaVersion == 2 || replacement.schemaVersion == 3 || replacement.schemaVersion == 4),
-              replacement.phase == .applyIntent,
-              replacement.isPendingRestoration,
-              replacement.sessionIdentifier != existing.sessionIdentifier,
-              replacement.revision == 1,
+        guard existing.phase == .applied, !existing.isPendingRestoration,
+              replacement.phase == .applyIntent, replacement.persistsAfterQuit == true,
+              existing.id != replacement.id,
+              (reviewedDrift || existing.delta.canBeReplaced(by: replacement.delta)),
               try loadReceipt(directoryDescriptor: directoryDescriptor) == existing else {
             throw OrderingTransactionError.recoveryRequired
         }
-
-        // The archive is durable and verified before the active record changes.
-        // A failure before replacement leaves the old ledger active; a failure
-        // acknowledging the atomic rename may leave the new intent active, so
-        // the coordinator inspects the active record once before reporting.
-        try write(
-            existing, name: "ordering-last-superseded.json",
-            directoryDescriptor: directoryDescriptor
-        )
-        guard try loadReceipt(
-            name: "ordering-last-superseded.json",
-            directoryDescriptor: directoryDescriptor
-        ) == existing else {
+        try write(existing, name: "fallback-last-superseded.json", directoryDescriptor: directoryDescriptor)
+        guard try loadReceipt(name: "fallback-last-superseded.json",
+                              directoryDescriptor: directoryDescriptor) == existing else {
             throw OrderingTransactionError.receiptStorageUnavailable
         }
-        try write(
-            replacement, name: "ordering-recovery.json",
-            directoryDescriptor: directoryDescriptor
-        )
+        try write(replacement, name: "fallback-recovery.json", directoryDescriptor: directoryDescriptor)
         guard try loadReceipt(directoryDescriptor: directoryDescriptor) == replacement else {
             throw OrderingTransactionError.receiptStorageUnavailable
         }
     }
 
-    public func complete(_ receipt: OrderingRecoveryReceipt) throws {
+    public func complete(_ receipt: FallbackPositionReceipt) throws {
         guard lease >= 0, directoryDescriptor >= 0,
-              receipt.phase == .preferencesRestored,
+              receipt.phase == .restored,
               try completionMatches(receipt, existing: loadReceipt(directoryDescriptor: directoryDescriptor)) else {
             throw OrderingTransactionError.invalidReceipt
         }
         try validateDirectory(descriptor: directoryDescriptor)
         try write(
-            receipt, name: "ordering-last-restored.json",
+            receipt, name: "fallback-last-restored.json",
             directoryDescriptor: directoryDescriptor
         )
-        guard unlinkat(directoryDescriptor, "ordering-recovery.json", 0) == 0 else {
+        guard unlinkat(directoryDescriptor, "fallback-recovery.json", 0) == 0 else {
             throw OrderingTransactionError.receiptStorageUnavailable
         }
         try synchronizeDirectory(descriptor: directoryDescriptor)
     }
 
     private func completionMatches(
-        _ receipt: OrderingRecoveryReceipt,
-        existing: OrderingRecoveryReceipt?
+        _ receipt: FallbackPositionReceipt,
+        existing: FallbackPositionReceipt?
     ) -> Bool {
-        guard let existing, existing.schemaVersion == receipt.schemaVersion else { return false }
-        if receipt.schemaVersion == 1 { return existing.plan == receipt.plan }
-        return existing.sessionIdentifier == receipt.sessionIdentifier
-            && existing.originalValues == receipt.originalValues
-            && existing.revision == receipt.revision
+        guard let existing else { return false }
+        return existing.phase == .restored && existing == receipt
     }
 
     private func openDirectory(create: Bool) throws -> Int32? {
@@ -230,9 +191,9 @@ public actor OrderingRecoveryStore: OrderingRecoveryStoring {
 
     private func loadReceipt(
         directoryDescriptor: Int32
-    ) throws -> OrderingRecoveryReceipt? {
+    ) throws -> FallbackPositionReceipt? {
         try loadReceipt(
-            name: "ordering-recovery.json",
+            name: "fallback-recovery.json",
             directoryDescriptor: directoryDescriptor
         )
     }
@@ -240,7 +201,7 @@ public actor OrderingRecoveryStore: OrderingRecoveryStoring {
     private func loadReceipt(
         name: String,
         directoryDescriptor: Int32
-    ) throws -> OrderingRecoveryReceipt? {
+    ) throws -> FallbackPositionReceipt? {
         try validateDirectory(descriptor: directoryDescriptor)
         var attributes = stat()
         if fstatat(
@@ -276,7 +237,7 @@ public actor OrderingRecoveryStore: OrderingRecoveryStoring {
         }
         try validateDirectory(descriptor: directoryDescriptor)
         do {
-            let receipt = try JSONDecoder().decode(OrderingRecoveryReceipt.self, from: data)
+            let receipt = try JSONDecoder().decode(FallbackPositionReceipt.self, from: data)
             try receipt.validate()
             return receipt
         } catch {
@@ -285,7 +246,7 @@ public actor OrderingRecoveryStore: OrderingRecoveryStoring {
     }
 
     private func write(
-        _ receipt: OrderingRecoveryReceipt,
+        _ receipt: FallbackPositionReceipt,
         name: String,
         directoryDescriptor: Int32
     ) throws {
@@ -296,7 +257,7 @@ public actor OrderingRecoveryStore: OrderingRecoveryStoring {
         guard data.count <= maximumReceiptBytes else {
             throw OrderingTransactionError.receiptStorageUnavailable
         }
-        let temporary = ".ordering-\(UUID().uuidString).tmp"
+        let temporary = ".fallback-\(UUID().uuidString).tmp"
         let descriptor = openat(
             directoryDescriptor, temporary,
             O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600

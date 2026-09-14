@@ -2,9 +2,12 @@
 
 > A minimal, native menu bar organizer for macOS 27 and later.
 
+> Version 0.10.0 completes the locally accepted interface, ordering and unified Undo milestone.
+> See [the release record](docs/RELEASE_0.10.0.md). The 0.9.0 history and tag are unchanged.
+
 ## Current status
 
-Current phase: `0.9.0` complete as a local experimental milestone on 2026-09-12.
+Current phase: `0.10.0` complete as a local experimental milestone on 2026-09-15.
 
 Version 0.9.0 integrates reviewed menu-bar ordering into the existing three-state
 Organize Board as a local experimental milestone. Its implementation scope is
@@ -31,12 +34,32 @@ owner accepts this as a documented limitation and rejects automatic Stop/Resume
 around Clock clicks. See [Known limitations](docs/KNOWN_LIMITATIONS.md) and the
 [technical report](docs/NOTIFICATION_CENTER_TECHNICAL_REPORT_2026-09-12.md).
 
-Version 0.10.0 focuses on final interface, copy and usability refinement. Begin
-with a concrete review and owner-approved recommendations before implementation.
-License adoption remains follow-up work after that review. Signing, notarization
-and all distribution requirements remain gates for the first public source and
-binary release candidate in 0.11.0. Blenny retains one canonical repository;
-publication and any push remain separate, explicit actions.
+Version 0.10.0 closes the owner-accepted compact UI, supported ordering, separate
+native control placement, unified last-Apply Undo and bounded automatic refresh.
+The owner confirms normal operation on the tested build. Version 0.11.0 begins
+with permission/onboarding refinement, final UI polish and distribution readiness.
+License adoption, signing, notarization and publication remain unfulfilled gates;
+ordinary Release still excludes ordering. See the 0.10.0 release record for the
+explicit acceptance matrix and limits.
+
+The separately gated grouped-control trial failed attended acceptance: its
+left-click arrow action is not delivered and grouping does not establish a
+Visible/Revealable boundary. It remains excluded from ordinary builds and is
+not an accepted fix. A separate native-button baseline now provides explicitly
+armed click checks and read-only boundary exports for the owner-approved next
+round. The owner-operated fallback-only move reaches the requested boundary;
+saved snapshots and the completed receipt confirm exact configuration restoration.
+The 0.10.0 ordering-enabled build now exposes explicit persistent arrow placement
+and independent Undo. Stop/Quit retain accepted placement; unfinished writes and
+legacy temporary experiments remain recoverable. The owner subsequently included
+the fish in explicit boundary placement; an already separating arrow retains its
+saved value. Unattended restart and broader lifecycle compatibility remain 0.11.0 validation items. See
+the 0.10.0 spike for evidence and remaining work.
+
+The owner subsequently accepts fish placement. An accepted control placement
+now follows successful explicit Apply and ordering Undo using the latest
+partition boundary. Expansion/collapse do not write positions. A failure in
+this bounded follow-up is reported separately from committed application changes.
 
 ## Current product contract
 
@@ -47,8 +70,8 @@ as one block. Reviewed policy and ordering mutations share one serial writer,
 fresh preflight, durable private recovery records, bounded verification and
 bounded rollback. Unexpected identity or target drift fails closed.
 
-Successful order changes persist through Stop and Quit; explicit Undo restores
-the recorded ordering baseline. Stop and Quit release process-owned visibility
+Successful order changes persist through Stop and Quit; explicit Undo Changes restores
+visibility and positions from immediately before the latest successful Apply. Stop and Quit release process-owned visibility
 restrictions. Retained preferred positions do not guarantee visibility after
 management ends or placement relative to the native overflow arrow.
 

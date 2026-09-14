@@ -139,9 +139,12 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
     private static let maximumPinnedBinaryBytes = 32 * 1_024 * 1_024
 
     private let contextProvider: ContextProvider
+    private let fallbackIdentityProvider: (@MainActor @Sendable () -> FallbackNativeIdentity?)?
 
-    public init(contextProvider: @escaping ContextProvider) {
+    public init(contextProvider: @escaping ContextProvider,
+                fallbackIdentityProvider: (@MainActor @Sendable () -> FallbackNativeIdentity?)? = nil) {
         self.contextProvider = contextProvider
+        self.fallbackIdentityProvider = fallbackIdentityProvider
     }
 
     static func sandboxContainerSourceIdentityForTesting(
@@ -331,7 +334,8 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
         expecting snapshot: OrderingSnapshot,
         requiresSingleDisplay: Bool,
         requiresGeometry: Bool = true,
-        configurationKeys: Set<String>? = nil
+        configurationKeys: Set<String>? = nil,
+        fallbackIdentity: FallbackNativeIdentity? = nil
     ) async throws {
         try snapshot.validate()
         let previous = try snapshot.table()
@@ -405,6 +409,15 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
                 guard try Self.readCorroboratedGroup() == snapshot.group else {
                     throw MacOS27MenuBarOrderingBackendError.staleSnapshot
                 }
+                if let fallbackIdentity {
+                    guard self.fallbackIdentityProvider?() == fallbackIdentity,
+                          platform.processes.filter({ $0.bundleIdentifier == "xyz.fi5h.blenny" }).count == 1,
+                          platform.processes.contains(where: {
+                              $0.bundleIdentifier == "xyz.fi5h.blenny" && $0.pid == fallbackIdentity.pid
+                          }) else {
+                        throw OrderingTransactionError.recoveryIdentityConflict
+                    }
+                }
                 observation.resetForWrite()
                 try Self.write(table: table)
             }
@@ -416,6 +429,43 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
         // A layout event normally ends this wait early. The deadline is only a
         // bounded handoff to the coordinator's single independent capture.
         await observation.wait(until: Self.layoutEventDeadline)
+    }
+}
+
+extension MacOS27MenuBarOrderingBackend: FallbackPositionWriting {
+    public func fallbackIdentity() async throws -> FallbackNativeIdentity {
+        guard let identity = await fallbackIdentityProvider?() else {
+            throw OrderingTransactionError.recoveryIdentityConflict
+        }
+        return identity
+    }
+
+    public func writeFallbackPosition(
+        _ table: [String: OrderingValue], expecting snapshot: OrderingSnapshot,
+        identity: FallbackNativeIdentity
+    ) async throws {
+        let previous = try snapshot.table()
+        let changed = Set(previous.keys.filter { previous[$0] != table[$0] })
+        guard Set(previous.keys) == Set(table.keys),
+              !changed.isEmpty,
+              changed.isSubset(of: [FallbackPositionDelta.key, FallbackPositionDelta.fishKey]) else {
+            throw MacOS27MenuBarOrderingBackendError.invalidWriteScope
+        }
+        for key in changed {
+            guard let original = previous[key], let proposed = table[key] else {
+                throw MacOS27MenuBarOrderingBackendError.invalidWriteScope
+            }
+            _ = try FallbackPositionDelta(original: original, proposed: proposed)
+        }
+        let owners = snapshot.afterProcesses.filter { $0.bundleIdentifier == "xyz.fi5h.blenny" }
+        guard owners.count == 1, owners[0].pid == identity.pid,
+              snapshot.beforeProcesses.contains(owners[0]) else {
+            throw OrderingTransactionError.recoveryIdentityConflict
+        }
+        let scope = Self.configurationOwnerKeys(for: Array(changed),
+            table: previous, processes: snapshot.afterProcesses)
+        try await performWrite(table, expecting: snapshot, requiresSingleDisplay: true,
+            requiresGeometry: false, configurationKeys: scope, fallbackIdentity: identity)
     }
 }
 
