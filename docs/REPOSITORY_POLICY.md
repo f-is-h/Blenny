@@ -1,10 +1,10 @@
 # Repository policy
 
-Blenny uses one canonical repository. It remains private during the engineering milestones and is intended to become public with the first `0.11.x` release candidate.
+Blenny uses one canonical repository. It remains private during the engineering milestones and is intended to become public with the first `0.12.x` release candidate.
 
 ## License and publication scope
 
-License adoption, notices and app packaging follow the 0.10.0 interface review. Apache-2.0
+License adoption, notices and app packaging are 0.12.0 public-release gates. Apache-2.0
 remains the owner's preferred direction, but this milestone includes no LICENSE
 or NOTICE files in Git or app packages. Owner-only drafts may remain locally
 excluded. Complete the licensing work before public distribution.

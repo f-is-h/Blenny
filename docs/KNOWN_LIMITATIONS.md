@@ -18,12 +18,21 @@ so they do not guarantee continued invisibility or arrow-relative placement.
 
 ## Clock cannot open Notification Center during management
 
-On macOS 27.0 build `26A5425a`, clicking the native menu-bar Clock does not open
+On macOS 27.0 builds `26A5425a` and `26A428`, clicking the native menu-bar Clock does not open
 Notification Center while Blenny management is active. Blenny's assessment-based
 hiding backend activates a system restriction state. ControlCenter responds by
 ignoring Clock menu events before they can request Notification Center. The Clock
 is already included in the visibility allowlist, so
 this is not an ordering failure or a missing-permission condition.
+
+The owner's September 25 report reconfirms failure after Resume and recovery
+after Stop on `26A428`. A bounded read-only recheck of the current runtime
+contracts and both installed ControlCenter architecture slices retains the
+same event gate. No compatible repair was found; see the
+[formal-build recheck](NOTIFICATION_CENTER_TECHNICAL_REPORT_2026-09-12.md#formal-build-recheck-2026-09-25).
+This round is closed without changing the hiding backend or adding automatic
+suspension. The trackpad evidence below is from the earlier owner test, not a
+fresh gesture test on every build.
 
 The owner confirms that **swiping left from the right edge of the trackpad opens
 Notification Center while Blenny management remains active**, even when Clock

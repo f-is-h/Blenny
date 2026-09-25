@@ -1,19 +1,15 @@
 # Blenny roadmap
 
-Version 0.10.0 is the current local experimental milestone, completed on
-2026-09-15. It builds on the unchanged 0.9.0 milestone completed on 2026-09-12.
-The first public source and binary candidate remains 0.11.0, retaining every
-distribution gate and beginning with permissions/onboarding and final UI polish.
+Version 0.11.0 completed the owner-accepted local permissions and interaction
+stability milestone on 2026-09-25, on macOS 27.0 build `26A428`. Build 15 native
+dragging and Apply are owner-accepted; repeated mixed Apply/Undo runs verify the
+preference-settlement fix. See [the release record](RELEASE_0.11.0.md).
 
-The milestone accepts tested third-party ordering, the repaired drag flow and
-responsive three-state visibility for Siri, Time Machine and Control Center on
-macOS 27.0 build `26A5425a`. Sorting for those three system subjects is deferred.
-Ordering remains gated to Debug or the explicitly opted-in optimized trial;
-ordinary Release excludes it. Native-arrow adjacency is not guaranteed. The
-Clock/Notification Center conflict is a known limitation with an owner-verified
-trackpad edge-swipe entry and no automatic Stop/Resume workaround. See
-[the 0.9.0 spike](TECH_SPIKE_0.9.0.md) and
-[Known limitations](KNOWN_LIMITATIONS.md).
+Version 0.12.0 is the next public source and signed-binary candidate. Every
+outstanding distribution gate remains required. Ordering stays in Debug or the
+explicitly opted-in optimized trial; ordinary Release excludes it. Siri, Time
+Machine and Control Center ordering, native-arrow adjacency and the documented
+Clock/Notification Center conflict remain unresolved boundaries.
 
 Blenny advances by verified exit criteria, not by elapsed time or commit count. Versions before `1.0.0` may use unsupported macOS behavior and are not compatibility promises.
 
@@ -22,7 +18,7 @@ Blenny advances by verified exit criteria, not by elapsed time or commit count. 
 - `0.0.x` versions are private engineering-foundation milestones. They may add bounded experimental capability, may be Debug-only, and are not public releases.
 - `0.y.0` versions beginning with `0.1.0` introduce a coherent pre-release product capability built on the validated engineering foundation.
 - `0.y.z` patch versions after a `0.y.0` milestone contain fixes and compatibility updates without expanding that milestone's scope.
-- `0.11.x` versions are the first public, open-source release candidates. Source and signed binaries ship together.
+- `0.12.x` versions are the first public, open-source release candidates. Source and signed binaries ship together.
 - `1.0.0` begins the stable product contract and published macOS compatibility policy.
 - A version advances only when every required exit criterion is verified and restoration is complete.
 - An explicitly scoped safety-feasibility investigation may close with an evidenced no-go; that does not mean the proposed feature or its implementation gate passed.
@@ -666,7 +662,8 @@ Accepted scope:
   Stop/Resume around Clock clicks is rejected.
 - One canonical repository remains the publication model. License adoption and
   notices remain follow-up work after the 0.10.0 interface review; the first
-  public source and binary candidate remains 0.11.0.
+  public source and binary candidate was then 0.11.0; the accepted schedule
+  now assigns that work to 0.12.0.
 
 Final test counts, binary checks and restored-state evidence are recorded in
 [the release record](RELEASE_0.9.0.md); the local annotated tag is `v0.9.0`.
@@ -821,38 +818,82 @@ Exit evidence:
 This closes the approved local functional scope, not distribution readiness or
 universal compatibility. Remaining onboarding, accessibility acceptance, final
 UI polish, restart/update lifecycle matrix and Release ordering promotion belong
-to 0.11.0. No new sorting support is claimed for Siri, Time Machine or Control
-Center; the Clock limitation remains accepted. License drafts remain excluded.
+to 0.11.0 at that closure; remaining gates now belong to 0.12.0. No new sorting
+support is claimed for Siri, Time Machine or Control Center; the Clock limitation
+remains accepted. License drafts remain excluded.
 
-## 0.11.0 — First public release candidate
+## 0.11.0 — Permissions and interaction stability
 
-First refine permissions/onboarding and final UI details, validate accessibility
-and restart/update recovery, and deliberately review promotion of ordering into
-Release. Publish the repository and signed prerelease together only when:
+Status: **Complete** as a local experimental milestone on 2026-09-25.
 
-- The established `xyz.fi5h.blenny` identifier remains stable through signing, installation and updates.
-- Developer ID signing and notarization succeed without embedding signing data in Git.
-- Installation and LaunchServices registration are reproducible.
-- A compatibility kill switch can disable the private backend on unknown macOS builds.
-- Privacy, diagnostics export, uninstall and complete restoration instructions are reviewed.
+The owner approved closing the accepted local behavior and moving the remaining
+public-release work to 0.12.0. This supersedes the earlier 0.11.0 distribution
+schedule, not any safety or publication gate. See
+[the release record](RELEASE_0.11.0.md) and
+[the technical spike](TECH_SPIKE_0.11.0.md).
 
-- The core installed experience supports bundle-level `Visible`, `Revealable`, and `Hidden` policies.
-- Reveal/conceal is fast, visually stable, and safely reversible.
-- Known unsupported items are surfaced clearly.
-- App updates preserve policies and the Blenny control's registration identity.
-- Onboarding, update delivery, and uninstall recovery are tested.
-- Performance remains effectively idle when state is unchanged.
-- No known issue can leave the menu bar unrecoverable.
-- The supported macOS build policy and emergency disable mechanism are final.
-- Security and privacy review is complete.
-- License adoption, copyright attribution, LICENSE and NOTICE files and app resource packaging are complete and accurate before distribution.
-- Every reachable branch, tag, commit, and tracked research artifact passes the repository publication gate.
-- A macOS build compatibility matrix and recovery instructions are published.
-- Public compatibility documentation discloses the Clock/Notification Center
-  limitation for every affected supported build until a replacement backend has
-  passed the full interaction, three-state intent, failure and recovery matrix.
-- Crash reports and diagnostics are opt-in and privacy-scoped.
-- User documentation matches the intentionally minimal feature set.
+Exit evidence:
+
+- Device Control's public setup request created the absent row; the owner enabled
+  it. Exact layout-file access passed read, reviewed write, inverse and same-binary
+  reopen. Broader signature/regrant coverage is explicitly deferred.
+- The CPU loop's redundant state publication is guarded. Prepared payload lookup
+  is nonmutating, and application/system sources share the typed drag contract.
+  The owner confirms Build 15 dragging and Apply are normal.
+- Canonical preview serialization prevents equivalent sets and integer-keyed
+  dictionaries from changing the reviewed fingerprint. Within-area order changes
+  scope only inversion participants; cross-area validation remains complete.
+- Eligible third-party owner proof uses exact bundle-key anchoring and fresh
+  public code identity, with collision and identity-drift refusal.
+- Both API/file disagreement directions fail closed. One event-driven wait and
+  one fresh read handle asynchronous disk commits without a write retry or
+  continuous observer. Five live Applies and three Undos passed in one process;
+  all five actual source disagreements settled, with exact final full-table inverse.
+- Cross-build recovery, stopped Undo, journal-first rollback and the one explicit
+  zero-change inverse retry have deterministic coverage and bounded live evidence.
+- Xcode 27 Debug/Release tests, app builds, packaged fixture checks, signatures,
+  isolation and history/privacy audits pass. Raw evidence remains ignored.
+- Controlled experiments were restored. A separately owner-abandoned migrated
+  receipt was archived without changing live order. The later user-accepted
+  applied receipt is verified and retained for ordinary Undo, not pending recovery.
+
+No new ordering support is claimed for Siri, Time Machine or Control Center.
+Clock remains an accepted limitation after the formal-build recheck. Broader
+hardware/display coverage and public distribution are not claimed complete.
+
+## 0.12.0 — First public release candidate
+
+Status: **Planned.** Remaining pre-publication work moves here from 0.11.0.
+
+Publish the repository and signed prerelease together only when:
+
+- Explicitly review ordering promotion into ordinary Release, including all
+  required access, failure, recovery and lifecycle behavior. Debug acceptance
+  alone does not promote a private implementation.
+- Keep the established `xyz.fi5h.blenny` identifier stable through signing,
+  installation and updates. Validate Developer ID identity, Device Control and
+  exact-file grant continuity, including revocation and regrant.
+- Complete onboarding, final UI, keyboard and VoiceOver acceptance for the
+  intentionally minimal bundle-level Visible, Revealable and Hidden experience.
+- Validate installation, LaunchServices registration, update delivery, restart,
+  interrupted recovery, uninstall and complete restoration. Preserve accepted
+  policy and Blenny control identity; no known issue may leave the bar unrecoverable.
+- Validate supported hardware, display and macOS configurations, effectively idle
+  unchanged-state performance, responsive reveal/conceal and unsupported-item copy.
+- Finalize supported-build policy and an emergency private-backend disable
+  mechanism. The current major-version/ABI checks are not a completed public
+  compatibility matrix.
+- Complete Developer ID signing and notarization without storing signing material
+  in Git, and reproduce every distributed binary from the published source.
+- Complete security/privacy review, opt-in scoped diagnostics, recovery/uninstall
+  instructions and user documentation.
+- Select and adopt the license, copyright attribution, LICENSE and NOTICE files
+  and app-resource packaging before distribution.
+- Audit every reachable branch, tag, commit and research artifact against the
+  repository publication gate; publish source and the first binary together.
+- Disclose the Clock/Notification Center limitation for every affected supported
+  build until a replacement backend passes the full interaction, three-state,
+  failure and recovery matrix. Do not add automatic Stop/Resume around clicks.
 
 ## 1.0.0 — Stable release
 
@@ -877,3 +918,73 @@ retains the previous Undo. Existing receipts are preserved until a new commit.
 The owner supersedes order-only Undo: Undo Changes reverses the latest successful
 Apply as one unit, including supported third-party and Apple visibility changes
 and offered ordering. This does not enable ordering for unsupported Apple items.
+### Historical macOS 27 public-build follow-up (2026-09-21)
+
+These entries retain the investigation sequence. Their pending actions and the
+one-direction API/file exception are superseded by the completed 0.11.0 record
+and strict two-direction corroboration described above.
+
+- The host rebooted from tested build `26A5425a` into public build `26A428`
+  after a successful ordering Apply. The old trial correctly failed closed, but
+  exposed only an opaque runtime error for Resume and could not enter ordering
+  Undo.
+- Read-only ABI checks on `26A428` match the existing assessment and container
+  preference contracts. Debug and the optimized ordering trial admit the new
+  build, preserve the actual build in snapshots, and retain old-build receipt
+  decoding for reviewed cross-build recovery.
+- Live assertion activation, corroborated layout capture, and the existing
+  receipt's single Undo remain owner-attended acceptance work. Control Center
+  ordering stays deferred because its pinned system binary identities changed.
+- The replacement passed read-only capture on `26A428`. A changed ad-hoc CDHash
+  required removing and re-adding the Device Control row; toggle-only regrant
+  did not update TCC's stored code requirement, while the exact-file bookmark
+  remained usable.
+- The first authorized cross-build Undo stopped before mutation because the
+  unified policy receipt recorded management enabled and the later Stop changed
+  only that flag. Unified Undo now preserves the current management state, so a
+  stopped Undo restores assignments and order without resuming visibility
+  management.
+- The second authorized attempt also stopped before mutation. After a quit and
+  reopen, recovery created a fresh inactive coordinator rather than retaining
+  the same stopped coordinator. Source now accepts that lifecycle only when the
+  persisted policy is stopped and the new coordinator has no active plan; all
+  exact policy, identity, table and one-attempt guards remain.
+- The third authorized Undo passed those lifecycle guards and durably recorded
+  recovery intent, then refused before inverse writes because recovery compared
+  obsolete system-host PID and launch-time values across the reboot. Policy and
+  the complete 55-entry table remained byte-for-byte unchanged. Recovery now
+  accepts a replacement system-host lifetime only after exact item/key mapping,
+  stable host bundle/executable identity and fresh code-identity verification;
+  fresh Apply review remains strict. Debug 611/56 and ordinary Release 323/34
+  pass. One explicit Recover Changes with the frozen receipt remains
+  owner-attended and is never automatic.
+- That Recover passed identity validation but the Objective-C writer still
+  hard-coded only `26A5425a`; it rejected current build `26A428` before invoking
+  the private container defaults API. Policy and all 55 table values remained
+  unchanged while the receipt retained `restoreIntent`. The C and Swift build
+  gates now admit the same exact builds. A complete zero-change capture may arm
+  one explicit retry, with a persisted counter that prevents any third write.
+  Debug 614/56 and ordinary Release 323/34 pass; the remaining retry is
+  owner-attended.
+- For the formal macOS 27 release, the owner replaced exact build enumeration
+  with a macOS 27 major-version gate. Complete build identity remains in every
+  ordering snapshot and must match for a fresh write; private ABI, symbols,
+  configuration namespace, code identity and corroborated readback still fail
+  closed at runtime. Representative 27.x and Darwin/build-major tests pass.
+  The new optimized trial was installed after an exact backup. After the owner
+  re-added and enabled its changed ad-hoc identity under Device Control, a
+  read-only preflight proved the frozen 55-entry state and unused retry counter.
+  One separately authorized Recover Changes restored all 25 controlled values
+  and the original policy, preserved all 30 unrelated entries, archived
+  `configurationVerified = true` with retry count 1, cleared the active receipt
+  and kept management stopped. No automatic Resume or fallback mutation ran;
+  physical coordinates remain independently unverified.
+- A later reviewed RunCat/Dato inversion visibly applied, but the low-level
+  container reader remained on the exact pre-write generation while the stable
+  protected plist contained the complete target. The former universal agreement
+  rule rolled the two keys back once and verified their originals. Post-write
+  capture now accepts only this exact previous-API/target-file split after its
+  single bounded wait; ordinary and pre-write reads, third states, missing keys
+  and unrelated drift remain strict. Debug 615/56 and ordinary Release 323/34
+  pass. The optimized candidate is built but not installed; attended Apply/Undo
+  acceptance remains pending.

@@ -2,64 +2,59 @@
 
 > A minimal, native menu bar organizer for macOS 27 and later.
 
-> Version 0.10.0 completes the locally accepted interface, ordering and unified Undo milestone.
-> See [the release record](docs/RELEASE_0.10.0.md). The 0.9.0 history and tag are unchanged.
+> Version 0.11.0 completes the local permissions and interaction-stability milestone.
+> See the [release record](docs/RELEASE_0.11.0.md). Earlier history and tags are unchanged.
 
 ## Current status
 
-Current phase: `0.10.0` complete as a local experimental milestone on 2026-09-15.
+Current phase: `0.11.0` complete as an owner-accepted local experimental milestone on 2026-09-25. Public release preparation moves to `0.12.0`.
 
-Version 0.9.0 integrates reviewed menu-bar ordering into the existing three-state
-Organize Board as a local experimental milestone. Its implementation scope is
-accepted; verification and restoration evidence are recorded in
-[the 0.9.0 release record](docs/RELEASE_0.9.0.md). It is not a distribution or
-public release.
+Build 15 on macOS 27.0 build `26A428` is the accepted local baseline. The owner
+confirms native dragging and Apply work normally, including the previously
+regressed system-item drag path. One shared typed drag-source modifier now serves
+application and system artwork. Redundant native-overflow state publication no
+longer feeds the observed SwiftUI update loop.
 
-Owner-operated testing on macOS 27.0 build `26A5425a` confirms the repaired drag
-flow and tested third-party ordering. It also confirms responsive Visible,
-Revealable and Hidden behavior for Siri, Time Machine and Control Center. Those
-reports establish the tested local workflow, not a universal application,
-hardware, display or macOS-build compatibility matrix.
+Reviewed preview fingerprints are deterministic. Pure within-area swaps change
+only the owners whose relative order changes; cross-area changes retain complete
+partition validation. API and independent preference-file reads must agree in
+both directions. A single exact-file event wait, bounded to 15 seconds, precedes
+at most one fresh read after disagreement. No polling or extra write is added.
+Five live Applies and three Undos exercised mixed changes, including five actual
+settlement waits, and ended with independently verified full-table restoration.
+The owner's later accepted configuration and clean Undo receipt remain intact.
+
+Device Control onboarding uses the public prompt with a process-scoped retry
+policy. Debug ordering uses an exact layout-file grant and bookmark; eligible
+application identity can be corroborated through public code-signing evidence
+without requiring access to every owner's preference container. Broader grant
+revocation and stable distribution-signature continuity remain unverified.
 
 Ordering remains available only in Debug and the explicitly opted-in optimized
 trial. Ordinary Release excludes ordering. Sorting for Siri, Time Machine and
-Control Center is deferred; their three-state visibility remains in the admitted
-experimental runtime. Weather and Input Menu retain their exact-owner ordering
-route. The native overflow arrow has no established writable ordering identity,
-so fish/arrow adjacency is not a product guarantee.
+Control Center is deferred; existing three-state capabilities remain unchanged.
+Weather and Input Menu retain their exact-owner ordering route. The native
+overflow arrow has no established writable ordering identity, so fish/arrow
+adjacency is not a product guarantee. Accepted explicit Blenny control placement
+and its separate Undo retain the 0.10.0 contract.
 
-The Clock cannot open Notification Center while Blenny management is active on
-the tested build. A left swipe from the trackpad's right edge still works. The
-owner accepts this as a documented limitation and rejects automatic Stop/Resume
-around Clock clicks. See [Known limitations](docs/KNOWN_LIMITATIONS.md) and the
+Clock clicks still cannot open Notification Center while management is active
+on the tested formal build. The bounded recheck confirmed the existing native
+event gate and produced no compatible fix. The earlier owner-verified trackpad
+edge-swipe alternative remains documented; it was not newly tested on every
+build. No automatic Stop/Resume workaround is added. See
+[Known limitations](docs/KNOWN_LIMITATIONS.md) and the
 [technical report](docs/NOTIFICATION_CENTER_TECHNICAL_REPORT_2026-09-12.md).
 
-Version 0.10.0 closes the owner-accepted compact UI, supported ordering, separate
-native control placement, unified last-Apply Undo and bounded automatic refresh.
-The owner confirms normal operation on the tested build. Version 0.11.0 begins
-with permission/onboarding refinement, final UI polish and distribution readiness.
-License adoption, signing, notarization and publication remain unfulfilled gates;
-ordinary Release still excludes ordering. See the 0.10.0 release record for the
-explicit acceptance matrix and limits.
+Version 0.12.0 retains all outstanding public-release gates: final onboarding and
+accessibility review, stable signing and permission continuity, Release ordering
+promotion, install/update/uninstall and interrupted-recovery validation, broader
+compatibility, license selection, notarization and publication audit. This local
+closure does not satisfy those gates or authorize a push. See
+[the roadmap](docs/ROADMAP.md) and [the technical spike](docs/TECH_SPIKE_0.11.0.md).
 
-The separately gated grouped-control trial failed attended acceptance: its
-left-click arrow action is not delivered and grouping does not establish a
-Visible/Revealable boundary. It remains excluded from ordinary builds and is
-not an accepted fix. A separate native-button baseline now provides explicitly
-armed click checks and read-only boundary exports for the owner-approved next
-round. The owner-operated fallback-only move reaches the requested boundary;
-saved snapshots and the completed receipt confirm exact configuration restoration.
-The 0.10.0 ordering-enabled build now exposes explicit persistent arrow placement
-and independent Undo. Stop/Quit retain accepted placement; unfinished writes and
-legacy temporary experiments remain recoverable. The owner subsequently included
-the fish in explicit boundary placement; an already separating arrow retains its
-saved value. Unattended restart and broader lifecycle compatibility remain 0.11.0 validation items. See
-the 0.10.0 spike for evidence and remaining work.
-
-The owner subsequently accepts fish placement. An accepted control placement
-now follows successful explicit Apply and ordering Undo using the latest
-partition boundary. Expansion/collapse do not write positions. A failure in
-this bounded follow-up is reported separately from committed application changes.
+Local packages identify candidates as `0.11.0 (Build N)`. Build numbers advance
+from ignored local state and do not themselves complete a milestone.
 
 ## Current product contract
 

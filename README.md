@@ -1,7 +1,8 @@
 # Blenny
 
-> Version 0.10.0 completes the locally accepted interface, ordering and unified Undo milestone.
-> See [the release record](docs/RELEASE_0.10.0.md) for evidence and remaining limits.
+> Version 0.11.0 completes the local permissions and interaction-stability milestone.
+> See the [release record](docs/RELEASE_0.11.0.md). Public release preparation
+> continues in 0.12.0.
 
 
 Blenny is a minimal, native menu bar organizer for macOS 27 and later. It uses
@@ -12,7 +13,7 @@ three explicit intent areas:
   a bounded reveal session.
 - **Hidden** items stay out of ordinary reveal sessions.
 
-Policy is owned at the application bundle level. The current experimental 0.10.0
+Policy is owned at the application bundle level. The current experimental 0.11.0
 configuration also retains reviewed preferred-position changes for attributable
 third-party owners. Every configured key associated with one owner moves as a
 block, and the same serial coordinator, durable receipt and bounded verification
@@ -20,16 +21,16 @@ contract protect policy and ordering writes.
 
 ## Current status
 
-Version `0.10.0` completed as a local experimental milestone on 2026-09-15.
-Verification is recorded in
-[the 0.10.0 release record](docs/RELEASE_0.10.0.md). It is not a distribution or
-public-release candidate.
+Version `0.11.0` completed as a local experimental milestone on 2026-09-25.
+[The release record](docs/RELEASE_0.11.0.md) distinguishes owner acceptance,
+automated checks and remaining distribution gates.
 
-Owner-operated testing on macOS 27.0 build `26A5425a` confirms the current
-three-state visibility behavior for Siri, Time Machine and Control Center is
-responsive, and confirms the tested third-party ordering and repaired drag flow.
-These observations establish the tested local workflow; they are not a universal
-application, hardware, display or macOS-build compatibility claim.
+On macOS 27.0 build `26A428`, the owner confirms Build 15 native dragging and
+Apply work normally after the shared application/system drag-source correction.
+Repeated mixed Apply/Undo runs independently verify the delayed preference-file
+commit repair and exact restoration. These results establish the tested local
+workflow, not universal application, hardware, display or macOS-build coverage.
+Local packages display both the marketing version and an identifying build number.
 
 Ordering is available only in Debug or in the explicitly opted-in optimized trial
 build. Ordinary Release excludes the ordering implementation. Sorting for Siri,
@@ -46,18 +47,21 @@ ordinary ordering Undo. Once enabled, placement follows successful Organize Appl
 and ordering Undo; Undo Control Placement turns this adjustment off. Expansion and collapse do
 not reposition it, and a fixed screen coordinate is not promised.
 
-Version 0.11.0 begins with permissions/onboarding and final UI polish, followed
-by the remaining distribution gates. One canonical repository remains the
-publication model; changing visibility or publishing any ref is a separate action.
-Current evidence is in [the 0.10.0 technical spike](docs/TECH_SPIKE_0.10.0.md).
+Version 0.12.0 owns the remaining onboarding/accessibility acceptance, Release
+ordering review, licensing, signing, notarization, installation/update and
+publication gates. One canonical repository remains the publication model;
+changing visibility or publishing any ref is a separate action. See
+[the 0.11.0 technical spike](docs/TECH_SPIKE_0.11.0.md) for the final fixes and
+superseded investigation steps, and [the roadmap](docs/ROADMAP.md) for open gates.
 Earlier results remain in [the 0.9.0 spike](docs/TECH_SPIKE_0.9.0.md) and
 [the historical notes](docs/HISTORICAL_DEVELOPMENT_NOTES.md).
 
 ## Known limitation
 
-On the tested build, clicking the native Clock cannot open Notification Center
-while Blenny management is active. A left swipe from the trackpad's right edge
-still opens Notification Center. The project will not add automatic Stop/Resume
+On tested builds `26A5425a` and `26A428`, clicking the native Clock cannot open
+Notification Center while Blenny management is active. A left swipe from the
+trackpad's right edge worked in the earlier owner test; it was not retested on
+every build. The project will not add automatic Stop/Resume
 around Clock clicks. See [Known limitations](docs/KNOWN_LIMITATIONS.md) and
 [the technical report](docs/NOTIFICATION_CENTER_TECHNICAL_REPORT_2026-09-12.md).
 
@@ -97,30 +101,34 @@ Blenny requires Xcode 27 and the macOS 27 SDK. Select the Xcode 27 developer
 directory explicitly because the machine default may point to an older Xcode.
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   xcrun swift test
 
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   ./scripts/build-app.sh debug
 ```
 
 To build the optimized local ordering trial:
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 BLENNY_ORDERING_TRIAL=YES ./scripts/build-app.sh release
 ```
 
 The optimized trial retains Debug capability gates. It is not ordinary Release.
+Each successful app build allocates the next local `CFBundleVersion` from an
+ignored `LocalData/build-number.txt` counter. Set `BLENNY_BUILD_NUMBER` to a
+positive integer when a reproducible CI or archival build needs an explicit
+number.
 Programs under `Research/` are not built by the Swift package and are not supported
 product entry points. The separate `BlennyLayoutProbe` package product is a bounded
 development tool, not part of the shipped application.
 
 ## License
 
-License adoption and distribution notices remain follow-up work after the
-0.10.0 interface review. No license files are tracked in this milestone. The project is a clean implementation and
-does not use or link Ice or Thaw code or binaries.
+License adoption and distribution notices remain 0.12.0 public-release gates.
+No license files are tracked in this milestone. The project is a clean
+implementation and does not use or link Ice or Thaw code or binaries.
 
 ## Using Blenny
 

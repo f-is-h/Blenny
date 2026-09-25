@@ -280,3 +280,65 @@ pass native Clock interaction during management, ordinary reveal/conceal,
 policy/order Apply and Stop/Resume, plus failure and exact recovery checks through
 the sole writer. Hidden owners must remain excluded from ordinary Reveal.
 No release gate, runtime boundary or experiment-authorization requirement is waived.
+
+## Formal-build recheck (2026-09-25)
+
+The owner requested one more bounded investigation, explicitly accepting closure
+if no compatible repair existed, and reported the same Resume-fails/Stop-works
+Clock behavior. The current host is macOS 27.0 `26A428`, not the original beta
+build. The installed ControlCenter UUIDs differ, so the old addresses were not
+assumed to remain valid.
+
+The existing read-only contract inspector was rebuilt with Xcode 27 and the
+macOS 27 SDK and exited successfully. `MBAssessmentModeConfiguration` still
+exposes only system-item and bundle allowlists; the restriction XPC acquisition
+still takes ID, origin and those two allowlists. No independent Clock-event or
+Notification Center exception appeared in that inspected contract. The probe
+created no assertion or XPC connection. Blenny's current planner still includes
+Clock in its numbered visibility allowlist.
+
+Fresh disassembly and Objective-C/Swift field metadata from **both** installed
+ControlCenter slices establish that the earlier consumer-side gate remains:
+
+| Anchor | arm64e | arm64e.x1 |
+| --- | --- | --- |
+| Image UUID | `C7B60E84-3CC5-30CE-9090-C27E7FDB687D` | `8FE6C54D-E0B0-374F-A124-E87961F5B41E` |
+| Clock `shouldIgnoreMenuExtraEvents` ivar-offset variable | `0x10095F4F0` | `0x10092F4F0` |
+| Restriction-state comparison | `0x1001B22F4` | `0x1001A5078` |
+| Result stored into that Clock field | `0x1001B2318` | `0x1001A509C` |
+| Clock handler tests the field | `0x1002108E8`–`0x1002108F4` | `0x10020008C`–`0x100200098` |
+| Restricted consumed return | `0x10021092C` | `0x1002000D0` |
+
+The branch goes directly to `w0 = 1` and the epilogue before the remote-client
+lookup and the mouse-down/up request branches. The class metadata explicitly
+names the field and its offset variable; the interpretation is not inferred
+only from similar numeric addresses. The runtime inventory plus this current
+gate and the owner's current A/B observation corroborate the original cause.
+This round did not re-trace every producer instruction, attach to a live process,
+or capture a Clock XPC transaction. Disassembly warnings in unrelated arm64e.x1
+regions are not treated as proof; the listed gate instructions decoded normally.
+
+A fresh upstream check provided no validated compatible escape route:
+
+- [Pelmet's FAQ](https://github.com/fif7y/pelmet/blob/main/docs/FAQ.md) still
+  describes temporarily releasing hiding for the Clock click and covering the
+  strip with an image. This is a temporary suspension, not an exception while
+  retaining the hiding assertion, and conflicts with the existing owner decision.
+- [Thaw 3.0.0-alpha.6](https://github.com/thaw-app/Thaw/releases/tag/3.0.0-alpha.6)
+  advertises a Notification Center shortcut fix, but the associated
+  [issue #1146](https://github.com/thaw-app/Thaw/issues/1146) contains subsequent
+  reports of persistence or delay. That release statement does not establish a
+  usable native Clock repair for Blenny. No Thaw implementation or binary was
+  copied, linked or executed, and its precise workaround is not claimed here.
+
+No product code, live policy, order, permission or management state was changed.
+The two captured policy/recovery JSON hashes remained unchanged; raw contracts,
+metadata, disassembly and verification are ignored under
+`LocalData/0.11.0-clock-recheck/`. The owner's current Clock report supplies the
+dynamic evidence; there was no synthetic click or fresh trackpad test.
+
+Disposition: close this bounded recheck without a repair, retain the disclosed
+limitation and earlier owner-verified trackpad alternative, and stop further
+allowlist/timing experiments. A future reopening requires new evidence of a
+contract separating selective hiding from the Clock event restriction. This
+does not undo or replace the independently validated drag/Apply fixes.
