@@ -1,12 +1,35 @@
 import AppKit
 import Darwin
 import Foundation
+#if DEBUG
+import BlennyCore
+#endif
 
 @main
 @MainActor
 enum BlennyMain {
     static func main() {
         #if DEBUG
+        if CommandLine.arguments.contains("--ordering-preference-read-only") {
+            let access = MenuBarLayoutAccessSession(store: MenuBarLayoutBookmarkStore(
+                directory: FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Application Support/Blenny/DebugOrdering")
+            ))
+            var bookmarkError: String?
+            do { try access.restoreSavedAccess() }
+            catch { bookmarkError = error.localizedDescription }
+            do {
+                let data = try withExtendedLifetime(access) {
+                    try MacOS27MenuBarOrderingBackend.preferenceReadDiagnostic(bookmarkError: bookmarkError)
+                }
+                FileHandle.standardOutput.write(data)
+                FileHandle.standardOutput.write(Data("\n".utf8))
+                return
+            } catch {
+                FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
+                Darwin.exit(1)
+            }
+        }
         if ProcessInfo.processInfo.environment[
             "BLENNY_ORDERING_BOARD_LIFECYCLE_CHECK"
         ] == "YES" {

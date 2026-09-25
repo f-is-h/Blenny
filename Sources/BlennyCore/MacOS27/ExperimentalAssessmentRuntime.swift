@@ -2,9 +2,8 @@ import Darwin
 import Foundation
 import ObjectiveC.runtime
 
-public enum ExperimentalAssessmentRuntimeError: Error, Equatable, Sendable {
+public enum ExperimentalAssessmentRuntimeError: Error, Equatable, LocalizedError, Sendable {
     case unsupportedOperatingSystem(majorVersion: Int)
-    case unsupportedOperatingSystemBuild(expected: String, actual: String)
     case unsupportedArchitecture
     case frameworkUnavailable
     case classUnavailable(String)
@@ -19,23 +18,40 @@ public enum ExperimentalAssessmentRuntimeError: Error, Equatable, Sendable {
     case initializationFailed(String)
     case configurationRoundTripMismatch
     case activationFailed(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case let .unsupportedOperatingSystem(majorVersion):
+            "This build requires macOS 27; the current major version is \(majorVersion)."
+        case .unsupportedArchitecture:
+            "This Blenny build requires Apple silicon."
+        case .frameworkUnavailable:
+            "The macOS menu bar management framework is unavailable."
+        case let .classUnavailable(name):
+            "The macOS menu bar management class \(name) is unavailable."
+        case let .selectorUnavailable(className, selector):
+            "The macOS menu bar management method \(className).\(selector) is unavailable."
+        case let .methodEncodingMismatch(className, selector, expected, actual):
+            "The macOS menu bar management method \(className).\(selector) changed from \(expected) to \(actual)."
+        case let .allocationFailed(name):
+            "The macOS menu bar management object \(name) could not be created."
+        case let .initializationFailed(name):
+            "The macOS menu bar management object \(name) could not be initialized."
+        case .configurationRoundTripMismatch:
+            "macOS returned different menu bar management settings than Blenny requested."
+        case let .activationFailed(detail):
+            "macOS refused the menu bar management request: \(detail)"
+        }
+    }
 }
 
 public final class ExperimentalMacOS27AssessmentFactory:
     RevealAssertionCandidateFactory,
     @unchecked Sendable
 {
-    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
-    public static let supportedOperatingSystemBuilds: Set<String> = [
-        "26A5416b", "26A5425a",
-    ]
+    public static let supportedOperatingSystemMajorVersion = 27
     public static let compatibilityFingerprint =
-        "arm64-macos27-debug-26A5416b-26A5425a-assessment-contract-v3"
-    #else
-    public static let supportedOperatingSystemBuilds: Set<String> = ["26A5416b"]
-    public static let compatibilityFingerprint =
-        "arm64-macos27-release-26A5416b-assessment-contract-v2"
-    #endif
+        "arm64-macos27-assessment-contract-v5"
     private static let frameworkPath =
         "/System/Library/PrivateFrameworks/MenuBarClientCore.framework/MenuBarClientCore"
 
@@ -49,16 +65,9 @@ public final class ExperimentalMacOS27AssessmentFactory:
         throw ExperimentalAssessmentRuntimeError.unsupportedArchitecture
         #endif
         let majorVersion = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-        guard majorVersion == 27 else {
+        guard majorVersion == Self.supportedOperatingSystemMajorVersion else {
             throw ExperimentalAssessmentRuntimeError.unsupportedOperatingSystem(
                 majorVersion: majorVersion
-            )
-        }
-        let operatingSystemBuild = Self.operatingSystemBuild() ?? "unavailable"
-        guard Self.supportedOperatingSystemBuilds.contains(operatingSystemBuild) else {
-            throw ExperimentalAssessmentRuntimeError.unsupportedOperatingSystemBuild(
-                expected: Self.supportedOperatingSystemBuilds.sorted().joined(separator: " or "),
-                actual: operatingSystemBuild
             )
         }
         guard let frameworkHandle = dlopen(Self.frameworkPath, RTLD_NOW | RTLD_LOCAL) else {
@@ -174,21 +183,6 @@ public final class ExperimentalMacOS27AssessmentFactory:
         return runtimeClass
     }
 
-    private static func operatingSystemBuild() -> String? {
-        var size = 0
-        guard sysctlbyname("kern.osversion", nil, &size, nil, 0) == 0,
-              size > 1 else {
-            return nil
-        }
-        var bytes = [CChar](repeating: 0, count: size)
-        guard sysctlbyname("kern.osversion", &bytes, &size, nil, 0) == 0 else {
-            return nil
-        }
-        return String(
-            decoding: bytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) },
-            as: UTF8.self
-        )
-    }
 }
 
 private final class ExperimentalAssessmentCandidate:

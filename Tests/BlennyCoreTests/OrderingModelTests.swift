@@ -117,6 +117,7 @@ struct OrderingModelTests {
         let legacyData = try JSONEncoder().encode(baseline)
         let legacyJSON = try #require(String(data: legacyData, encoding: .utf8))
         #expect(!legacyJSON.contains("ownerPreferenceSourceIdentity"))
+        #expect(!legacyJSON.contains("applicationCodeIdentity"))
         let decoded = try JSONDecoder().decode(OrderingSnapshot.self, from: legacyData)
         #expect(decoded == baseline)
         #expect(try decoded.canonicalFingerprint == baseline.canonicalFingerprint)

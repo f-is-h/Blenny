@@ -54,6 +54,46 @@ struct OrderingBoardArrangementTests {
         #expect(draft.draftSubjectPolicies[.systemItem(.wifi)] == .visible)
     }
 
+    @Test("Pure same-area reorder scopes only inversion participants")
+    func pureSameAreaScope() {
+        let blenny = OrderingSubjectID.application("xyz.fi5h.blenny")
+        let chat = OrderingSubjectID.application(bundle("chat"))
+        let lark = OrderingSubjectID.application(bundle("lark"))
+        let tailscale = OrderingSubjectID.application(bundle("tailscale"))
+        let alfred = OrderingSubjectID.application(bundle("alfred"))
+        let original = [alfred, tailscale, blenny, chat, lark]
+        let draft = [alfred, tailscale, blenny, lark, chat]
+        let policies: [OrderingSubjectID: MenuBarBundlePolicy] = [
+            alfred: .hidden, tailscale: .revealable, blenny: .visible,
+            chat: .visible, lark: .visible,
+        ]
+
+        #expect(OrderingBoardConfigurationScope.subjectsRequiringConfiguration(
+            original: original, draft: draft,
+            originalPolicies: policies, draftPolicies: policies
+        ) == [lark, chat])
+    }
+
+    @Test("Visibility change retains the complete partition target")
+    func visibilityChangeUsesGlobalScope() {
+        let hidden = OrderingSubjectID.application(bundle("hidden"))
+        let moved = OrderingSubjectID.application(bundle("moved"))
+        let visible = OrderingSubjectID.application(bundle("visible"))
+        let original = [hidden, moved, visible]
+        let draft = [hidden, moved, visible]
+        let originalPolicies: [OrderingSubjectID: MenuBarBundlePolicy] = [
+            hidden: .hidden, moved: .revealable, visible: .visible,
+        ]
+        let draftPolicies: [OrderingSubjectID: MenuBarBundlePolicy] = [
+            hidden: .hidden, moved: .visible, visible: .visible,
+        ]
+
+        #expect(OrderingBoardConfigurationScope.subjectsRequiringConfiguration(
+            original: original, draft: draft,
+            originalPolicies: originalPolicies, draftPolicies: draftPolicies
+        ) == draft)
+    }
+
     @Test("Exact system subject moves independently from its shared host")
     func exactSystemSubjectMove() throws {
         let draft = try OrderingBoardLayoutDraft(
@@ -272,11 +312,18 @@ struct OrderingBoardArrangementTests {
         ) == .before("b"))
     }
 
-    @Test("Hover recomputation retains one drag token for one Board generation")
-    func dragPayloadRemainsStableWithinLayoutGeneration() {
+    @Test("Prepared drag payload lookup is pure and session replacement is bounded")
+    func preparedDragPayloadLifecycle() {
         var registry = OrderingBoardDragPayloadRegistry()
         let subject = OrderingSubjectID.application("com.example.source")
-        let first = registry.payload(
+        #expect(registry.payload(
+            subjectID: subject,
+            sourcePolicy: .visible,
+            candidateGeneration: candidateGeneration,
+            layoutGeneration: layoutGeneration
+        ) == nil)
+
+        let first = registry.prepare(
             dragIdentifier: "com.example.source",
             subjectID: subject,
             sourcePolicy: .visible,
@@ -285,17 +332,16 @@ struct OrderingBoardArrangementTests {
         )
         for _ in 0 ..< 1_000 {
             let repeated = registry.payload(
-                dragIdentifier: "com.example.source",
                 subjectID: subject,
                 sourcePolicy: .visible,
                 candidateGeneration: candidateGeneration,
                 layoutGeneration: layoutGeneration
             )
-            #expect(repeated.dragToken == first.dragToken)
-            #expect(repeated.id == first.id)
+            #expect(repeated?.dragToken == first.dragToken)
+            #expect(repeated?.id == first.id)
         }
 
-        let nextLayout = registry.payload(
+        let nextLayout = registry.prepare(
             dragIdentifier: "com.example.source",
             subjectID: subject,
             sourcePolicy: .visible,
@@ -307,22 +353,19 @@ struct OrderingBoardArrangementTests {
 
         let unknownRetired = registry.discard(token: UUID())
         #expect(!unknownRetired)
-        let currentRetired = registry.discard(token: nextLayout.dragToken)
-        #expect(currentRetired)
-        let alreadyRetired = registry.discard(token: nextLayout.dragToken)
-        #expect(!alreadyRetired)
-        let afterDeliveredNoOp = registry.payload(
-            dragIdentifier: "com.example.source",
+        let afterDeliveredNoOp = registry.replace(token: nextLayout.dragToken)
+        #expect(afterDeliveredNoOp?.dragToken != nextLayout.dragToken)
+        #expect(afterDeliveredNoOp?.id != nextLayout.id)
+        #expect(registry.replace(token: nextLayout.dragToken) == nil)
+
+        registry.clear()
+        #expect(registry.payload(
             subjectID: subject,
             sourcePolicy: .visible,
             candidateGeneration: candidateGeneration,
-            layoutGeneration: nextLayoutGeneration
-        )
-        #expect(afterDeliveredNoOp.dragToken != nextLayout.dragToken)
-        #expect(afterDeliveredNoOp.id != nextLayout.id)
-
-        registry.clear()
-        let afterClear = registry.payload(
+            layoutGeneration: layoutGeneration
+        ) == nil)
+        let afterClear = registry.prepare(
             dragIdentifier: "com.example.source",
             subjectID: subject,
             sourcePolicy: .visible,

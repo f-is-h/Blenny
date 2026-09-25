@@ -5,6 +5,24 @@ import Testing
 
 @Suite("Exact system-item ordering core")
 struct SystemOrderingCoreTests {
+    @Test("The private writer and Swift ordering gate admit the complete macOS 27 major")
+    func privateWriterMajorVersionGate() {
+        for version in ["27", "27.0", "27.4.1"] {
+            #expect(MacOS27MenuBarOrderingBackend
+                .privateWriterSupportsSystemVersionForTesting(version))
+        }
+        for version in ["26.9", "28.0", "27beta", "unexpected"] {
+            #expect(!MacOS27MenuBarOrderingBackend
+                .privateWriterSupportsSystemVersionForTesting(version))
+        }
+        for build in ["26A428", "26A5425a", "26B101", "26Z999z"] {
+            #expect(OrderingSnapshot.supportsBuild(build))
+        }
+        for build in ["25Z999", "27A1", "26", "26beta"] {
+            #expect(!OrderingSnapshot.supportsBuild(build))
+        }
+    }
+
     @Test("Deferred sorting retains exact identities for historical recovery")
     func deferredProductAvailability() throws {
         #expect(ExactSystemOrderingItem.allCases.filter(\.isOrderingOffered)
@@ -137,6 +155,51 @@ struct SystemOrderingCoreTests {
             plan, confirmedFingerprint: plan.fingerprint
         )
         _ = try await writer.restoreOrdering()
+        #expect(await backend.current.group == fixture.baseline.group)
+        #expect(await recovery.receipt == nil)
+    }
+
+    @Test("Recovery accepts a freshly verified system host process lifetime")
+    func systemHostRelaunchRecovery() async throws {
+        let fixture = try SystemOrderingFixture()
+        let backend = SystemOrderingBackend(fixture: fixture)
+        let recovery = SystemOrderingRecovery()
+        let writer = makeWriter(backend: backend, recovery: recovery)
+        let plan = try fixture.mixedPlan()
+        _ = try await writer.applyConfigurationOrdering(
+            plan, confirmedFingerprint: plan.fingerprint
+        )
+
+        let restartedControlCenter = OrderingProcess(
+            bundleIdentifier: fixture.controlCenter.bundleIdentifier,
+            executableName: fixture.controlCenter.executableName,
+            pid: 602, launchTime: fixture.now.addingTimeInterval(-1), isSystem: true
+        )
+        let restartedSystemUIServer = OrderingProcess(
+            bundleIdentifier: fixture.systemUIServer.bundleIdentifier,
+            executableName: fixture.systemUIServer.executableName,
+            pid: 603, launchTime: fixture.now.addingTimeInterval(-1), isSystem: true
+        )
+        let processes = fixture.baseline.beforeProcesses.map { process in
+            if process == fixture.controlCenter { return restartedControlCenter }
+            if process == fixture.systemUIServer { return restartedSystemUIServer }
+            return process
+        }
+        let bindings = (fixture.baseline.systemHostBindings ?? []).map { binding in
+            let host = binding.hostProcess == fixture.controlCenter
+                ? restartedControlCenter : restartedSystemUIServer
+            return OrderingSystemHostBinding(
+                item: binding.item, configurationKey: binding.configurationKey,
+                hostProcess: host, codeIdentityVerified: true
+            )
+        }
+        let committed = await backend.current
+        await backend.replaceCurrent(try fixture.snapshot(
+            group: committed.group, processes: processes, bindings: bindings
+        ))
+
+        _ = try await writer.restoreOrdering()
+
         #expect(await backend.current.group == fixture.baseline.group)
         #expect(await recovery.receipt == nil)
     }
@@ -422,6 +485,30 @@ struct SystemOrderingCoreTests {
         #expect(await recovery.receipt == nil)
     }
 
+    @Test("A clean configuration receipt can undo after an admitted macOS build transition")
+    func crossBuildConfigurationUndo() async throws {
+        let fixture = try SystemOrderingFixture()
+        let backend = SystemOrderingBackend(fixture: fixture)
+        let recovery = SystemOrderingRecovery()
+        let writer = makeWriter(backend: backend, recovery: recovery)
+        let plan = try fixture.mixedPlan()
+        _ = try await writer.applyConfigurationOrdering(
+            plan, confirmedFingerprint: plan.fingerprint
+        )
+
+        let committed = await backend.current
+        let publicBuild = try fixture.snapshot(
+            group: committed.group, build: "26A428"
+        )
+        await backend.replaceCurrent(publicBuild)
+
+        _ = try await writer.restoreOrdering()
+        let restored = await backend.current
+        #expect(restored.osBuild == "26A428")
+        #expect(restored.group == fixture.baseline.group)
+        #expect(await recovery.receipt == nil)
+    }
+
     @Test("A visibility transition that changes an ordered system key is compensated")
     func postPolicyOrderingDrift() async throws {
         let fixture = try SystemOrderingFixture()
@@ -469,6 +556,57 @@ struct SystemOrderingCoreTests {
         }
         #expect(await recovery.receipt?.phase == .restoreIntent)
         #expect(await recovery.receipt?.isPendingRestoration == true)
+    }
+
+    @Test("Configuration Undo retries once after a verified zero-change failure")
+    func inverseVerifiedZeroChangeRetry() async throws {
+        let fixture = try SystemOrderingFixture()
+        let backend = SystemOrderingBackend(fixture: fixture)
+        let recovery = SystemOrderingRecovery()
+        let writer = makeWriter(backend: backend, recovery: recovery)
+        let plan = try fixture.mixedPlan()
+        _ = try await writer.applyConfigurationOrdering(
+            plan, confirmedFingerprint: plan.fingerprint
+        )
+        await backend.failNextRestoresWithoutChange(1)
+
+        await #expect(throws: OrderingTransactionError.restorationAlreadyAttempted) {
+            _ = try await writer.restoreOrdering()
+        }
+        let committedGroup = try plan.applying(to: fixture.baseline.group)
+        #expect(await backend.current.group == committedGroup)
+        #expect(await recovery.receipt?.phase == .restoreIntent)
+        #expect(await recovery.receipt?.configurationRestoreRetryCount == nil)
+
+        _ = try await writer.restoreOrdering()
+        #expect(await backend.current.group == fixture.baseline.group)
+        #expect(await recovery.receipt == nil)
+        #expect(await backend.writeCount == 3)
+    }
+
+    @Test("Configuration Undo never makes a third write after its bounded retry fails")
+    func inverseRetryRemainsBounded() async throws {
+        let fixture = try SystemOrderingFixture()
+        let backend = SystemOrderingBackend(fixture: fixture)
+        let recovery = SystemOrderingRecovery()
+        let writer = makeWriter(backend: backend, recovery: recovery)
+        let plan = try fixture.mixedPlan()
+        _ = try await writer.applyConfigurationOrdering(
+            plan, confirmedFingerprint: plan.fingerprint
+        )
+        await backend.failNextRestoresWithoutChange(2)
+
+        for _ in 0..<2 {
+            await #expect(throws: OrderingTransactionError.restorationAlreadyAttempted) {
+                _ = try await writer.restoreOrdering()
+            }
+        }
+        #expect(await recovery.receipt?.configurationRestoreRetryCount == 1)
+        #expect(await backend.writeCount == 3)
+        await #expect(throws: OrderingTransactionError.restorationAlreadyAttempted) {
+            _ = try await writer.restoreOrdering()
+        }
+        #expect(await backend.writeCount == 3)
     }
 
     private func makeWriter(
@@ -609,13 +747,14 @@ private struct SystemOrderingFixture: Sendable {
         extraProcesses: [OrderingProcess] = [],
         processes: [OrderingProcess]? = nil,
         bindings: [OrderingSystemHostBinding]? = nil,
-        displayCount: Int? = nil
+        displayCount: Int? = nil,
+        build: String? = nil
     ) throws -> OrderingSnapshot {
         let processes = (processes ?? baseline.beforeProcesses) + extraProcesses
         return try OrderingSnapshot(
             group: group, beforeProcesses: processes, afterProcesses: processes,
             observationsByPID: baseline.observationsByPID,
-            osBuild: baseline.osBuild, architecture: baseline.architecture,
+            osBuild: build ?? baseline.osBuild, architecture: baseline.architecture,
             runtimeContractVerified: true, displaySignature: baseline.displaySignature,
             displayCount: displayCount ?? baseline.displayCount, displayFrame: baseline.displayFrame,
             lifecycleGeneration: baseline.lifecycleGeneration,
@@ -632,6 +771,7 @@ private actor SystemOrderingBackend: MenuBarOrderingBackend {
     var writeCount = 0
     private var partialFailure: Bool
     private var collateralOnRestore = false
+    private var restoreFailuresWithoutChange = 0
 
     init(fixture: SystemOrderingFixture, partialFailure: Bool = false) {
         self.fixture = fixture
@@ -655,11 +795,17 @@ private actor SystemOrderingBackend: MenuBarOrderingBackend {
             }
             partial[key] = table[key]
             group[OrderingSnapshot.tableKey] = .dictionary(partial)
-            current = try fixture.snapshot(group: group)
+            current = try fixture.snapshot(
+                group: group, processes: current.beforeProcesses,
+                bindings: current.systemHostBindings, build: current.osBuild
+            )
             throw OrderingTransactionError.receiptStorageUnavailable
         }
         group[OrderingSnapshot.tableKey] = .dictionary(table)
-        current = try fixture.snapshot(group: group)
+        current = try fixture.snapshot(
+            group: group, processes: current.beforeProcesses,
+            bindings: current.systemHostBindings, build: current.osBuild
+        )
     }
 
     func restoreTable(
@@ -681,12 +827,17 @@ private actor SystemOrderingBackend: MenuBarOrderingBackend {
         ownerKeys: Set<String>
     ) async throws {
         try snapshot.validateConfigurationProcessScope(for: ownerKeys, against: current)
+        if restoreFailuresWithoutChange > 0 {
+            restoreFailuresWithoutChange -= 1
+            writeCount += 1
+            throw MacOS27MenuBarOrderingBackendError.synchronizationFailed
+        }
         try await restoreTable(table, expecting: snapshot)
         if collateralOnRestore {
             collateralOnRestore = false
             var group = current.group
             group["collateral"] = .string("unexpected")
-            current = try fixture.snapshot(group: group)
+            current = try fixture.snapshot(group: group, build: current.osBuild)
         }
     }
 
@@ -696,11 +847,14 @@ private actor SystemOrderingBackend: MenuBarOrderingBackend {
         var table = try current.table()
         table[key] = value
         group[OrderingSnapshot.tableKey] = .dictionary(table)
-        current = try fixture.snapshot(group: group)
+        current = try fixture.snapshot(group: group, build: current.osBuild)
     }
 
 
     func enableCollateralOnRestore() { collateralOnRestore = true }
+    func failNextRestoresWithoutChange(_ count: Int) {
+        restoreFailuresWithoutChange = count
+    }
 
     func replaceCurrent(_ snapshot: OrderingSnapshot) { current = snapshot }
 }

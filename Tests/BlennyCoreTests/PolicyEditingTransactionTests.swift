@@ -423,6 +423,41 @@ struct PolicyEditingTransactionTests {
         #expect(await provider.creationCount == 1)
     }
 
+    @Test("Unified Undo preview preserves a stopped management state")
+    func undoPreviewKeepsManagementStopped() async throws {
+        let accepted = try document(
+            enabled: false, revealable: usage, hidden: cleanShot
+        )
+        let target = try document(
+            enabled: true, revealable: cleanShot, hidden: usage
+        )
+        let store = MemoryPolicyStore(document: accepted)
+        let provider = TransactionWriterProvider()
+        let core = PolicyEditingCore(
+            store: store,
+            blennyBundleIdentifier: blenny,
+            scope: scope,
+            writerProvider: { try await provider.makeWriter() }
+        )
+
+        let preview = try await core.previewUndoKeepingManagementState(
+            targetPolicy: target,
+            candidates: inventory(),
+            observedRunningBundleIdentifiers: [blenny, usage, cleanShot]
+        )
+        let prepared = try #require(preview.1)
+
+        #expect(prepared.oldPolicy == accepted)
+        #expect(prepared.newPolicy.managementEnabled == false)
+        #expect(prepared.newPolicy.policies == target.policies)
+        #expect(preview.0.diff?.changes.contains(where: {
+            if case .managementEnabledChanged = $0.operation { return true }
+            return false
+        }) == false)
+        #expect(await store.saveCount == 0)
+        #expect(await provider.creationCount == 0)
+    }
+
     @Test("Stale reviewed inputs cannot reach the writer and Review is single-use")
     func staleReviewFailsBeforeWriter() async throws {
         let accepted = try document(enabled: false, revealable: usage, hidden: cleanShot)

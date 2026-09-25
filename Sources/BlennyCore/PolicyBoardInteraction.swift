@@ -68,6 +68,73 @@ public struct PolicyDragPayload:
     }
 }
 
+/// Keeps ordinary policy drag sources stable while SwiftUI recomputes the
+/// Board. Payload creation happens when the displayed model changes; view
+/// evaluation performs only a nonmutating lookup.
+public struct PolicyDragPayloadRegistry: Sendable {
+    private struct Key: Hashable, Sendable {
+        let bundleIdentifier: String
+        let sourcePolicy: MenuBarBundlePolicy
+        let candidateGeneration: UUID
+    }
+
+    private var payloads: [Key: PolicyDragPayload] = [:]
+
+    public init() {}
+
+    @discardableResult
+    public mutating func prepare(
+        bundleIdentifier: String,
+        sourcePolicy: MenuBarBundlePolicy,
+        candidateGeneration: UUID
+    ) -> PolicyDragPayload {
+        let key = Key(
+            bundleIdentifier: bundleIdentifier,
+            sourcePolicy: sourcePolicy,
+            candidateGeneration: candidateGeneration
+        )
+        if let payload = payloads[key] { return payload }
+        let payload = PolicyDragPayload(
+            bundleIdentifier: bundleIdentifier,
+            sourcePolicy: sourcePolicy,
+            candidateGeneration: candidateGeneration
+        )
+        payloads[key] = payload
+        return payload
+    }
+
+    public func payload(
+        bundleIdentifier: String,
+        sourcePolicy: MenuBarBundlePolicy,
+        candidateGeneration: UUID
+    ) -> PolicyDragPayload? {
+        payloads[Key(
+            bundleIdentifier: bundleIdentifier,
+            sourcePolicy: sourcePolicy,
+            candidateGeneration: candidateGeneration
+        )]
+    }
+
+    public mutating func replace(token: UUID) -> PolicyDragPayload? {
+        guard let entry = payloads.first(where: { $0.value.dragToken == token })
+        else { return nil }
+        let replacement = PolicyDragPayload(
+            bundleIdentifier: entry.value.bundleIdentifier,
+            sourcePolicy: entry.value.sourcePolicy,
+            candidateGeneration: entry.value.candidateGeneration
+        )
+        payloads[entry.key] = replacement
+        return replacement
+    }
+
+    @discardableResult
+    public mutating func clear() -> Bool {
+        let removedPayload = !payloads.isEmpty
+        payloads.removeAll(keepingCapacity: true)
+        return removedPayload
+    }
+}
+
 /// Typed delivery can follow native cleanup. Missing terminal metadata is not
 /// a conflict; any still-present native or payload identity must agree. The
 /// coordinator separately validates the delivered token and current generation.

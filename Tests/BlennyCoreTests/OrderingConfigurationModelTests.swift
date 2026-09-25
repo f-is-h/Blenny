@@ -130,9 +130,75 @@ struct OrderingConfigurationModelTests {
     }
 
     @Test func incompletePreferenceReadStillCannotAuthorizeAWrite() throws {
-        #expect(try OrderingConfigurationIdentityResolver.resolve(
-            snapshot: fixture(preferencesComplete: false)
-        ).allSatisfy { !$0.eligible && $0.reasons.contains(.ownerPreferencesIncomplete) })
+        let candidates = try OrderingConfigurationIdentityResolver.resolve(
+            snapshot: fixture(preferencesComplete: false, useCodeIdentity: true)
+        )
+        #expect(candidates.first { $0.bundleIdentifier == "example.alpha" }?.eligible == true)
+        let executableMapped = try #require(candidates.first {
+            $0.bundleIdentifier == "example.beta"
+        })
+        #expect(!executableMapped.eligible)
+        #expect(executableMapped.reasons.contains(.ownerPreferencesIncomplete))
+    }
+
+    @Test func exactBundleKeysUsePublicCodeIdentityWithoutOwnerPreferences() throws {
+        let exactTable: [String: OrderingValue] = [
+            "status:example.alpha::Pinned": .integer(900),
+            "status:example.alpha::Item-0": .integer(100),
+            "status:example.beta::Item-0": .integer(500),
+        ]
+        let snapshot = try fixture(
+            saved: ["unavailable-owner-data": .integer(77)],
+            preferencesComplete: false, table: exactTable, useCodeIdentity: true
+        )
+        let candidates = try OrderingConfigurationIdentityResolver.resolve(snapshot: snapshot)
+        #expect(candidates.allSatisfy { $0.eligible && $0.exactBundleCodeIdentity != nil })
+        #expect(candidates.allSatisfy { $0.ownerSavedPositions.isEmpty })
+
+        let plan = try OrderingPlan.makeConfigurationOrdering(
+            snapshot: snapshot,
+            orderedBundleIdentifiers: ["example.beta", "example.alpha"], now: now
+        )
+        #expect(plan.configurationTargets?.allSatisfy {
+            $0.exactBundleCodeIdentity != nil
+                && $0.ownerSavedPositions.isEmpty
+                && $0.ownerPreferenceNamespace == .unknown
+        } == true)
+        #expect(try JSONDecoder().decode(
+            OrderingPlan.self, from: JSONEncoder().encode(plan)
+        ) == plan)
+
+        let changedUnavailablePreferences = try fixture(
+            saved: ["different-denied-read": .integer(88)],
+            preferencesComplete: false, table: exactTable, useCodeIdentity: true
+        )
+        try plan.validateFresh(equivalentTo: changedUnavailablePreferences, now: now)
+
+        let changedIdentity = try fixture(
+            preferencesComplete: false, table: exactTable, useCodeIdentity: true,
+            codeIdentityDigest: String(repeating: "b", count: 64)
+        )
+        #expect(!plan.isFresh(equivalentTo: changedIdentity, now: now))
+    }
+
+    @Test func exactBundleAnchorCarriesUniqueExecutableAliasKeys() throws {
+        let snapshot = try fixture(
+            preferencesComplete: false,
+            table: [
+                "status:example.alpha::Item-0": .integer(900),
+                "status:Alpha::Legacy": .integer(700),
+                "status:example.beta::Item-0": .integer(500),
+            ],
+            useCodeIdentity: true
+        )
+        let alpha = try #require(try OrderingConfigurationIdentityResolver.resolve(
+            snapshot: snapshot
+        ).first { $0.bundleIdentifier == "example.alpha" })
+        #expect(alpha.eligible)
+        #expect(alpha.exactBundleCodeIdentity != nil)
+        #expect(Set(alpha.keys.map(\.key)) == Set([
+            "status:example.alpha::Item-0", "status:Alpha::Legacy",
+        ]))
     }
 
     @Test func onlyExactCatalogAppleOwnersAreConfigurationEligible() throws {
@@ -183,6 +249,13 @@ struct OrderingConfigurationModelTests {
         }
     }
 
+    @Test("The macOS 27 public build is admitted after its read-only contract check")
+    func publicBuildIsAdmitted() throws {
+        let snapshot = try fixture(build: "26A428")
+        try snapshot.validate()
+        #expect(snapshot.osBuild == "26A428")
+    }
+
     @Test func noOpPositionsCanBindACombinedAreaOnlyCommit() throws {
         let snapshot = try fixture(table: [
             "status:example.alpha::Pinned": .integer(900),
@@ -212,14 +285,20 @@ struct OrderingConfigurationModelTests {
         build: String = OrderingSnapshot.supportedBuild,
         table: [String: OrderingValue]? = nil,
         allowedBundleIdentifiers: Set<String> = [],
-        otherSetting: OrderingValue = .bool(true)
+        otherSetting: OrderingValue = .bool(true),
+        useCodeIdentity: Bool = false,
+        codeIdentityDigest: String = String(repeating: "a", count: 64)
     ) throws -> OrderingSnapshot {
         let processes = [alpha, beta] + (extraProcess.map { [$0] } ?? [])
         let observations = Dictionary(uniqueKeysWithValues: processes.map { process in
             (process.pid, OrderingOwnerObservation(
                 process: process, displayName: process.executableName!,
                 axComplete: !frames.isEmpty, itemFrames: frames,
-                ownerPreferencesComplete: preferencesComplete, ownerSavedPositions: saved
+                ownerPreferencesComplete: preferencesComplete, ownerSavedPositions: saved,
+                applicationCodeIdentity: useCodeIdentity ? OrderingApplicationCodeIdentity(
+                    signingIdentifier: process.bundleIdentifier!, teamIdentifier: "TEAM123456",
+                    designatedRequirementDigest: codeIdentityDigest
+                ) : nil
             ))
         })
         return try OrderingSnapshot(

@@ -160,6 +160,15 @@ struct DebugOrderingConfigurationRequest: Equatable {
             return bundleIdentifier
         }
     }
+
+    var subjectsRequiringConfiguration: [OrderingSubjectID] {
+        OrderingBoardConfigurationScope.subjectsRequiringConfiguration(
+            original: originalOrderedSubjects,
+            draft: orderedSubjects,
+            originalPolicies: originalPolicies,
+            draftPolicies: draftSubjectPolicies
+        )
+    }
 }
 
 struct DebugOrderingTechnicalDetail: Identifiable, Equatable {
@@ -233,7 +242,7 @@ final class DebugOrderingPresentation: ObservableObject {
     var onApply: (String) -> Void = { _ in }
     var onRestore: () -> Void = {}
     var onDiscard: () -> Void = {}
-    var onOpenDataAccess: () -> Void = {}
+    var onChooseLayoutFile: () -> Void = {}
 
     func finishSuccessfulRead() {
         isError = false
@@ -369,7 +378,7 @@ struct DebugOrderingStatusBar: View {
                     : "Undo the last Apply, including visibility and order changes.")
         }
         if presentation.needsDataAccess {
-            Button("Open System Settings", action: presentation.onOpenDataAccess)
+            Button("Choose Layout File…", action: presentation.onChooseLayoutFile)
         }
     }
 

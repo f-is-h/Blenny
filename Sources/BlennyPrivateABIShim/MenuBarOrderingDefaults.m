@@ -13,6 +13,18 @@ static NSString *const BlennyOrderingErrorDomain = @"xyz.fi5h.blenny.ordering-pr
 static NSString *const BlennyOrderingSuite = @"com.apple.MenuBar";
 static NSString *const BlennyOrderingTableKey = @"TrailingItemPreferredPositions";
 
+bool blenny_menu_bar_ordering_supports_system_version(CFStringRef version) {
+    if (version == NULL) return false;
+    NSString *value = (__bridge NSString *)version;
+    NSString *major = [value componentsSeparatedByString:@"."].firstObject;
+    if (major.length == 0
+        || [major rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location
+            != NSNotFound) {
+        return false;
+    }
+    return major.integerValue == 27;
+}
+
 static bool BlennyOrderingReject(
     NSInteger code,
     NSString *description,
@@ -40,8 +52,9 @@ bool blenny_write_menu_bar_ordering_table(
 #endif
             NSDictionary *version = [NSDictionary dictionaryWithContentsOfFile:
                 @"/System/Library/CoreServices/SystemVersion.plist"];
-            if (![version[@"ProductBuildVersion"] isEqual:@"26A5425a"]) {
-                return BlennyOrderingReject(2, @"OS build differs", errorOut);
+            if (!blenny_menu_bar_ordering_supports_system_version(
+                    (__bridge CFStringRef)version[@"ProductVersion"])) {
+                return BlennyOrderingReject(2, @"OS major version differs", errorOut);
             }
             SEL selector = @selector(_initWithSuiteName:container:);
             Method method = class_getInstanceMethod(NSUserDefaults.class, selector);

@@ -38,7 +38,8 @@ public struct FallbackPositionReceipt: Codable, Equatable, Sendable {
             fishOriginal: delta.fishOriginal, fishProposed: delta.fishProposed)
         let owners = baseline.afterProcesses.filter { $0.bundleIdentifier == "xyz.fi5h.blenny" }
         guard owners.count == 1, baseline.beforeProcesses.contains(owners[0]),
-              baseline.runtimeContractVerified, baseline.osBuild == "26A5425a",
+              baseline.runtimeContractVerified,
+              OrderingSnapshot.supportsBuild(baseline.osBuild),
               baseline.architecture == "arm64", baseline.displayCount == 1 else {
             throw OrderingTransactionError.recoveryIdentityConflict
         }

@@ -16,6 +16,13 @@ esac
 
 ordering_trial=${BLENNY_ORDERING_TRIAL:-NO}
 shared_system_item_trial=${BLENNY_SHARED_SYSTEM_ITEM_TRIAL:-NO}
+code_sign_identity=${BLENNY_CODE_SIGN_IDENTITY:--}
+build_number_override=${BLENNY_BUILD_NUMBER:-}
+
+if [[ -z "$code_sign_identity" ]]; then
+  print -u2 "BLENNY_CODE_SIGN_IDENTITY must not be empty"
+  exit 64
+fi
 
 if [[ "$ordering_trial" == "YES" ]]; then
   if [[ "$configuration" != "release" ]]; then
@@ -57,6 +64,50 @@ fi
 swift build --package-path "$repository_root" --scratch-path "$scratch_directory" --configuration "$configuration" --product Blenny "${swift_build_options[@]}"
 binary_directory=$(swift build --package-path "$repository_root" --scratch-path "$scratch_directory" --configuration "$configuration" --show-bin-path "${swift_build_options[@]}")
 
+allocate_build_number() {
+  if [[ -n "$build_number_override" ]]; then
+    if [[ "$build_number_override" != <-> || "$build_number_override" -lt 1 ]]; then
+      print -u2 "BLENNY_BUILD_NUMBER must be a positive integer"
+      exit 64
+    fi
+    print -r -- "$build_number_override"
+    return
+  fi
+
+  local counter_file=${BLENNY_BUILD_NUMBER_FILE:-"$repository_root/LocalData/build-number.txt"}
+  local lock_directory="$counter_file.lock"
+  local attempts=0
+  mkdir -p "${counter_file:h}"
+  until mkdir "$lock_directory" 2>/dev/null; do
+    attempts=$((attempts + 1))
+    if (( attempts >= 200 )); then
+      print -u2 "Timed out waiting for the local build-number lock"
+      exit 75
+    fi
+    sleep 0.05
+  done
+  trap 'rmdir "$lock_directory" 2>/dev/null || true' EXIT INT TERM HUP
+
+  local current=0
+  if [[ -f "$counter_file" ]]; then
+    current=$(<"$counter_file")
+    if [[ "$current" != <-> ]]; then
+      print -u2 "Invalid local build-number counter: $counter_file"
+      exit 65
+    fi
+  fi
+
+  local next=$((current + 1))
+  local temporary="$counter_file.$$.tmp"
+  print -r -- "$next" > "$temporary"
+  mv "$temporary" "$counter_file"
+  rmdir "$lock_directory"
+  trap - EXIT INT TERM HUP
+  print -r -- "$next"
+}
+
+build_number=$(allocate_build_number)
+
 application_directory="$build_root/Blenny.app"
 contents_directory="$application_directory/Contents"
 executable_directory="$contents_directory/MacOS"
@@ -78,6 +129,12 @@ mkdir -p "$executable_directory" "$resources_directory"
 mkdir -p "$app_iconset_directory"
 cp "$binary_directory/Blenny" "$executable_directory/Blenny"
 cp "$repository_root/Config/Info.plist" "$contents_directory/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" \
+  "$contents_directory/Info.plist"
+if [[ "$configuration" == "release" && "$ordering_trial" != "YES" ]]; then
+  /usr/libexec/PlistBuddy -c 'Delete :NSAppDataUsageDescription' \
+    "$contents_directory/Info.plist"
+fi
 cp "$repository_root/Assets/MenuBar/BlennyMenuBarTemplate.svg" "$resources_directory/BlennyMenuBarTemplate.svg"
 
 render_app_icon() {
@@ -102,5 +159,12 @@ render_app_icon 1024 icon_512x512@2x.png
   "$app_iconset_directory"
 
 bundle_identifier=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$repository_root/Config/Info.plist")
-codesign --force --sign - --identifier "$bundle_identifier" "$application_directory"
+codesign_options=(--force --sign "$code_sign_identity" --identifier "$bundle_identifier")
+if [[ "$configuration" == "debug" || "$ordering_trial" == "YES" ]]; then
+  codesign_options+=(--entitlements "$repository_root/Config/OrderingTrial.entitlements")
+fi
+codesign "${codesign_options[@]}" "$application_directory"
+marketing_version=$(/usr/libexec/PlistBuddy \
+  -c 'Print :CFBundleShortVersionString' "$contents_directory/Info.plist")
+print -r -- "Built Blenny $marketing_version (Build $build_number)"
 print -r -- "$application_directory"

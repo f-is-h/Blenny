@@ -391,6 +391,46 @@ struct PolicyBoardInteractionTests {
         }
     }
 
+    @Test("Prepared policy drag sources remain stable until explicitly replaced")
+    func preparedPolicyDragPayloadLifecycle() {
+        var registry = PolicyDragPayloadRegistry()
+        let generation = UUID()
+
+        #expect(registry.payload(
+            bundleIdentifier: revealable,
+            sourcePolicy: .revealable,
+            candidateGeneration: generation
+        ) == nil)
+        let first = registry.prepare(
+            bundleIdentifier: revealable,
+            sourcePolicy: .revealable,
+            candidateGeneration: generation
+        )
+        for _ in 0 ..< 1_000 {
+            #expect(registry.payload(
+                bundleIdentifier: revealable,
+                sourcePolicy: .revealable,
+                candidateGeneration: generation
+            ) == first)
+        }
+
+        let replacement = registry.replace(token: first.dragToken)
+        #expect(replacement?.id != first.id)
+        #expect(registry.replace(token: first.dragToken) == nil)
+        #expect(registry.payload(
+            bundleIdentifier: revealable,
+            sourcePolicy: .revealable,
+            candidateGeneration: generation
+        ) == replacement)
+
+        registry.clear()
+        #expect(registry.payload(
+            bundleIdentifier: revealable,
+            sourcePolicy: .revealable,
+            candidateGeneration: generation
+        ) == nil)
+    }
+
     @Test("The native item provider delivers the transferable drag payload")
     func itemProviderTransferRoundTrip() async throws {
         let payload = PolicyDragPayload(

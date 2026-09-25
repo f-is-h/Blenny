@@ -13,6 +13,7 @@ public enum OrderingError: Error, Equatable, LocalizedError, Sendable {
     case indistinguishablePositions
     case invalidGeometry
     case malformedPlan
+    case unavailableOrderChanges([String])
     case staleSnapshot(String)
     case targetDrift(String)
     case relativeOrderMismatch
@@ -37,6 +38,8 @@ public enum OrderingError: Error, Equatable, LocalizedError, Sendable {
             "The observed positions do not establish a distinguishable left-to-right order."
         case .malformedPlan:
             "The ordering plan no longer matches its reviewed inputs."
+        case let .unavailableOrderChanges(names):
+            "This draft changes the relative order of items that cannot be sorted: \(names.joined(separator: ", "))."
         case let .staleSnapshot(reason):
             "The ordering snapshot is stale: \(reason)."
         case let .targetDrift(key):
@@ -469,6 +472,26 @@ public enum OrderingOwnerPreferenceNamespace: String, Codable, Equatable, Sendab
     case unknown
 }
 
+/// Public code-signing evidence for one running application. The backend emits
+/// this only after strict validity succeeds and the signing identifier matches
+/// the process bundle identifier. The designated-requirement digest binds the
+/// captured identity without persisting the full requirement text.
+public struct OrderingApplicationCodeIdentity: Codable, Equatable, Sendable {
+    public let signingIdentifier: String
+    public let teamIdentifier: String?
+    public let designatedRequirementDigest: String
+
+    public init(
+        signingIdentifier: String,
+        teamIdentifier: String?,
+        designatedRequirementDigest: String
+    ) {
+        self.signingIdentifier = signingIdentifier
+        self.teamIdentifier = teamIdentifier
+        self.designatedRequirementDigest = designatedRequirementDigest
+    }
+}
+
 public struct OrderingOwnerObservation: Codable, Equatable, Sendable {
     public let process: OrderingProcess
     public let displayName: String
@@ -478,11 +501,15 @@ public struct OrderingOwnerObservation: Codable, Equatable, Sendable {
     public let ownerSavedPositions: [String: OrderingValue]
     public let ownerPreferenceNamespace: OrderingOwnerPreferenceNamespace
     public let ownerPreferenceSourceIdentity: String?
+    /// Present only when public Security.framework evidence binds this running
+    /// process to an exact bundle identifier. Legacy snapshots omit it.
+    public let applicationCodeIdentity: OrderingApplicationCodeIdentity?
 
     public init(process: OrderingProcess, displayName: String, axComplete: Bool, itemFrames: [RectSnapshot],
                 ownerPreferencesComplete: Bool, ownerSavedPositions: [String: OrderingValue],
                 ownerPreferenceNamespace: OrderingOwnerPreferenceNamespace = .currentUserAnyHost,
-                ownerPreferenceSourceIdentity: String? = nil) {
+                ownerPreferenceSourceIdentity: String? = nil,
+                applicationCodeIdentity: OrderingApplicationCodeIdentity? = nil) {
         self.process = process
         self.displayName = displayName
         self.axComplete = axComplete
@@ -491,6 +518,7 @@ public struct OrderingOwnerObservation: Codable, Equatable, Sendable {
         self.ownerSavedPositions = ownerSavedPositions
         self.ownerPreferenceNamespace = ownerPreferenceNamespace
         self.ownerPreferenceSourceIdentity = ownerPreferenceSourceIdentity
+        self.applicationCodeIdentity = applicationCodeIdentity
     }
 }
 
@@ -507,8 +535,26 @@ public enum OrderingPolicyScope {
 
 public struct OrderingSnapshot: Codable, Equatable, Sendable {
     public static let tableKey = "TrailingItemPreferredPositions"
+    public static let supportedOperatingSystemMajorVersion = 27
+    /// macOS 27 uses Darwin/build major 26. The complete build remains part of
+    /// snapshot freshness, but every well-formed build in this OS major can be
+    /// captured after the live private-contract probes pass.
+    public static let supportedBuildMajor = 26
+    /// Kept as the deterministic fixture default for the already accepted
+    /// 0.10.0 build. Runtime capture records the actual admitted build.
     public static let supportedBuild = "26A5425a"
     public static let supportedArchitecture = "arm64"
+
+    public static func supportsBuild(_ build: String) -> Bool {
+        let digits = build.prefix(while: { $0.isNumber })
+        let suffix = build.dropFirst(digits.count)
+        guard Int(digits) == supportedBuildMajor,
+              let first = suffix.first, first.isASCII, first.isUppercase,
+              first.isLetter else { return false }
+        return suffix.dropFirst().allSatisfy {
+            $0.isASCII && ($0.isLetter || $0.isNumber)
+        }
+    }
 
     public let schemaVersion: Int
     public let group: [String: OrderingValue]
@@ -553,6 +599,39 @@ public struct OrderingSnapshot: Codable, Equatable, Sendable {
         self.systemHostBindings = systemHostBindings.isEmpty ? nil : systemHostBindings
         self.capturedAt = capturedAt
         try validate()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, group, beforeProcesses, afterProcesses, observationsByPID
+        case osBuild, architecture, runtimeContractVerified, displaySignature
+        case displayCount, displayFrame, lifecycleGeneration, policyFingerprint
+        case orderingAllowedBundleIdentifiers, systemHostBindings, capturedAt
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(group, forKey: .group)
+        try container.encode(beforeProcesses, forKey: .beforeProcesses)
+        try container.encode(afterProcesses, forKey: .afterProcesses)
+        // JSONEncoder encodes dictionaries with non-string keys as alternating
+        // key/value arrays; sortedKeys does not order those entries.
+        var observations = container.nestedUnkeyedContainer(forKey: .observationsByPID)
+        for pid in observationsByPID.keys.sorted() {
+            try observations.encode(pid)
+            try observations.encode(observationsByPID[pid])
+        }
+        try container.encode(osBuild, forKey: .osBuild)
+        try container.encode(architecture, forKey: .architecture)
+        try container.encode(runtimeContractVerified, forKey: .runtimeContractVerified)
+        try container.encode(displaySignature, forKey: .displaySignature)
+        try container.encode(displayCount, forKey: .displayCount)
+        try container.encode(displayFrame, forKey: .displayFrame)
+        try container.encode(lifecycleGeneration, forKey: .lifecycleGeneration)
+        try container.encode(policyFingerprint, forKey: .policyFingerprint)
+        try container.encode(orderingAllowedBundleIdentifiers.sorted(), forKey: .orderingAllowedBundleIdentifiers)
+        try container.encodeIfPresent(systemHostBindings, forKey: .systemHostBindings)
+        try container.encode(capturedAt, forKey: .capturedAt)
     }
 
     public func table() throws -> [String: OrderingValue] {
@@ -720,7 +799,7 @@ public struct OrderingSnapshot: Codable, Equatable, Sendable {
 
     public func validate() throws {
         guard schemaVersion == 1 else { throw OrderingError.invalidSnapshot("unknown schema") }
-        guard osBuild == Self.supportedBuild, architecture == Self.supportedArchitecture,
+        guard Self.supportsBuild(osBuild), architecture == Self.supportedArchitecture,
               runtimeContractVerified else { throw OrderingError.unsupportedRuntime }
         guard (1...16).contains(displayCount), !displaySignature.isEmpty, lifecycleGeneration >= 0,
               !policyFingerprint.isEmpty, Self.valid(displayFrame), displayFrame.width > 0,
@@ -746,6 +825,14 @@ public struct OrderingSnapshot: Codable, Equatable, Sendable {
                 guard source.utf8.count == 64,
                       source.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
                     throw OrderingError.invalidSnapshot("owner preference source identity is invalid")
+                }
+            }
+            if let identity = observation.applicationCodeIdentity {
+                guard identity.signingIdentifier == observation.process.bundleIdentifier,
+                      Self.validToken(identity.signingIdentifier),
+                      identity.teamIdentifier.map(Self.validToken) != false,
+                      Self.validSHA256(identity.designatedRequirementDigest) else {
+                    throw OrderingError.invalidSnapshot("application code identity is invalid")
                 }
             }
             guard observation.itemFrames.allSatisfy(Self.valid) else {
@@ -810,6 +897,11 @@ public struct OrderingSnapshot: Codable, Equatable, Sendable {
     fileprivate static func validToken(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 1_024
             && !value.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 })
+    }
+
+    fileprivate static func validSHA256(_ value: String) -> Bool {
+        value.utf8.count == 64
+            && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
     fileprivate static func sortedProcesses(_ values: [OrderingProcess]) -> [OrderingProcess] {
@@ -1105,13 +1197,19 @@ public struct OrderingConfigurationOwnerTarget: Codable, Equatable, Sendable {
     public let ownerSavedPositions: [String: OrderingValue]
     public let ownerPreferenceNamespace: OrderingOwnerPreferenceNamespace
     public let ownerPreferenceSourceIdentity: String?
+    /// Non-nil only when the owner has an exact bundle-ID status key anchor and
+    /// every associated bundle/executable token is unique to the same process.
+    /// This public signing proof replaces cross-application preference evidence
+    /// for that narrow configuration identity route.
+    public let exactBundleCodeIdentity: OrderingApplicationCodeIdentity?
 
     public init(
         bundleIdentifier: String, displayName: String,
         process: OrderingProcess, keys: [OrderingConfigurationKeyTarget],
         ownerSavedPositions: [String: OrderingValue],
         ownerPreferenceNamespace: OrderingOwnerPreferenceNamespace,
-        ownerPreferenceSourceIdentity: String?
+        ownerPreferenceSourceIdentity: String?,
+        exactBundleCodeIdentity: OrderingApplicationCodeIdentity? = nil
     ) {
         self.bundleIdentifier = bundleIdentifier
         self.displayName = displayName
@@ -1120,6 +1218,7 @@ public struct OrderingConfigurationOwnerTarget: Codable, Equatable, Sendable {
         self.ownerSavedPositions = ownerSavedPositions
         self.ownerPreferenceNamespace = ownerPreferenceNamespace
         self.ownerPreferenceSourceIdentity = ownerPreferenceSourceIdentity
+        self.exactBundleCodeIdentity = exactBundleCodeIdentity
     }
 }
 
@@ -1309,6 +1408,7 @@ public struct OrderingConfigurationBundleCandidate: Equatable, Sendable {
     public let process: OrderingProcess?
     public let keys: [(key: String, persistentIdentifier: String, value: OrderingValue)]
     public let ownerSavedPositions: [String: OrderingValue]
+    public let exactBundleCodeIdentity: OrderingApplicationCodeIdentity?
     public let reasons: [OrderingEligibilityReason]
 
     public var eligible: Bool { reasons.isEmpty }
@@ -1323,6 +1423,7 @@ public struct OrderingConfigurationBundleCandidate: Equatable, Sendable {
             && lhs.keys.map { [$0.key, $0.persistentIdentifier] } == rhs.keys.map { [$0.key, $0.persistentIdentifier] }
             && lhs.keys.map(\.value) == rhs.keys.map(\.value)
             && lhs.ownerSavedPositions == rhs.ownerSavedPositions
+            && lhs.exactBundleCodeIdentity == rhs.exactBundleCodeIdentity
             && lhs.reasons == rhs.reasons
     }
 }
@@ -1352,6 +1453,7 @@ public enum OrderingConfigurationIdentityResolver {
             var keys: [(key: String, persistentIdentifier: String, value: OrderingValue)] = []
             var displayName = bundle
             var ownerSavedPositions: [String: OrderingValue] = [:]
+            var exactBundleCodeIdentity: OrderingApplicationCodeIdentity?
 
             if snapshot.displayCount != 1 { reasons.append(.singleDisplayRequired) }
             if owners.count != 1 || snapshot.afterProcesses.filter({ $0.bundleIdentifier == bundle }).count != 1 {
@@ -1392,14 +1494,23 @@ public enum OrderingConfigurationIdentityResolver {
                     displayName = observation.displayName
                     ownerSavedPositions = observation.ownerSavedPositions
                     if observation.process != process { reasons.append(.ownerLifetimeUnverified) }
-                    if !observation.ownerPreferencesComplete {
-                        reasons.append(.ownerPreferencesIncomplete)
+                    let hasExactBundleKey = keys.contains { key in
+                        parsedKeys.first(where: { $0.0 == key.key })?.1 == bundle
                     }
-                    let namespaceVerified = observation.ownerPreferenceNamespace == .currentUserAnyHost
-                        || (observation.ownerPreferenceNamespace == .sandboxContainer
-                            && observation.ownerPreferenceSourceIdentity != nil)
-                    if !namespaceVerified {
-                        reasons.append(.ownerPreferenceNamespaceUnsupported)
+                    if hasExactBundleKey,
+                       observation.applicationCodeIdentity?.signingIdentifier == bundle {
+                        exactBundleCodeIdentity = observation.applicationCodeIdentity
+                        ownerSavedPositions = [:]
+                    } else {
+                        if !observation.ownerPreferencesComplete {
+                            reasons.append(.ownerPreferencesIncomplete)
+                        }
+                        let namespaceVerified = observation.ownerPreferenceNamespace == .currentUserAnyHost
+                            || (observation.ownerPreferenceNamespace == .sandboxContainer
+                                && observation.ownerPreferenceSourceIdentity != nil)
+                        if !namespaceVerified {
+                            reasons.append(.ownerPreferenceNamespaceUnsupported)
+                        }
                     }
                 } else {
                     reasons.append(.observationMissing)
@@ -1415,6 +1526,7 @@ public enum OrderingConfigurationIdentityResolver {
             return OrderingConfigurationBundleCandidate(
                 bundleIdentifier: bundle, displayName: displayName,
                 process: process, keys: keys, ownerSavedPositions: ownerSavedPositions,
+                exactBundleCodeIdentity: exactBundleCodeIdentity,
                 reasons: deduplicated(reasons)
             )
         }
@@ -1729,11 +1841,25 @@ public struct OrderingPlan: Codable, Equatable, Sendable {
         } else {
             Set(targets.map(\.process.pid))
         }
+        let exactCodeIdentitiesByPID: [Int32: OrderingApplicationCodeIdentity] = if schemaVersion == 3 {
+            Dictionary(uniqueKeysWithValues: (configurationTargets ?? []).compactMap { target in
+                target.exactBundleCodeIdentity.map { (target.process.pid, $0) }
+            })
+        } else if schemaVersion == 4 {
+            Dictionary(uniqueKeysWithValues: (configurationSubjectTargets ?? []).compactMap { target in
+                guard case let .application(owner) = target,
+                      let identity = owner.exactBundleCodeIdentity else { return nil }
+                return (owner.process.pid, identity)
+            })
+        } else {
+            [:]
+        }
         if let difference = Self.observationDifference(
             baseline.observationsByPID.filter { selectedPIDs.contains($0.key) },
             snapshot.observationsByPID.filter { selectedPIDs.contains($0.key) },
             selectedPIDs: selectedPIDs,
-            includeGeometryEvidence: !configurationPlan
+            includeGeometryEvidence: !configurationPlan,
+            exactCodeIdentitiesByPID: exactCodeIdentitiesByPID
         ) {
             throw OrderingError.staleSnapshot(difference)
         }
@@ -2050,8 +2176,11 @@ public struct OrderingPlan: Codable, Equatable, Sendable {
                 displayName: candidate.displayName,
                 process: candidate.process!, keys: targets,
                 ownerSavedPositions: candidate.ownerSavedPositions,
-                ownerPreferenceNamespace: snapshot.observationsByPID[candidate.process!.pid]!.ownerPreferenceNamespace,
-                ownerPreferenceSourceIdentity: snapshot.observationsByPID[candidate.process!.pid]!.ownerPreferenceSourceIdentity
+                ownerPreferenceNamespace: candidate.exactBundleCodeIdentity == nil
+                    ? snapshot.observationsByPID[candidate.process!.pid]!.ownerPreferenceNamespace : .unknown,
+                ownerPreferenceSourceIdentity: candidate.exactBundleCodeIdentity == nil
+                    ? snapshot.observationsByPID[candidate.process!.pid]!.ownerPreferenceSourceIdentity : nil,
+                exactBundleCodeIdentity: candidate.exactBundleCodeIdentity
             )
         }
     }
@@ -2137,8 +2266,11 @@ public struct OrderingPlan: Codable, Equatable, Sendable {
                     bundleIdentifier: candidate.bundleIdentifier,
                     displayName: candidate.displayName, process: process, keys: keys,
                     ownerSavedPositions: candidate.ownerSavedPositions,
-                    ownerPreferenceNamespace: observation.ownerPreferenceNamespace,
-                    ownerPreferenceSourceIdentity: observation.ownerPreferenceSourceIdentity
+                    ownerPreferenceNamespace: candidate.exactBundleCodeIdentity == nil
+                        ? observation.ownerPreferenceNamespace : .unknown,
+                    ownerPreferenceSourceIdentity: candidate.exactBundleCodeIdentity == nil
+                        ? observation.ownerPreferenceSourceIdentity : nil,
+                    exactBundleCodeIdentity: candidate.exactBundleCodeIdentity
                 ))
             case let .system(candidate):
                 let value = candidate.value!
@@ -2262,7 +2394,8 @@ public struct OrderingPlan: Codable, Equatable, Sendable {
         _ lhs: [Int32: OrderingOwnerObservation],
         _ rhs: [Int32: OrderingOwnerObservation],
         selectedPIDs: Set<Int32>,
-        includeGeometryEvidence: Bool
+        includeGeometryEvidence: Bool,
+        exactCodeIdentitiesByPID: [Int32: OrderingApplicationCodeIdentity] = [:]
     ) -> String? {
         let allPIDs = Set(lhs.keys).union(rhs.keys)
         if let pid = allPIDs.sorted().first(where: { (lhs[$0] == nil) != (rhs[$0] == nil) }) {
@@ -2282,6 +2415,13 @@ public struct OrderingPlan: Codable, Equatable, Sendable {
             }
             if includeGeometryEvidence, first.axComplete != second.axComplete {
                 return "Accessibility completeness changed for \(owner)"
+            }
+            if let expectedIdentity = exactCodeIdentitiesByPID[pid] {
+                if first.applicationCodeIdentity != expectedIdentity
+                    || second.applicationCodeIdentity != expectedIdentity {
+                    return "application code identity changed for \(owner)"
+                }
+                continue
             }
             if first.ownerPreferencesComplete != second.ownerPreferencesComplete {
                 return "owner preference completeness changed for \(owner)"

@@ -399,26 +399,21 @@ struct PolicyEditorViewModelTests {
         #expect(!reset.hasDraftChanges)
     }
 
-    @Test("Accessibility system prompt is requested at most once")
+    @Test("Accessibility prompt repeats only after a new process lifetime")
     func onboardingPromptPolicy() {
+        var state = AccessibilityOnboardingState()
         #expect(
-            AccessibilityOnboardingPolicy.action(
-                isTrusted: true,
-                hasRequestedSystemPrompt: false
-            ) == .alreadyGranted
+            state.nextAction(isTrusted: true) == .alreadyGranted
         )
         #expect(
-            AccessibilityOnboardingPolicy.action(
-                isTrusted: false,
-                hasRequestedSystemPrompt: false
-            ) == .requestSystemPrompt
+            state.nextAction(isTrusted: false) == .requestSystemPrompt
         )
         #expect(
-            AccessibilityOnboardingPolicy.action(
-                isTrusted: false,
-                hasRequestedSystemPrompt: true
-            ) == .openSystemSettings
+            state.nextAction(isTrusted: false) == .openSystemSettings
         )
+
+        var reopenedApp = AccessibilityOnboardingState()
+        #expect(reopenedApp.nextAction(isTrusted: false) == .requestSystemPrompt)
     }
 
     @Test("Accessibility grant refreshes once only on a safe trust transition")

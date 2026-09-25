@@ -156,6 +156,25 @@ struct OrderingInsertionTransactionTests {
         #expect(await recovery.receipt?.sessionIdentifier != retained.sessionIdentifier)
     }
 
+    @Test("Undo rebase review token survives receipt serialization")
+    func undoRebaseTokenStableAcrossReceiptDecodes() async throws {
+        let fixture = try InsertionTransactionFixture()
+        let backend = InsertionTransactionBackend(fixture: fixture)
+        let recovery = InsertionTransactionRecovery()
+        let writer = makeWriter(backend, recovery)
+        let first = try configurationPlan(fixture.baseline)
+        _ = try await writer.applyConfigurationOrdering(first, confirmedFingerprint: first.fingerprint)
+        try await backend.changeTarget("status:com.example.owner0::item", to: .integer(777))
+        let current = await backend.current
+        let retained = try #require(await recovery.receipt)
+        let data = try JSONEncoder().encode(retained)
+        let expected = try #require(try retained.undoLedgerRebaseReview(in: current)).token
+        for _ in 0..<100 {
+            let decoded = try JSONDecoder().decode(OrderingRecoveryReceipt.self, from: data)
+            #expect(try decoded.undoLedgerRebaseReview(in: current)?.token == expected)
+        }
+    }
+
     @Test("A rebase token refuses later drift anywhere in the retained ledger")
     func undoRebaseReviewBecomesStale() async throws {
         let fixture = try InsertionTransactionFixture()
@@ -508,6 +527,50 @@ struct OrderingInsertionTransactionTests {
         #expect(await recovery.receipt == nil)
     }
 
+    @Test("Exact bundle code identity supports configuration Apply and Undo without owner preferences")
+    func exactBundleCodeIdentityApplyAndUndo() async throws {
+        let fixture = try InsertionTransactionFixture(usesExactCodeIdentity: true)
+        let backend = InsertionTransactionBackend(fixture: fixture, freezeGeometry: true)
+        let recovery = InsertionTransactionRecovery()
+        let writer = makeWriter(backend, recovery)
+        let plan = try configurationPlan(fixture.baseline)
+
+        #expect(plan.configurationTargets?.allSatisfy {
+            $0.exactBundleCodeIdentity != nil && $0.ownerSavedPositions.isEmpty
+        } == true)
+        _ = try await writer.applyConfigurationOrdering(
+            plan, confirmedFingerprint: plan.fingerprint
+        )
+        #expect(await recovery.receipt?.configurationVerified == true)
+        #expect(await recovery.receipt?.ownerBindings?.allSatisfy {
+            $0.exactBundleCodeIdentity != nil
+        } == true)
+
+        let restored = try await writer.restoreOrdering()
+        #expect(restored.preferencesRestored)
+        #expect(await backend.current.group == fixture.baseline.group)
+        #expect(await recovery.receipt == nil)
+    }
+
+    @Test("Exact bundle recovery refuses a changed code identity before writing")
+    func exactBundleRecoveryRejectsCodeIdentityDrift() async throws {
+        let fixture = try InsertionTransactionFixture(usesExactCodeIdentity: true)
+        let backend = InsertionTransactionBackend(fixture: fixture, freezeGeometry: true)
+        let recovery = InsertionTransactionRecovery()
+        let writer = makeWriter(backend, recovery)
+        let plan = try configurationPlan(fixture.baseline)
+        _ = try await writer.applyConfigurationOrdering(
+            plan, confirmedFingerprint: plan.fingerprint
+        )
+        try await backend.changeCodeIdentityDigest(String(repeating: "b", count: 64))
+
+        await #expect(throws: OrderingTransactionError.recoveryIdentityConflict) {
+            _ = try await writer.restoreOrdering()
+        }
+        #expect(await backend.writeCount == 1)
+        #expect(await recovery.receipt?.hasConfigurationUndo == true)
+    }
+
     @Test("Undo reverses only the latest successful configuration commit")
     func repeatedConfigurationCommits() async throws {
         let fixture = try InsertionTransactionFixture()
@@ -564,8 +627,8 @@ struct OrderingInsertionTransactionTests {
         #expect(await backend.writeCount == 2)
     }
 
-    @Test("Interrupted revision rollback is inspected without a second inverse")
-    func interruptedRollbackInspection() async throws {
+    @Test("Interrupted revision rollback is inspected without undoing an earlier policy", arguments: [false, true])
+    func interruptedRollbackInspection(hasEarlierPolicyUndo: Bool) async throws {
         let fixture = try InsertionTransactionFixture()
         let backend = InsertionTransactionBackend(fixture: fixture)
         let recovery = InsertionTransactionRecovery()
@@ -598,6 +661,15 @@ struct OrderingInsertionTransactionTests {
             pendingValues: try #require(first.configurationAfterValues)
         )
         receipt.phase = .restoreIntent
+        if hasEarlierPolicyUndo {
+            let earlierPolicy = try preparedPolicyChange()
+            receipt.schemaVersion = 4
+            receipt.undoPolicy = OrderingPolicyUndo(
+                before: earlierPolicy.oldPolicy, after: earlierPolicy.newPolicy,
+                backup: nil
+            )
+        }
+        #expect(receipt.hasPendingRevisionRollback)
         try await recovery.save(receipt)
         let writer = makeWriter(backend, recovery)
 
@@ -606,6 +678,9 @@ struct OrderingInsertionTransactionTests {
         #expect(await backend.writeCount == 1)
         #expect(await recovery.receipt?.phase == .applied)
         #expect(await recovery.receipt?.hasConfigurationUndo == true)
+        #expect(await recovery.receipt?.hasPendingRevisionRollback == false)
+        #expect(await recovery.receipt?.originalPolicy == nil)
+        #expect((await recovery.receipt?.undoPolicy != nil) == hasEarlierPolicyUndo)
     }
 
     @Test("A multi-owner insertion uses one write and one exact inverse")
@@ -714,6 +789,87 @@ struct OrderingInsertionTransactionTests {
         #expect(await writer.activePlanSnapshot() == inverse.report.newBaselinePlan)
     }
 
+    @Test("Unified Undo after Stop restores policy and order without resuming management")
+    func unifiedUndoAfterStop() async throws {
+        let fixture = try InsertionTransactionFixture()
+        let backend = InsertionTransactionBackend(fixture: fixture)
+        let recovery = InsertionTransactionRecovery()
+        let forward = try preparedPolicyChange()
+        let store = MemoryPolicyStore(document: forward.oldPolicy)
+        let writer = CoordinatedPolicyWriter(
+            assertionWriter: InsertionAssertionWriter(),
+            persistentWriter: InsertionPersistentWriter(),
+            orderingBackend: backend,
+            orderingRecovery: recovery
+        )
+        let plan = try configurationPlan(fixture.baseline)
+
+        _ = try await writer.applyConfigurationOrdering(
+            plan, confirmedFingerprint: plan.fingerprint,
+            policyChange: forward, policyStore: store
+        )
+        await writer.restoreAndStop()
+        let stoppedAfter = try forward.newPolicy.settingManagementEnabled(false)
+        try await store.save(stoppedAfter)
+        let inverse = try preparedPolicyChange(
+            inverse: true, inverseManagementEnabled: false
+        )
+        let stoppedBefore = try forward.oldPolicy.settingManagementEnabled(false)
+
+        _ = try await writer.restoreOrdering(policyStore: store, policyUndo: inverse)
+
+        #expect(await store.document == stoppedBefore)
+        #expect(await backend.current.group == fixture.baseline.group)
+        #expect(await recovery.receipt == nil)
+        #expect(await writer.activePlanSnapshot() == nil)
+    }
+
+    @Test("Unified Undo after reopening while stopped uses an inactive recovery writer")
+    func unifiedUndoAfterStoppedReopen() async throws {
+        let fixture = try InsertionTransactionFixture()
+        let backend = InsertionTransactionBackend(fixture: fixture)
+        let recovery = InsertionTransactionRecovery()
+        let forward = try preparedPolicyChange()
+        let store = MemoryPolicyStore(document: forward.oldPolicy)
+        let applyingWriter = CoordinatedPolicyWriter(
+            assertionWriter: InsertionAssertionWriter(),
+            persistentWriter: InsertionPersistentWriter(),
+            orderingBackend: backend,
+            orderingRecovery: recovery
+        )
+        let plan = try configurationPlan(fixture.baseline)
+
+        _ = try await applyingWriter.applyConfigurationOrdering(
+            plan, confirmedFingerprint: plan.fingerprint,
+            policyChange: forward, policyStore: store
+        )
+        await applyingWriter.restoreAndStop()
+        let stoppedAfter = try forward.newPolicy.settingManagementEnabled(false)
+        try await store.save(stoppedAfter)
+
+        // A reopened app creates a new coordinator. It has no active plan, but
+        // it has not received the old process's restoreAndStop() call.
+        let recoveryWriter = CoordinatedPolicyWriter(
+            assertionWriter: InsertionAssertionWriter(),
+            persistentWriter: InsertionPersistentWriter(),
+            orderingBackend: backend,
+            orderingRecovery: recovery
+        )
+        let inverse = try preparedPolicyChange(
+            inverse: true, inverseManagementEnabled: false
+        )
+        let stoppedBefore = try forward.oldPolicy.settingManagementEnabled(false)
+
+        _ = try await recoveryWriter.restoreOrdering(
+            policyStore: store, policyUndo: inverse
+        )
+
+        #expect(await store.document == stoppedBefore)
+        #expect(await backend.current.group == fixture.baseline.group)
+        #expect(await recovery.load() == nil)
+        #expect(await recoveryWriter.activePlanSnapshot() == nil)
+    }
+
     private func configurationPlan(_ snapshot: OrderingSnapshot) throws -> OrderingPlan {
         try OrderingPlan.makeConfigurationOrdering(
             snapshot: snapshot,
@@ -724,7 +880,8 @@ struct OrderingInsertionTransactionTests {
     }
 
     private func preparedPolicyChange(
-        recoveryBackupFingerprint: String? = nil, inverse: Bool = false, siri: Bool = false
+        recoveryBackupFingerprint: String? = nil, inverse: Bool = false,
+        siri: Bool = false, inverseManagementEnabled: Bool = true
     ) throws -> PreparedPolicyEdit {
         let blenny = "xyz.fi5h.blenny"
         let owners = (0..<3).map { "com.example.owner\($0)" }
@@ -760,9 +917,16 @@ struct OrderingInsertionTransactionTests {
         )
         let forward = try #require(prepared.prepared)
         guard inverse else { return forward }
+        let inverseOld = try forward.newPolicy.settingManagementEnabled(
+            inverseManagementEnabled
+        )
+        let inverseTarget = try old.settingManagementEnabled(
+            inverseManagementEnabled
+        )
         return try #require(PolicyDryRunner.prepare(
-            oldPolicy: forward.newPolicy, draft: BundlePolicyDraft(acceptedPolicy: old),
-            managementEnabled: true, candidates: inventory,
+            oldPolicy: inverseOld,
+            draft: BundlePolicyDraft(acceptedPolicy: inverseTarget),
+            managementEnabled: inverseManagementEnabled, candidates: inventory,
             observedRunningBundleIdentifiers: Set([blenny] + owners),
             scope: PolicyValidationScope(approvedBundleIdentifiers: [blenny] + owners),
             blennyBundleIdentifier: blenny,
@@ -775,7 +939,7 @@ private struct InsertionTransactionFixture: Sendable {
     let baseline: OrderingSnapshot
     let plan: OrderingPlan
 
-    init() throws {
+    init(usesExactCodeIdentity: Bool = false) throws {
         let now = Date()
         let processes = (0..<3).map { index in
             OrderingProcess(
@@ -792,7 +956,13 @@ private struct InsertionTransactionFixture: Sendable {
                 process: process, displayName: "Owner\(index)",
                 axComplete: true,
                 itemFrames: [RectSnapshot(x: Double(30 + index * 50), y: 0, width: 20, height: 22)],
-                ownerPreferencesComplete: true, ownerSavedPositions: ["item": value]
+                ownerPreferencesComplete: !usesExactCodeIdentity,
+                ownerSavedPositions: usesExactCodeIdentity ? [:] : ["item": value],
+                ownerPreferenceNamespace: usesExactCodeIdentity ? .unknown : .currentUserAnyHost,
+                applicationCodeIdentity: usesExactCodeIdentity ? OrderingApplicationCodeIdentity(
+                    signingIdentifier: process.bundleIdentifier!, teamIdentifier: "TEAM123456",
+                    designatedRequirementDigest: String(repeating: "a", count: 64)
+                ) : nil
             )
         }
         baseline = try OrderingSnapshot(
@@ -804,15 +974,20 @@ private struct InsertionTransactionFixture: Sendable {
             lifecycleGeneration: 1, policyFingerprint: "insertion-policy",
             orderingAllowedBundleIdentifiers: Set(processes.compactMap(\.bundleIdentifier)), capturedAt: now
         )
-        plan = try OrderingPlan.makeReordering(
-            snapshot: baseline,
-            orderedBundleIdentifiers: [processes[2], processes[0], processes[1]].compactMap(\.bundleIdentifier)
-        )
+        let order = [processes[2], processes[0], processes[1]].compactMap(\.bundleIdentifier)
+        plan = usesExactCodeIdentity
+            ? try OrderingPlan.makeConfigurationOrdering(
+                snapshot: baseline, orderedBundleIdentifiers: order
+            )
+            : try OrderingPlan.makeReordering(
+                snapshot: baseline, orderedBundleIdentifiers: order
+            )
     }
 
     func snapshot(
         group: [String: OrderingValue], freezeGeometry: Bool = false,
-        excludingBundleIdentifiers excluded: Set<String> = []
+        excludingBundleIdentifiers excluded: Set<String> = [],
+        codeIdentityDigest: String? = nil
     ) throws -> OrderingSnapshot {
         guard case let .dictionary(table)? = group[OrderingSnapshot.tableKey] else {
             throw OrderingTransactionError.invalidReceipt
@@ -832,7 +1007,18 @@ private struct InsertionTransactionFixture: Sendable {
             observations[pid] = OrderingOwnerObservation(
                 process: original.process, displayName: original.displayName, axComplete: true,
                 itemFrames: freezeGeometry ? original.itemFrames : (slot?.itemFrames ?? original.itemFrames),
-                ownerPreferencesComplete: true, ownerSavedPositions: original.ownerSavedPositions
+                ownerPreferencesComplete: original.ownerPreferencesComplete,
+                ownerSavedPositions: original.ownerSavedPositions,
+                ownerPreferenceNamespace: original.ownerPreferenceNamespace,
+                ownerPreferenceSourceIdentity: original.ownerPreferenceSourceIdentity,
+                applicationCodeIdentity: original.applicationCodeIdentity.map { identity in
+                    OrderingApplicationCodeIdentity(
+                        signingIdentifier: identity.signingIdentifier,
+                        teamIdentifier: identity.teamIdentifier,
+                        designatedRequirementDigest: codeIdentityDigest
+                            ?? identity.designatedRequirementDigest
+                    )
+                }
             )
         }
         return try OrderingSnapshot(
@@ -936,6 +1122,14 @@ private actor InsertionTransactionBackend: MenuBarOrderingBackend {
         group[OrderingSnapshot.tableKey] = .dictionary(table)
         current = try fixture.snapshot(
             group: group, excludingBundleIdentifiers: excludedBundleIdentifiers
+        )
+    }
+
+    func changeCodeIdentityDigest(_ digest: String) throws {
+        current = try fixture.snapshot(
+            group: current.group,
+            excludingBundleIdentifiers: excludedBundleIdentifiers,
+            codeIdentityDigest: digest
         )
     }
 

@@ -10,7 +10,6 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
 {
     private static let frameworkPath =
         "/System/Library/PrivateFrameworks/ControlCenter.framework/ControlCenter"
-    private static let supportedBuild = "26A5425a"
     private static let siriDomain = "com.apple.Siri"
     private static let timeMachineDomain = "com.apple.systemuiserver"
     private static let nowPlayingDomain = "com.apple.controlcenter"
@@ -246,12 +245,7 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
     }
 
     private func validateRuntime() throws {
-        var bytes = [CChar](repeating: 0, count: 128)
-        var size = bytes.count
-        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27,
-              sysctlbyname("kern.osversion", &bytes, &size, nil, 0) == 0,
-              String(decoding: bytes.prefix(while: { $0 != 0 }).map(UInt8.init), as: UTF8.self)
-                == Self.supportedBuild else {
+        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27 else {
             throw SharedSystemItemTrialError.unsupportedRuntime
         }
     }

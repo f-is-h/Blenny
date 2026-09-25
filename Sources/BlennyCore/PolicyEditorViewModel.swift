@@ -6,13 +6,18 @@ public enum AccessibilityOnboardingAction: Equatable, Sendable {
     case openSystemSettings
 }
 
-public enum AccessibilityOnboardingPolicy {
-    public static func action(
-        isTrusted: Bool,
-        hasRequestedSystemPrompt: Bool
-    ) -> AccessibilityOnboardingAction {
+/// Prevents repeated system prompts during one process lifetime without
+/// suppressing a new request after the app is replaced or reopened.
+public struct AccessibilityOnboardingState: Sendable {
+    public private(set) var hasRequestedSystemPromptThisLaunch = false
+
+    public init() {}
+
+    public mutating func nextAction(isTrusted: Bool) -> AccessibilityOnboardingAction {
         if isTrusted { return .alreadyGranted }
-        return hasRequestedSystemPrompt ? .openSystemSettings : .requestSystemPrompt
+        if hasRequestedSystemPromptThisLaunch { return .openSystemSettings }
+        hasRequestedSystemPromptThisLaunch = true
+        return .requestSystemPrompt
     }
 }
 

@@ -5,6 +5,46 @@ import Foundation
 
 @Suite("Configuration ordering backend scope")
 struct OrderingConfigurationBackendScopeTests {
+    @Test func exactBundleCodeIdentityRequiresExactUniqueStatusTokens() {
+        let owner = OrderingProcess(
+            bundleIdentifier: "example.owner", executableName: "Owner", pid: 42,
+            launchTime: Date(timeIntervalSince1970: 100), isSystem: false
+        )
+        let exact = ["status:example.owner::first": OrderingValue.integer(3)]
+        let evidence = MacOS27MenuBarOrderingBackend.exactBundleApplicationIdentityForTesting(
+            process: owner, table: exact, processes: [owner],
+            signingIdentifier: "example.owner"
+        )
+        #expect(evidence?.signingIdentifier == "example.owner")
+
+        #expect(MacOS27MenuBarOrderingBackend.exactBundleApplicationIdentityForTesting(
+            process: owner,
+            table: ["status:Owner::first": .integer(3)],
+            processes: [owner], signingIdentifier: "example.owner"
+        ) == nil)
+        #expect(MacOS27MenuBarOrderingBackend.exactBundleApplicationIdentityForTesting(
+            process: owner,
+            table: [
+                "status:example.owner::first": .integer(3),
+                "status:Owner::legacy": .integer(2),
+            ],
+            processes: [owner], signingIdentifier: "example.owner"
+        ) != nil)
+        #expect(MacOS27MenuBarOrderingBackend.exactBundleApplicationIdentityForTesting(
+            process: owner, table: exact, processes: [owner],
+            signingIdentifier: "different.owner"
+        ) == nil)
+
+        let collision = OrderingProcess(
+            bundleIdentifier: "example.other", executableName: "example.owner", pid: 43,
+            launchTime: Date(timeIntervalSince1970: 101), isSystem: false
+        )
+        #expect(MacOS27MenuBarOrderingBackend.exactBundleApplicationIdentityForTesting(
+            process: owner, table: exact, processes: [owner, collision],
+            signingIdentifier: "example.owner"
+        ) == nil)
+    }
+
     @Test func onlyExactMappedSystemModulesAreAdmittedToConfigurationWrites() throws {
         let before: [String: OrderingValue] = [
             "module:Bluetooth": .integer(3), "module:WiFi": .integer(2), "module:Clock": .integer(1)
@@ -107,6 +147,89 @@ struct OrderingConfigurationBackendScopeTests {
                 proposed: ["unknown-control": .integer(2)],
                 configurationMode: true
             )
+        }
+    }
+
+    @Test func containerFileDisagreementGetsOneBoundedReadRetry() async throws {
+        let expected = ["TrailingItemPreferredPositions": OrderingValue.dictionary([
+            "status:example.owner::Item-0": .real(42)
+        ])]
+        var reads = 0
+        var settlements = 0
+        let recovered = try await MacOS27MenuBarOrderingBackend
+            .readCorroboratedGroupAfterBoundedSettle(
+                read: {
+                    reads += 1
+                    if reads == 1 {
+                        throw MacOS27MenuBarOrderingBackendError.groupSourcesDisagree
+                    }
+                    return expected
+                },
+                settle: { settlements += 1 }
+            )
+        #expect(recovered == expected)
+        #expect(reads == 2)
+        #expect(settlements == 1)
+
+        reads = 0
+        settlements = 0
+        await #expect(throws: MacOS27MenuBarOrderingBackendError.groupSourcesDisagree) {
+            try await MacOS27MenuBarOrderingBackend.readCorroboratedGroupAfterBoundedSettle(
+                read: {
+                    reads += 1
+                    throw MacOS27MenuBarOrderingBackendError.groupSourcesDisagree
+                },
+                settle: { settlements += 1 }
+            )
+        }
+        #expect(reads == 2)
+        #expect(settlements == 1)
+
+        reads = 0
+        settlements = 0
+        await #expect(throws: MacOS27MenuBarOrderingBackendError.groupChangedDuringCapture) {
+            try await MacOS27MenuBarOrderingBackend.readCorroboratedGroupAfterBoundedSettle(
+                read: {
+                    reads += 1
+                    throw MacOS27MenuBarOrderingBackendError.groupChangedDuringCapture
+                },
+                settle: { settlements += 1 }
+            )
+        }
+        #expect(reads == 1)
+        #expect(settlements == 0)
+    }
+
+    @Test("Neither direction of a generation split is a verified configuration", arguments: [false, true])
+    func generationSplitRequiresSettlement(fileLags: Bool) async throws {
+        let before = [OrderingSnapshot.tableKey: OrderingValue.dictionary(["status:example.owner::one": .real(10)])]
+        let after = [OrderingSnapshot.tableKey: OrderingValue.dictionary(["status:example.owner::one": .real(20)])]
+        let file = fileLags ? before : after
+        let api = fileLags ? after : before
+        guard case let .dictionary(apiTable)? = api[OrderingSnapshot.tableKey],
+              case let .dictionary(finalTable)? = after[OrderingSnapshot.tableKey] else {
+            Issue.record("Missing fixture table")
+            return
+        }
+        #expect(throws: MacOS27MenuBarOrderingBackendError.groupSourcesDisagree) {
+            try MacOS27MenuBarOrderingBackend.corroboratedGroup(first: file, containerTable: apiTable, second: file)
+        }
+        var settled = false
+        var reads = 0
+        let result = try await MacOS27MenuBarOrderingBackend.readCorroboratedGroupAfterBoundedSettle(
+            read: {
+                reads += 1
+                return try MacOS27MenuBarOrderingBackend.corroboratedGroup(
+                    first: settled ? after : file,
+                    containerTable: settled ? finalTable : apiTable,
+                    second: settled ? after : file
+                )
+            }, settle: { settled = true }
+        )
+        #expect(result == after)
+        #expect(reads == 2)
+        #expect(throws: MacOS27MenuBarOrderingBackendError.groupChangedDuringCapture) {
+            try MacOS27MenuBarOrderingBackend.corroboratedGroup(first: before, containerTable: finalTable, second: after)
         }
     }
 }

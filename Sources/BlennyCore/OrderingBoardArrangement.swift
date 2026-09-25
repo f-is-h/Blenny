@@ -288,6 +288,52 @@ public struct OrderingBoardLayoutDraft: Equatable, Sendable {
     }
 }
 
+/// Narrows a pure same-area ordering edit to the subjects whose relative
+/// order actually changed. A visibility move still uses the complete global
+/// Hidden -> Revealable -> Visible target because it changes area boundaries.
+public enum OrderingBoardConfigurationScope {
+    public static func subjectsRequiringConfiguration(
+        original: [OrderingSubjectID],
+        draft: [OrderingSubjectID],
+        originalPolicies: [OrderingSubjectID: MenuBarBundlePolicy],
+        draftPolicies: [OrderingSubjectID: MenuBarBundlePolicy]
+    ) -> [OrderingSubjectID] {
+        guard original.count == draft.count,
+              Set(original) == Set(draft),
+              Set(original).count == original.count else {
+            return draft
+        }
+
+        let policyChanged = draft.contains {
+            originalPolicies[$0] != draftPolicies[$0]
+        }
+        guard !policyChanged else { return draft }
+
+        let originalRank = Dictionary(uniqueKeysWithValues: original.enumerated().map {
+            ($0.element, $0.offset)
+        })
+        let draftRank = Dictionary(uniqueKeysWithValues: draft.enumerated().map {
+            ($0.element, $0.offset)
+        })
+        var changed: Set<OrderingSubjectID> = []
+        for leftIndex in original.indices {
+            for rightIndex in original.index(after: leftIndex)..<original.endIndex {
+                let left = original[leftIndex]
+                let right = original[rightIndex]
+                guard originalPolicies[left] == originalPolicies[right],
+                      draftPolicies[left] == draftPolicies[right],
+                      let newLeft = draftRank[left], let newRight = draftRank[right],
+                      (leftIndex < rightIndex) != (newLeft < newRight) else {
+                    continue
+                }
+                changed.insert(left)
+                changed.insert(right)
+            }
+        }
+        return draft.filter { changed.contains($0) && originalRank[$0] != nil }
+    }
+}
+
 public struct OrderingBoardLayoutItemID: Equatable, Hashable, Sendable {
     public let bundleIdentifier: String
     public let sourcePolicy: MenuBarBundlePolicy
@@ -492,7 +538,10 @@ public struct OrderingBoardDragPayloadRegistry: Sendable {
 
     public init() {}
 
-    public mutating func payload(
+    /// Installs one payload before SwiftUI renders its drag source. Repeated
+    /// preparation for the same Board identity is idempotent.
+    @discardableResult
+    public mutating func prepare(
         dragIdentifier: String,
         subjectID: OrderingSubjectID,
         sourcePolicy: MenuBarBundlePolicy,
@@ -515,6 +564,23 @@ public struct OrderingBoardDragPayloadRegistry: Sendable {
         return payload
     }
 
+    /// Reads a payload that was prepared when the Board layout was installed.
+    /// This lookup must remain nonmutating because SwiftUI can evaluate it
+    /// repeatedly while resolving a native drag source.
+    public func payload(
+        subjectID: OrderingSubjectID,
+        sourcePolicy: MenuBarBundlePolicy,
+        candidateGeneration: UUID,
+        layoutGeneration: UUID
+    ) -> PolicyDragPayload? {
+        payloads[Key(
+            subjectID: subjectID,
+            sourcePolicy: sourcePolicy,
+            candidateGeneration: candidateGeneration,
+            layoutGeneration: layoutGeneration
+        )]
+    }
+
     @discardableResult
     public mutating func clear() -> Bool {
         let removedPayload = !payloads.isEmpty
@@ -530,6 +596,20 @@ public struct OrderingBoardDragPayloadRegistry: Sendable {
         let previousCount = payloads.count
         payloads = payloads.filter { $0.value.dragToken != token }
         return payloads.count != previousCount
+    }
+
+    /// Replaces only the completed or cancelled native session while keeping
+    /// the unchanged Board identity mounted and ready for another drag.
+    public mutating func replace(token: UUID) -> PolicyDragPayload? {
+        guard let entry = payloads.first(where: { $0.value.dragToken == token })
+        else { return nil }
+        let replacement = PolicyDragPayload(
+            bundleIdentifier: entry.value.bundleIdentifier,
+            sourcePolicy: entry.value.sourcePolicy,
+            candidateGeneration: entry.value.candidateGeneration
+        )
+        payloads[entry.key] = replacement
+        return replacement
     }
 }
 

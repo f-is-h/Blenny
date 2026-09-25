@@ -192,6 +192,7 @@ final class ProductInterfaceModel: ObservableObject {
         availability: .disabled
     )
     @Published private(set) var candidateGeneration = UUID()
+    @Published private(set) var policyDragSourceRevision: UInt = 0
     @Published private(set) var managementRuntimeState: ManagementLoopState = .unknown
     @Published private(set) var developmentMutationAvailable = false
     @Published private(set) var nativeOverflowPlacementAvailable = false
@@ -200,6 +201,7 @@ final class ProductInterfaceModel: ObservableObject {
     @Published private(set) var orderingLayoutDraft: OrderingBoardLayoutDraft?
     @Published private(set) var orderingDragSourceRevision: UInt = 0
     private var orderingPresentationCancellable: AnyCancellable?
+    private var dragDiagnosticCancellables = Set<AnyCancellable>()
     private var orderingConsumedDragTokens: Set<UUID> = []
     private var orderingDragLayoutGenerations: [UUID: UUID] = [:]
     private var orderingDragPayloads = OrderingBoardDragPayloadRegistry()
@@ -214,13 +216,56 @@ final class ProductInterfaceModel: ObservableObject {
 
     private let iconResolver = WorkspacePolicyIconResolver()
     private var assignmentCoordinator = PolicyDraftAssignmentCoordinator()
+    private var policyDragPayloads = PolicyDragPayloadRegistry()
 
     init() {
         #if DEBUG
         orderingPresentationCancellable = orderingPresentation.objectWillChange
             .sink { [weak self] _ in
+                DebugDragStartDiagnostics.record("orderingPresentation.forwardObjectWillChange")
                 self?.objectWillChange.send()
             }
+        if DebugDragStartDiagnostics.mode != nil {
+            DebugDragStartDiagnostics.watch($navigation, name: "model.navigation", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($model, name: "model.model", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($observationCount, name: "model.observationCount", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($discoveryWarnings, name: "model.discoveryWarnings", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($recoveryAvailable, name: "model.recoveryAvailable", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($accessibilityTrusted, name: "model.accessibilityTrusted", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($accessibilityPromptRequested, name: "model.accessibilityPromptRequested", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($isRefreshing, name: "model.isRefreshing", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($statusMessage, name: "model.statusMessage", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($statusIsError, name: "model.statusIsError", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($isApplying, name: "model.isApplying", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($applicationIcons, name: "model.applicationIcons", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($systemIcons, name: "model.systemIcons", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($launchAtLoginState, name: "model.launchAtLoginState", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($candidateGeneration, name: "model.candidateGeneration", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($policyDragSourceRevision, name: "model.policyDragSourceRevision", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($managementRuntimeState, name: "model.managementRuntimeState", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($developmentMutationAvailable, name: "model.developmentMutationAvailable", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($nativeOverflowPlacementAvailable, name: "model.nativeOverflowPlacementAvailable", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($orderingLayoutDraft, name: "model.orderingLayoutDraft", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($orderingDragSourceRevision, name: "model.orderingDragSourceRevision", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch($sharedSystemItemTrials, name: "model.sharedSystemItemTrials", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$rows, name: "ordering.rows", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$preview, name: "ordering.preview", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$message, name: "ordering.message", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$technicalDetail, name: "ordering.technicalDetail", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$requiresUndoReplacement, name: "ordering.requiresUndoReplacement", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$requiresObservationRefresh, name: "ordering.requiresObservationRefresh", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$isError, name: "ordering.isError", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$isBusy, name: "ordering.isBusy", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$hasRecovery, name: "ordering.hasRecovery", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$hasPendingRecovery, name: "ordering.hasPendingRecovery", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$hasObservation, name: "ordering.hasObservation", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$needsDataAccess, name: "ordering.needsDataAccess", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$canRefresh, name: "ordering.canRefresh", in: &dragDiagnosticCancellables)
+            DebugDragStartDiagnostics.watch(orderingPresentation.$canApply, name: "ordering.canApply", in: &dragDiagnosticCancellables)
+            objectWillChange.sink { _ in
+                DebugDragStartDiagnostics.record("model.objectWillChange")
+            }.store(in: &dragDiagnosticCancellables)
+        }
         #endif
     }
 
@@ -414,6 +459,7 @@ final class ProductInterfaceModel: ObservableObject {
         }
         assignmentCoordinator.replaceCandidateGeneration()
         candidateGeneration = assignmentCoordinator.candidateGeneration
+        preparePolicyDragPayloads()
         #if DEBUG
         orderingLayoutDraft = nil
         orderingConsumedDragTokens.removeAll(keepingCapacity: true)
@@ -495,9 +541,15 @@ final class ProductInterfaceModel: ObservableObject {
     func setNativeOverflowPlacement(
         _ snapshot: NativeOverflowObservationSnapshot
     ) {
-        nativeOverflowPlacementAvailable = BlennyFishPlacement.guideAvailable(
-            for: snapshot
-        )
+        let available = BlennyFishPlacement.guideAvailable(for: snapshot)
+        #if DEBUG
+        if DebugDragStartDiagnostics.publishUnchangedOverflow {
+            nativeOverflowPlacementAvailable = available
+            return
+        }
+        #endif
+        guard nativeOverflowPlacementAvailable != available else { return }
+        nativeOverflowPlacementAvailable = available
     }
 
     #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
@@ -616,9 +668,9 @@ final class ProductInterfaceModel: ObservableObject {
                 + (row.observedX == nil ? " On-screen position could not be verified." : "")
         case .needsMapping:
             if case .systemItem = subjectID, row.systemKey == nil {
-                return "This system control has no current preferred-position key, so it is not added to the ordered lane. \(row.reason ?? "")"
+                return "Visibility can be changed, but sorting is unavailable because this system control has no verified saved position. \(row.reason ?? "")"
             }
-            return "Its area can be edited, but its preferred position remains unchanged until the configuration key is identified. \(row.reason ?? "")"
+            return "Visibility can be changed, but sorting is unavailable because Blenny cannot verify a unique saved position for this item. \(row.reason ?? "")"
         case .unverified:
             return "Mapping or observation is not fully verified yet. Its configuration position can still be arranged. \(row.reason ?? "")"
         case .blocked:
@@ -628,7 +680,7 @@ final class ProductInterfaceModel: ObservableObject {
 
     func initializeOrderingLayoutFromCurrentRows(force: Bool = false) {
         guard model != nil else {
-            orderingLayoutDraft = nil
+            installOrderingLayout(nil)
             return
         }
         if !force, let orderingLayoutDraft,
@@ -650,20 +702,15 @@ final class ProductInterfaceModel: ObservableObject {
             }.map(\.element)
         }
         do {
-            orderingLayoutDraft = try OrderingBoardLayoutDraft(
+            let layout = try OrderingBoardLayoutDraft(
                 visibleSubjects: orderedSubjects(in: .visible),
                 revealableSubjects: orderedSubjects(in: .revealable),
                 hiddenSubjects: orderedSubjects(in: .hidden),
                 candidateGeneration: candidateGeneration
             )
-            orderingConsumedDragTokens.removeAll(keepingCapacity: true)
-            orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
-            orderingDragPayloads.clear()
+            installOrderingLayout(layout)
         } catch {
-            orderingLayoutDraft = nil
-            orderingConsumedDragTokens.removeAll(keepingCapacity: true)
-            orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
-            orderingDragPayloads.clear()
+            installOrderingLayout(nil)
             setOrderingStatus("The observed applications could not form one unique configuration order: \(error)")
         }
     }
@@ -696,21 +743,16 @@ final class ProductInterfaceModel: ObservableObject {
             }
         }
         do {
-            orderingLayoutDraft = try OrderingBoardLayoutDraft(
+            let layout = try OrderingBoardLayoutDraft(
                 visibleSubjects: subjects(in: .visible),
                 revealableSubjects: subjects(in: .revealable),
                 hiddenSubjects: subjects(in: .hidden),
                 candidateGeneration: candidateGeneration
             )
-            orderingConsumedDragTokens.removeAll(keepingCapacity: true)
-            orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
-            orderingDragPayloads.clear()
+            installOrderingLayout(layout)
             return true
         } catch {
-            orderingLayoutDraft = nil
-            orderingConsumedDragTokens.removeAll(keepingCapacity: true)
-            orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
-            orderingDragPayloads.clear()
+            installOrderingLayout(nil)
             return false
         }
     }
@@ -778,10 +820,7 @@ final class ProductInterfaceModel: ObservableObject {
               restored.hasChanges == previous.hasChanges else {
             return false
         }
-        orderingLayoutDraft = restored
-        orderingConsumedDragTokens.removeAll(keepingCapacity: true)
-        orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
-        orderingDragPayloads.clear()
+        installOrderingLayout(restored)
         return true
     }
 
@@ -807,16 +846,15 @@ final class ProductInterfaceModel: ObservableObject {
 
     func resetOrderingLayoutDraft() {
         if let layout = orderingLayoutDraft {
-            orderingLayoutDraft = try? OrderingBoardLayoutDraft(
+            installOrderingLayout(try? OrderingBoardLayoutDraft(
                 visible: layout.initialVisible,
                 revealable: layout.initialRevealable,
                 hidden: layout.initialHidden,
                 candidateGeneration: candidateGeneration
-            )
+            ))
+        } else {
+            installOrderingLayout(nil)
         }
-        orderingConsumedDragTokens.removeAll(keepingCapacity: true)
-        orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
-        orderingDragPayloads.clear()
     }
 
     func discardOrderingLayoutDraft() {
@@ -933,8 +971,7 @@ final class ProductInterfaceModel: ObservableObject {
 
         orderingConsumedDragTokens.insert(payload.dragToken)
         orderingDragLayoutGenerations.removeValue(forKey: payload.dragToken)
-        orderingLayoutDraft = updatedLayout
-        orderingDragPayloads.clear()
+        installOrderingLayout(updatedLayout)
         orderingPresentation.isError = false
         // Editing never prepares or submits a system write. The Board is the preview.
         orderingPresentation.preview = nil
@@ -1047,7 +1084,11 @@ final class ProductInterfaceModel: ObservableObject {
         guard let layout = orderingLayoutDraft,
               layout.candidateGeneration == candidateGeneration,
               layout.policy(of: subjectID) == sourcePolicy else { return nil }
-        return dragPayload(subjectID: subjectID, sourcePolicy: sourcePolicy)
+        return orderingDragPayload(
+            subjectID: subjectID,
+            sourcePolicy: sourcePolicy,
+            layout: layout
+        )
     }
 
     /// Ends the authority owned by one native drag session. The exact payload
@@ -1058,10 +1099,18 @@ final class ProductInterfaceModel: ObservableObject {
         retireOrderingDragPayload(identity)
     }
 
-    private func retireOrderingDragPayload(_ identity: PolicyDragPayload.ID) {
+    @discardableResult
+    private func retireOrderingDragPayload(
+        _ identity: PolicyDragPayload.ID
+    ) -> Bool {
         orderingDragLayoutGenerations.removeValue(forKey: identity.dragToken)
-        guard orderingDragPayloads.discard(token: identity.dragToken) else { return }
+        guard let replacement = orderingDragPayloads.replace(token: identity.dragToken),
+              let layoutGeneration = orderingLayoutDraft?.layoutGeneration else {
+            return false
+        }
+        orderingDragLayoutGenerations[replacement.dragToken] = layoutGeneration
         orderingDragSourceRevision &+= 1
+        return true
     }
 
     /// Records a refusal only after the native drag/drop layer has observed a
@@ -1228,22 +1277,22 @@ final class ProductInterfaceModel: ObservableObject {
         sourcePolicy: MenuBarBundlePolicy
     ) -> PolicyDragPayload {
         #if DEBUG
-        if let subjectID = orderingSubject(forDragIdentifier: bundleIdentifier) {
-            let layoutGeneration = orderingLayoutDraft?.layoutGeneration
-                ?? candidateGeneration
-            let payload = orderingDragPayloads.payload(
-                dragIdentifier: bundleIdentifier,
-                subjectID: subjectID,
-                sourcePolicy: sourcePolicy,
-                candidateGeneration: candidateGeneration,
-                layoutGeneration: layoutGeneration
-            )
-            if orderingLayoutDraft?.policy(of: subjectID) == sourcePolicy {
-                orderingDragLayoutGenerations[payload.dragToken] = layoutGeneration
-            }
+        if let subjectID = orderingSubject(forDragIdentifier: bundleIdentifier),
+           let layout = orderingLayoutDraft,
+           let payload = orderingDragPayload(
+               subjectID: subjectID,
+               sourcePolicy: sourcePolicy,
+               layout: layout
+           ) {
             return payload
         }
         #endif
+        if let payload = preparedPolicyDragPayload(
+            bundleIdentifier: bundleIdentifier,
+            sourcePolicy: sourcePolicy
+        ) {
+            return payload
+        }
         let payload = PolicyDragPayload(
             bundleIdentifier: bundleIdentifier,
             sourcePolicy: sourcePolicy,
@@ -1251,6 +1300,95 @@ final class ProductInterfaceModel: ObservableObject {
         )
         return payload
     }
+
+    func preparedPolicyDragPayload(
+        bundleIdentifier: String,
+        sourcePolicy: MenuBarBundlePolicy
+    ) -> PolicyDragPayload? {
+        policyDragPayloads.payload(
+            bundleIdentifier: bundleIdentifier,
+            sourcePolicy: sourcePolicy,
+            candidateGeneration: candidateGeneration
+        )
+    }
+
+    private func preparePolicyDragPayloads() {
+        policyDragPayloads.clear()
+        guard let model else { return }
+
+        for candidate in model.candidateInventory.candidates
+            where !isBlenny(candidate.bundleIdentifier) {
+            guard let policy = model.effectivePolicy(for: candidate.bundleIdentifier)
+            else { continue }
+            policyDragPayloads.prepare(
+                bundleIdentifier: candidate.bundleIdentifier,
+                sourcePolicy: policy,
+                candidateGeneration: candidateGeneration
+            )
+        }
+
+        for observation in model.systemItems {
+            guard let identifier = systemItemPolicyIdentifier(
+                for: observation.observationIdentifier
+            ), let policy = effectiveSystemItemPolicy(
+                for: observation.observationIdentifier
+            ) else { continue }
+            policyDragPayloads.prepare(
+                bundleIdentifier: identifier,
+                sourcePolicy: policy,
+                candidateGeneration: candidateGeneration
+            )
+        }
+    }
+
+    func retireDragSession(_ identity: PolicyDragPayload.ID) {
+        #if DEBUG
+        if retireOrderingDragPayload(identity) { return }
+        #endif
+        guard policyDragPayloads.replace(token: identity.dragToken) != nil else {
+            return
+        }
+        policyDragSourceRevision &+= 1
+    }
+
+    #if DEBUG
+    private func installOrderingLayout(_ layout: OrderingBoardLayoutDraft?) {
+        orderingLayoutDraft = layout
+        orderingConsumedDragTokens.removeAll(keepingCapacity: true)
+        orderingDragLayoutGenerations.removeAll(keepingCapacity: true)
+        orderingDragPayloads.clear()
+        preparePolicyDragPayloads()
+        guard let layout else { return }
+
+        for policy in MenuBarBundlePolicy.allCases {
+            for subjectID in layout.subjects(in: policy) {
+                let payload = orderingDragPayloads.prepare(
+                    dragIdentifier: dragIdentifier(for: subjectID),
+                    subjectID: subjectID,
+                    sourcePolicy: policy,
+                    candidateGeneration: candidateGeneration,
+                    layoutGeneration: layout.layoutGeneration
+                )
+                orderingDragLayoutGenerations[payload.dragToken] = layout.layoutGeneration
+            }
+        }
+    }
+
+    private func orderingDragPayload(
+        subjectID: OrderingSubjectID,
+        sourcePolicy: MenuBarBundlePolicy,
+        layout: OrderingBoardLayoutDraft
+    ) -> PolicyDragPayload? {
+        guard layout.candidateGeneration == candidateGeneration,
+              layout.policy(of: subjectID) == sourcePolicy else { return nil }
+        return orderingDragPayloads.payload(
+            subjectID: subjectID,
+            sourcePolicy: sourcePolicy,
+            candidateGeneration: candidateGeneration,
+            layoutGeneration: layout.layoutGeneration
+        )
+    }
+    #endif
 
     /// Policy-only system items can be represented by a structured live
     /// observation while their draft is keyed by a canonical menu-extra ID.
@@ -1263,7 +1401,7 @@ final class ProductInterfaceModel: ObservableObject {
         guard let policyIdentifier = systemItemPolicyIdentifier(
             for: observationIdentifier
         ) else { return nil }
-        return dragPayload(
+        return preparedPolicyDragPayload(
             bundleIdentifier: policyIdentifier,
             sourcePolicy: sourcePolicy
         )
@@ -1301,6 +1439,7 @@ final class ProductInterfaceModel: ObservableObject {
         )
         if outcome.changedDraft {
             model = editor
+            preparePolicyDragPayloads()
             #if DEBUG
             orderingDragPayloads.clear()
             #endif
@@ -1323,6 +1462,7 @@ final class ProductInterfaceModel: ObservableObject {
         )
         if outcome.changedDraft {
             model = editor
+            preparePolicyDragPayloads()
             #if DEBUG
             orderingDragPayloads.clear()
             #endif
@@ -1368,6 +1508,7 @@ final class ProductInterfaceModel: ObservableObject {
         }
         if outcome.changedDraft {
             model = editor
+            preparePolicyDragPayloads()
             #if DEBUG
             orderingDragPayloads.clear()
             #endif
@@ -1386,6 +1527,7 @@ final class ProductInterfaceModel: ObservableObject {
         assignmentCoordinator.replaceCandidateGeneration()
         candidateGeneration = assignmentCoordinator.candidateGeneration
         model = editor
+        preparePolicyDragPayloads()
         #if DEBUG
         resetOrderingLayoutDraft()
         orderingPresentation.preview = nil
@@ -1628,9 +1770,7 @@ final class PolicyEditorWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        let version = Bundle.main.object(
-            forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "0.5.0"
+        let version = BlennyApplicationVersion.display
         #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         #if BLENNY_FALLBACK_POSITION_TRIAL
         window.title = "Blenny \(version) · Arrow Position Trial"
@@ -1643,6 +1783,12 @@ final class PolicyEditorWindowController: NSWindowController {
         #endif
         #else
         window.title = "Blenny \(version)"
+        #endif
+        #if DEBUG
+        if let mode = DebugDragStartDiagnostics.mode {
+            window.title = "Blenny \(version) · Drag: \(mode.rawValue) · \(DebugDragStartDiagnostics.typedSource ? "typed" : "provider") · overflow: \(DebugDragStartDiagnostics.publishUnchangedOverflow ? "always" : "changed")"
+            DebugDragStartDiagnostics.record("launch.\(mode.rawValue)")
+        }
         #endif
         window.toolbarStyle = .unified
         window.contentMinSize = Self.minimumContentSize(

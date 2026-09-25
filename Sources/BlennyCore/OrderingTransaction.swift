@@ -20,6 +20,9 @@ public protocol MenuBarOrderingBackend: Sendable {
         _ table: [String: OrderingValue], expecting snapshot: OrderingSnapshot,
         ownerKeys: Set<String>
     ) async throws
+    func captureConfigurationTransition(
+        from snapshot: OrderingSnapshot, to table: [String: OrderingValue]
+    ) async throws -> OrderingSnapshot
 }
 
 public extension MenuBarOrderingBackend {
@@ -41,6 +44,12 @@ public extension MenuBarOrderingBackend {
     ) async throws {
         try snapshot.validateConfigurationProcessScope(for: ownerKeys, against: snapshot)
         try await restoreTable(table, expecting: snapshot)
+    }
+
+    func captureConfigurationTransition(
+        from snapshot: OrderingSnapshot, to table: [String: OrderingValue]
+    ) async throws -> OrderingSnapshot {
+        try await capture()
     }
 }
 
@@ -75,6 +84,7 @@ public struct OrderingRecoveryReceipt: Codable, Equatable, Sendable {
     public var physicalVerificationStatus: OrderingPhysicalVerificationStatus?
     public var ownerBindings: [OrderingConfigurationOwnerTarget]?
     public var subjectBindings: [OrderingConfigurationSubjectTarget]?
+    public var configurationRestoreRetryCount: Int?
     public var undoPolicyWriteAttempted: Bool?
     public var undoPolicyRestoreIntent: Bool?
     public var undoPolicy: OrderingPolicyUndo?
@@ -177,7 +187,12 @@ public struct OrderingRecoveryReceipt: Codable, Equatable, Sendable {
                 .isSubset(of: Set(originalValues.keys)) else {
             throw OrderingTransactionError.invalidReceipt
         }
-        guard (undoPolicy == nil && undoPolicyRestoreIntent == nil && undoPolicyWriteAttempted == nil) || schemaVersion == 4 else { throw OrderingTransactionError.invalidReceipt }
+        guard (undoPolicy == nil && undoPolicyRestoreIntent == nil
+                && undoPolicyWriteAttempted == nil && configurationRestoreRetryCount == nil)
+                || schemaVersion == 4,
+              configurationRestoreRetryCount.map({ (0...1).contains($0) }) != false else {
+            throw OrderingTransactionError.invalidReceipt
+        }
         try OrderingValue.dictionary(originalValues).validate()
         try OrderingValue.dictionary(committedValues).validate()
         if let pendingValues { try OrderingValue.dictionary(pendingValues).validate() }
@@ -216,6 +231,15 @@ public struct OrderingRecoveryReceipt: Codable, Equatable, Sendable {
         schemaVersion >= 2 && !isPendingRestoration
             && phase == .applied && configurationVerified == true
             && (committedValues != originalValues || undoPolicy != nil)
+    }
+
+    /// A failed later revision has already journaled its inverse to the last
+    /// clean commit. Recovery must verify that inverse before considering the
+    /// older commit's separate Undo, even when an Undo policy is retained.
+    public var hasPendingRevisionRollback: Bool {
+        phase == .restoreIntent && pendingValues != nil
+            && pendingValues == committedValues
+            && originalPolicy == nil && proposedPolicy == nil
     }
 
     /// Describes a clean Undo ledger whose committed positions no longer match

@@ -1,4 +1,4 @@
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import Foundation
 
 public enum AccessibilityAuthorization {
@@ -9,7 +9,7 @@ public enum AccessibilityAuthorization {
     @discardableResult
     public static func requestSystemPrompt() -> Bool {
         let options = [
-            "AXTrustedCheckOptionPrompt": true
+            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
         ] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
     }

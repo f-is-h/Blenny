@@ -475,6 +475,32 @@ public actor PolicyEditingCore {
         )
     }
 
+    /// Prepares the policy half of unified Undo without changing whether
+    /// management is currently running. Stop and Quit deliberately leave an
+    /// accepted order in place, so a later Undo must restore the prior policy
+    /// assignments while preserving the stopped state.
+    public func previewUndoKeepingManagementState(
+        targetPolicy: PersistentBundlePolicyDocument,
+        candidates: PolicyCandidateInventory,
+        observedRunningBundleIdentifiers: Set<String>,
+        candidateGeneration: UUID = PolicyReviewBinding.unversionedCandidateGeneration,
+        runtimeContractFingerprint: String = "deterministic-core"
+    ) async throws -> (PolicyDryRunImpactReport, PreparedPolicyEdit?) {
+        guard let accepted = try await store.load() else { return try missingPolicy() }
+        return try PolicyDryRunner.prepare(
+            oldPolicy: accepted,
+            draft: BundlePolicyDraft(acceptedPolicy: targetPolicy),
+            managementEnabled: accepted.managementEnabled,
+            candidates: candidates,
+            observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
+            scope: scope,
+            blennyBundleIdentifier: blennyBundleIdentifier,
+            candidateGeneration: candidateGeneration,
+            runtimeContractFingerprint: runtimeContractFingerprint,
+            recoveryBackupFingerprint: try await backupFingerprint()
+        )
+    }
+
     public func previewResumeManaging(
         candidates: PolicyCandidateInventory,
         observedRunningBundleIdentifiers: Set<String>,

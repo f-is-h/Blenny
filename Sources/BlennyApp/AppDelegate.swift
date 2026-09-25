@@ -9,8 +9,6 @@ import CryptoKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let legacyBlennyBundleIdentifier = "com.example.BlennyProbe"
-    private static let accessibilityPromptRequestedKey =
-        "AccessibilitySystemPromptRequestedForMenuBarOwnership"
     private static let readOnlySystemMenuBarOwners = Set([
         "com.apple.controlcenter",
         "com.apple.menubaragent",
@@ -25,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private var isRefreshing = false
     private var lastKnownAccessibilityTrust: Bool?
+    private var accessibilityOnboarding = AccessibilityOnboardingState()
     private var accessibilityGrantRefresh = AccessibilityGrantRefreshState()
     private var persistentStore: PersistentBundlePolicyStore?
     private var interfaceStore: PolicyInterfaceStore?
@@ -137,6 +136,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         directory: FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Blenny/DebugOrdering")
     )
+    private lazy var menuBarLayoutAccess = MenuBarLayoutAccessSession(
+        store: MenuBarLayoutBookmarkStore(
+            directory: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/Blenny/DebugOrdering")
+        )
+    )
     private lazy var orderingBackend = MacOS27MenuBarOrderingBackend(
         contextProvider: { [weak self] in
             self?.orderingRuntimeContext() ?? MacOS27MenuBarOrderingContext(
@@ -208,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureMainMenu()
         #if DEBUG
         configureOrderingInterface()
+        restoreSavedMenuBarLayoutAccess()
         statusItemController.debugConfigureBoundaryCapture(directory: boundaryEvidenceDirectory) { [weak self] in
             self?.captureBoundaryEvidence()
         }
@@ -411,7 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updatePermissionPresentation()
         guard AccessibilityAuthorization.isTrusted else {
             editorWindowController.setStatus(
-                "Enable Accessibility, then return to Blenny. One bounded refresh will run automatically.",
+                "Turn on Blenny in Device Control and Data Access, then return. Blenny will refresh automatically.",
                 isError: false
             )
             return
@@ -2005,28 +2011,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func requestAccessibilityAccess() {
         guard !isReadOnlyValidation else { return }
-        let defaults = UserDefaults.standard
-        let action = AccessibilityOnboardingPolicy.action(
-            isTrusted: AccessibilityAuthorization.isTrusted,
-            hasRequestedSystemPrompt: defaults.bool(
-                forKey: Self.accessibilityPromptRequestedKey
-            )
+        let action = accessibilityOnboarding.nextAction(
+            isTrusted: AccessibilityAuthorization.isTrusted
         )
         switch action {
         case .alreadyGranted:
             refresh()
         case .requestSystemPrompt:
-            defaults.set(true, forKey: Self.accessibilityPromptRequestedKey)
             _ = AccessibilityAuthorization.requestSystemPrompt()
             editorWindowController.setStatus(
-                "The one-time system prompt was requested. Enable Blenny, then return for one automatic refresh.",
+                "Turn on Blenny in Device Control and Data Access, then return. Blenny will refresh automatically.",
                 isError: false
             )
         case .openSystemSettings:
-            openAccessibilitySettings()
+            let opened = openAccessibilitySettings()
             editorWindowController.setStatus(
-                "The system prompt will not be repeated. Enable Blenny, then return for one automatic refresh.",
-                isError: false
+                opened
+                    ? "Turn on Blenny, then return. Blenny will refresh automatically."
+                    : "System Settings could not be opened. Open Privacy & Security, then Device Control and Data Access.",
+                isError: !opened
             )
         }
         updatePermissionPresentation()
@@ -2034,11 +2037,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if accessibilityGrantRefresh.pending { refresh() }
     }
 
-    private func openAccessibilitySettings() {
+    @discardableResult
+    private func openAccessibilitySettings() -> Bool {
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-        ) else { return }
-        NSWorkspace.shared.open(url)
+        ) else { return false }
+        return NSWorkspace.shared.open(url)
     }
 
     private func openProjectWebsite() {
@@ -2069,12 +2073,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         accessibilityGrantRefresh.observe(trusted: trusted)
         lastKnownAccessibilityTrust = trusted
-        let requested = UserDefaults.standard.bool(
-            forKey: Self.accessibilityPromptRequestedKey
-        )
         editorWindowController.setAccessibilityTrusted(
             trusted,
-            hasRequestedSystemPrompt: requested
+            hasRequestedSystemPrompt: accessibilityOnboarding.hasRequestedSystemPromptThisLaunch
         )
         statusItemController.setAccessibilityTrusted(trusted)
     }
@@ -2406,9 +2407,8 @@ extension AppDelegate {
         presentation.onPreviewConfiguration = { [weak self] request in
             self?.previewBoardConfiguration(request)
         }
-        presentation.onOpenDataAccess = {
-            guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders") else { return }
-            NSWorkspace.shared.open(url)
+        presentation.onChooseLayoutFile = { [weak self] in
+            self?.requestMenuBarLayoutAccess()
         }
         presentation.onApply = { [weak self] fingerprint in self?.applyOrdering(fingerprint) }
         presentation.onRestore = { [weak self] in self?.restoreOrdering() }
@@ -2435,6 +2435,48 @@ extension AppDelegate {
         presentation.preview = nil
         presentation.requiresUndoReplacement = false
         presentation.canApply = false
+    }
+
+    private func restoreSavedMenuBarLayoutAccess() {
+        do {
+            if try menuBarLayoutAccess.restoreSavedAccess() {
+                sessionDiagnostic("layout-access restored exact-file bookmark")
+            }
+        } catch {
+            sessionDiagnostic("layout-access restore-failure \(error.localizedDescription)")
+        }
+    }
+
+    private func requestMenuBarLayoutAccess() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose the Menu Bar Layout File"
+        panel.message = "Select the menu bar layout file so Blenny can apply and undo the order you choose."
+        panel.prompt = "Grant Access"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.resolvesAliases = true
+        panel.directoryURL = menuBarLayoutAccess.expectedFileURL.deletingLastPathComponent()
+        panel.nameFieldStringValue = menuBarLayoutAccess.expectedFileURL.lastPathComponent
+        panel.begin { [weak self] response in
+            guard let self, response == .OK, let selectedURL = panel.url else { return }
+            do {
+                try menuBarLayoutAccess.grant(selectedURL: selectedURL)
+                let presentation = editorWindowController.orderingPresentation
+                presentation.needsDataAccess = false
+                presentation.isError = false
+                presentation.technicalDetail = nil
+                presentation.message = "Access granted. Reading the current menu bar order…"
+                Task { [weak self] in await self?.readOrderingForBoard() }
+            } catch {
+                let presentation = editorWindowController.orderingPresentation
+                presentation.needsDataAccess = true
+                presentation.isError = true
+                presentation.message = "Choose the menu bar layout file to enable sorting and Undo."
+                presentation.technicalDetail = error.localizedDescription
+            }
+        }
     }
 
     private func orderingCoordinator(forRecovery: Bool = false) async throws -> CoordinatedPolicyWriter {
@@ -2521,7 +2563,7 @@ extension AppDelegate {
                     .map { String(format: "%02x", $0) }.joined()
                 let evidence = DebugBoundaryEvidence(
                     id: UUID(), startedAt: startedAt, finishedAt: Date(),
-                    appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+                    appVersion: BlennyApplicationVersion.display,
                     appPath: Bundle.main.bundleURL.path, executableSHA256: digest,
                     processIdentifier: ProcessInfo.processInfo.processIdentifier,
                     stateBefore: stateBefore, stateAfter: stateAfter, contextUnchanged: unchanged,
@@ -2624,6 +2666,14 @@ extension AppDelegate {
         guard let policy = editorModel?.acceptedPolicy, !interactionGate.isTerminating else { return nil }
         do {
             guard try await fallbackRecoveryStore.load() != nil else { return nil }
+            // Persistent fallback placement is dormant while the native
+            // overflow control is usable (or its exact AppKit identity is not
+            // currently available). An unrelated Apply or Undo must leave that
+            // older placement unchanged instead of reporting the completed
+            // primary operation as a failure.
+            #if DEBUG
+            guard statusItemController.debugFallbackNativeIdentity != nil else { return nil }
+            #endif
             let coordinator = try await orderingCoordinator()
             _ = try await coordinator.updateAcceptedControlBoundary(policy: policy)
             return nil
@@ -2712,22 +2762,25 @@ extension AppDelegate {
                 // snapshot before the serial writer can change anything.
                 let candidates = try OrderingConfigurationSubjectIdentityResolver.resolve(snapshot: current)
                 let bySubject = Dictionary(uniqueKeysWithValues: candidates.map { ($0.subjectID, $0) })
-                let selected = request.orderedSubjects.filter { subject in
+                let allEligible = request.orderedSubjects.filter { subject in
                     guard bySubject[subject]?.eligible == true else { return false }
                     if case let .systemItem(item) = subject {
                         return item.isOrderingOffered
                     }
                     return true
                 }
-                let selectedSet = Set(selected)
-                let omitted = request.orderedSubjects.filter { !selectedSet.contains($0) }
+                let allEligibleSet = Set(allEligible)
                 let unavailable = request.unavailableOrderChanges(
-                    eligibleSubjects: selectedSet, blenny: model.blennyBundleIdentifier
+                    eligibleSubjects: allEligibleSet, blenny: model.blennyBundleIdentifier
                 )
                 guard unavailable.isEmpty else {
                     let names = unavailable.map { bySubject[$0]?.displayName ?? $0.boardID }
-                    throw OrderingError.staleSnapshot("Cannot apply this order: \(names.joined(separator: ", ")). Discard changes and refresh to check these items.")
+                    throw OrderingError.unavailableOrderChanges(names)
                 }
+                let required = Set(request.subjectsRequiringConfiguration)
+                let selected = allEligible.filter { required.contains($0) }
+                let selectedSet = Set(selected)
+                let omitted = request.orderedSubjects.filter { !selectedSet.contains($0) }
                 let plan: OrderingPlan? = try OrderingPlan.makeConfigurationOrdering(
                     snapshot: current, orderedSubjects: selected
                 )
@@ -3053,12 +3106,14 @@ extension AppDelegate {
                 let writer = try await orderingCoordinator(forRecovery: true)
                 var inverse: PreparedPolicyEdit?
                 let priorModel = editorModel
-                if let undo = try await orderingRecoveryStore.load()?.undoPolicy,
+                let receipt = try await orderingRecoveryStore.load()
+                if receipt?.hasPendingRevisionRollback != true,
+                   let undo = receipt?.undoPolicy,
                    let model = priorModel {
                     let observation = try await captureApplyPreflight()
                     let core = try await makeCore(scope: model.validationScope, permitsReviewedActivation: true)
-                    inverse = try await core.preview(
-                        draft: BundlePolicyDraft(acceptedPolicy: undo.before),
+                    inverse = try await core.previewUndoKeepingManagementState(
+                        targetPolicy: undo.before,
                         candidates: observation.candidates,
                         observedRunningBundleIdentifiers: observation.runningBundleIdentifiers,
                         candidateGeneration: editorWindowController.candidateGeneration,
@@ -3249,11 +3304,13 @@ extension AppDelegate {
         }
         presentation.isError = true
         presentation.message = presentation.needsDataAccess
-            ? "Allow access in System Settings, then try again."
+            ? "Choose the menu bar layout file so Blenny can apply and undo your order."
             : "The operation could not finish. See Details before trying again."
         if let backendError = error as? MacOS27MenuBarOrderingBackendError,
            backendError == .runtimeUnsupported || backendError == .runtimeContractDiffers {
             presentation.message = "Ordering is unavailable on this macOS build."
+        } else if case let .unavailableOrderChanges(names) = error as? OrderingError {
+            presentation.message = "This draft moves items marked No sort: \(names.joined(separator: ", ")). Put them back or discard changes."
         } else if case .staleSnapshot = error as? OrderingError {
             presentation.message = "The menu bar changed. Discard changes and refresh before trying again."
         }

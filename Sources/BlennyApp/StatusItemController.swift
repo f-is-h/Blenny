@@ -596,7 +596,7 @@ final class StatusItemController: NSObject {
     }
 
     private func debugPreferredPosition(_ item: NSStatusItem?) -> String {
-        guard ProcessInfo.processInfo.operatingSystemVersionString.contains("26A5425a") else {
+        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27 else {
             return "unsupported-runtime"
         }
         guard let item else { return "absent" }
@@ -838,10 +838,7 @@ final class StatusItemController: NSObject {
         if image == nil {
             button.title = "B"
         }
-        let version = Bundle.main.object(
-            forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "0.5.0"
-        button.toolTip = "Blenny \(version)"
+        button.toolTip = "Blenny \(BlennyApplicationVersion.display)"
     }
 
     private func configureRevealStatusItem() {
@@ -906,7 +903,7 @@ final class StatusItemController: NSObject {
 
     private func configureMenu() {
         let openItem = NSMenuItem(title: "Open Blenny", action: #selector(openDiagnostics), keyEquivalent: "o")
-        let requestItem = NSMenuItem(title: "Set Up Accessibility…", action: #selector(requestAccess), keyEquivalent: "")
+        let requestItem = NSMenuItem(title: "Set Up Access…", action: #selector(requestAccess), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Blenny", action: #selector(quit), keyEquivalent: "q")
 
         for item in [

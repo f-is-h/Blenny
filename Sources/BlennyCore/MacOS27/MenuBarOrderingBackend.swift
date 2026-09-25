@@ -109,7 +109,6 @@ public enum MacOS27MenuBarOrderingBackendError: Error, Equatable, LocalizedError
 public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unchecked Sendable {
     public typealias ContextProvider = @MainActor @Sendable () -> MacOS27MenuBarOrderingContext
 
-    private static let supportedBuild = "26A5425a"
     private static let supportedArchitecture = "arm64"
     private static let suiteName = "com.apple.MenuBar"
     private static let tableKey = "TrailingItemPreferredPositions"
@@ -128,8 +127,15 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
     private static let maximumStringBytes = 64 * 1_024
     private static let maximumDataBytes = 1 * 1_024 * 1_024
     private static let maximumMetadataBytes = 1 * 1_024 * 1_024
+
+    static func privateWriterSupportsSystemVersionForTesting(_ version: String) -> Bool {
+        blenny_menu_bar_ordering_supports_system_version(version as CFString)
+    }
     private static let axCaptureDeadline = Duration.seconds(2)
     private static let layoutEventDeadline: DispatchTimeInterval = .milliseconds(800)
+    // The protected plist can lag an acknowledged API write by more than six
+    // seconds on macOS 27. Wait for its event, with one bounded fallback deadline.
+    private static let preferenceSettlementDeadline = Duration.seconds(15)
     private static let controlCenterBinaryPath =
         "/System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter"
     private static let menuBarAgentBinaryPath =
@@ -170,6 +176,25 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
             expecting: resolution,
             homeDirectoryPath: homeDirectoryPath
         ) != nil
+    }
+
+    static func exactBundleApplicationIdentityForTesting(
+        process: OrderingProcess,
+        table: [String: OrderingValue],
+        processes: [OrderingProcess],
+        signingIdentifier: String,
+        teamIdentifier: String? = "TEAM123456",
+        designatedRequirementDigest: String = String(repeating: "a", count: 64)
+    ) -> OrderingApplicationCodeIdentity? {
+        exactBundleApplicationIdentity(
+            seed: OwnerSeed(process: process, displayName: "Test Owner"),
+            table: table, processes: processes,
+            codeIdentity: CodeIdentity(
+                sandboxed: true, signingIdentifier: signingIdentifier,
+                teamIdentifier: teamIdentifier,
+                designatedRequirementDigest: designatedRequirementDigest
+            )
+        )
     }
 
     static func configurationOwnerKeys(
@@ -216,17 +241,61 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
     }
 
     public func capture() async throws -> OrderingSnapshot {
-        try Self.validateRuntimeContract()
-        let firstGroup = try Self.readCorroboratedGroup()
+        try await capture(transition: nil)
+    }
+
+    /// Explicit diagnostic entry point for a fresh instance of the installed
+    /// executable. It creates no status items, writer, policy store, or recovery
+    /// lease, and does not synchronize the preference domain.
+    public static func preferenceReadDiagnostic(bookmarkError: String? = nil) throws -> Data {
+        struct Report: Encodable {
+            let process: Int32
+            let groups: [String: [String: OrderingValue]]
+            let errors: [String: String]
+        }
+        var groups: [String: [String: OrderingValue]] = [:]
+        var errors: [String: String] = [:]
+        if let bookmarkError { errors["bookmark"] = bookmarkError }
+        for source in ["fileBefore", "container", "fileAfter"] {
+            do {
+                groups[source] = source == "container"
+                    ? [tableKey: .dictionary(try tableFromContainerRead())]
+                    : try decodeGroup(readPlistRoot())
+            } catch { errors[source] = error.localizedDescription }
+        }
+        OrderingPreferenceDiagnostics.record("explicit-fresh-read", groups: groups,
+                                             detail: errors.description)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(Report(process: getpid(), groups: groups, errors: errors))
+    }
+
+    public func captureConfigurationTransition(
+        from snapshot: OrderingSnapshot, to table: [String: OrderingValue]
+    ) async throws -> OrderingSnapshot {
+        try snapshot.validate()
+        var expectedGroup = snapshot.group
+        expectedGroup[Self.tableKey] = .dictionary(table)
+        return try await capture(transition: PostWriteReadback(
+            previousGroup: snapshot.group, expectedGroup: expectedGroup
+        ))
+    }
+
+    private func capture(transition postWriteReadback: PostWriteReadback?) async throws
+        -> OrderingSnapshot {
+        let firstBuild = try Self.validateRuntimeContract()
+        let firstGroup = try await Self.readCorroboratedGroupAfterBoundedSettle(
+            transition: postWriteReadback
+        )
+        let firstTable = try Self.table(in: firstGroup)
         let firstPlatform = await MainActor.run {
             Self.capturePlatform(context: contextProvider())
         }
         let firstSystemBindings = Self.captureSystemHostBindings(
-            in: firstPlatform.processes, table: try Self.table(in: firstGroup)
+            in: firstPlatform.processes, table: firstTable
         )
         let candidateSeeds = Self.candidateSeeds(
-            in: firstPlatform.ownerSeeds,
-            table: try Self.table(in: firstGroup)
+            in: firstPlatform.ownerSeeds, table: firstTable
         )
         let deadline = ContinuousClock.now.advanced(by: Self.axCaptureDeadline)
         let observations = await Task.detached(priority: .utility) {
@@ -240,7 +309,17 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
             for seed in candidateSeeds {
                 let ax = axByPID[seed.process.pid]
                     ?? AXCapture(complete: false, frames: [])
-                let preferences = Self.captureOwnerPreferences(seed: seed)
+                let codeIdentity = Self.codeIdentity(pid: seed.process.pid)
+                let exactBundleCodeIdentity = Self.exactBundleApplicationIdentity(
+                    seed: seed, table: firstTable, processes: firstPlatform.processes,
+                    codeIdentity: codeIdentity
+                )
+                let preferences = exactBundleCodeIdentity == nil
+                    ? Self.captureOwnerPreferences(seed: seed)
+                    : PreferenceCapture(
+                        complete: false, positions: [:], namespace: .unknown,
+                        sourceIdentity: nil
+                    )
                 result[seed.process.pid] = OrderingOwnerObservation(
                     process: seed.process,
                     displayName: seed.displayName,
@@ -249,7 +328,8 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
                     ownerPreferencesComplete: preferences.complete,
                     ownerSavedPositions: preferences.positions,
                     ownerPreferenceNamespace: preferences.namespace,
-                    ownerPreferenceSourceIdentity: preferences.sourceIdentity
+                    ownerPreferenceSourceIdentity: preferences.sourceIdentity,
+                    applicationCodeIdentity: exactBundleCodeIdentity
                 )
             }
             return result
@@ -257,12 +337,17 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
         let secondPlatform = await MainActor.run {
             Self.capturePlatform(context: contextProvider())
         }
-        try Self.validateRuntimeContract()
-        let secondGroup = try Self.readCorroboratedGroup()
+        let secondBuild = try Self.validateRuntimeContract()
+        let secondGroup = try await Self.readCorroboratedGroupAfterBoundedSettle(
+            transition: postWriteReadback
+        )
         let secondSystemBindings = Self.captureSystemHostBindings(
             in: secondPlatform.processes, table: try Self.table(in: secondGroup)
         )
 
+        guard firstBuild == secondBuild else {
+            throw MacOS27MenuBarOrderingBackendError.runtimeContractDiffers
+        }
         guard firstGroup == secondGroup else {
             throw MacOS27MenuBarOrderingBackendError.groupChangedDuringCapture
         }
@@ -281,7 +366,7 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
             beforeProcesses: firstPlatform.processes,
             afterProcesses: secondPlatform.processes,
             observationsByPID: observations,
-            osBuild: Self.supportedBuild,
+            osBuild: secondBuild,
             architecture: Self.supportedArchitecture,
             runtimeContractVerified: true,
             displaySignature: secondPlatform.display.signature,
@@ -293,6 +378,36 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
             systemHostBindings: secondSystemBindings.filter { firstSystemBindings.contains($0) },
             capturedAt: Date()
         )
+    }
+
+    static func readCorroboratedGroupAfterBoundedSettle(
+        read: () throws -> [String: OrderingValue],
+        settle: () async throws -> Void
+    ) async throws -> [String: OrderingValue] {
+        do {
+            return try read()
+        } catch let error as MacOS27MenuBarOrderingBackendError
+            where error == .groupSourcesDisagree {
+            // cfprefsd may acknowledge a synchronized container write before
+            // its container API and on-disk plist expose the same generation.
+            // Wait once and repeat the complete corroborated read; never poll
+            // and never repeat the system write.
+            try await settle()
+            return try read()
+        }
+    }
+
+    static func corroboratedGroup(
+        first: [String: OrderingValue], containerTable: [String: OrderingValue],
+        second: [String: OrderingValue]
+    ) throws -> [String: OrderingValue] {
+        guard first == second else {
+            throw MacOS27MenuBarOrderingBackendError.groupChangedDuringCapture
+        }
+        guard try table(in: second) == containerTable else {
+            throw MacOS27MenuBarOrderingBackendError.groupSourcesDisagree
+        }
+        return second
     }
 
     public func writeTable(
@@ -377,9 +492,9 @@ public final class MacOS27MenuBarOrderingBackend: MenuBarOrderingBackend, @unche
 
         do {
             try await MainActor.run {
-                try Self.validateRuntimeContract()
+                let currentBuild = try Self.validateRuntimeContract()
                 guard snapshot.runtimeContractVerified,
-                      snapshot.osBuild == Self.supportedBuild,
+                      snapshot.osBuild == currentBuild,
                       snapshot.architecture == Self.supportedArchitecture,
                       (!requiresSingleDisplay || snapshot.displayCount == 1),
                       (1...16).contains(snapshot.displayCount) else {
@@ -470,6 +585,11 @@ extension MacOS27MenuBarOrderingBackend: FallbackPositionWriting {
 }
 
 private extension MacOS27MenuBarOrderingBackend {
+    struct PostWriteReadback: Sendable {
+        let previousGroup: [String: OrderingValue]
+        let expectedGroup: [String: OrderingValue]
+    }
+
     struct OwnerSeed: Sendable {
         let process: OrderingProcess
         let displayName: String
@@ -503,6 +623,17 @@ private extension MacOS27MenuBarOrderingBackend {
     struct CodeIdentity: Sendable {
         let sandboxed: Bool
         let signingIdentifier: String?
+        let teamIdentifier: String?
+        let designatedRequirementDigest: String?
+
+        var applicationIdentity: OrderingApplicationCodeIdentity? {
+            guard let signingIdentifier, let designatedRequirementDigest else { return nil }
+            return OrderingApplicationCodeIdentity(
+                signingIdentifier: signingIdentifier,
+                teamIdentifier: teamIdentifier,
+                designatedRequirementDigest: designatedRequirementDigest
+            )
+        }
     }
 
     struct SandboxContainerResolution: Equatable, Sendable {
@@ -570,7 +701,8 @@ private extension MacOS27MenuBarOrderingBackend {
             .appendingPathComponent("com.apple.MenuBar.plist", isDirectory: false)
     }
 
-    static func validateRuntimeContract() throws {
+    @discardableResult
+    static func validateRuntimeContract() throws -> String {
         #if arch(arm64)
         let compileArchitecture = supportedArchitecture
         #else
@@ -578,7 +710,10 @@ private extension MacOS27MenuBarOrderingBackend {
         #endif
         guard compileArchitecture == supportedArchitecture,
               runtimeArchitecture() == supportedArchitecture,
-              systemBuild() == supportedBuild else {
+              ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+                == OrderingSnapshot.supportedOperatingSystemMajorVersion,
+              let currentBuild = systemBuild(),
+              OrderingSnapshot.supportsBuild(currentBuild) else {
             throw MacOS27MenuBarOrderingBackendError.runtimeUnsupported
         }
         let selector = NSSelectorFromString(initializerName)
@@ -589,6 +724,7 @@ private extension MacOS27MenuBarOrderingBackend {
               dlsym(UnsafeMutableRawPointer(bitPattern: -2), containerKeyListSymbol) != nil else {
             throw MacOS27MenuBarOrderingBackendError.runtimeContractDiffers
         }
+        return currentBuild
     }
 
     static func systemBuild() -> String? {
@@ -655,9 +791,26 @@ private extension MacOS27MenuBarOrderingBackend {
                 == errSecSuccess,
               let dictionary = information as? [String: Any] else { return nil }
         let entitlements = dictionary[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
+        var designatedRequirementDigest: String?
+        var designatedRequirement: SecRequirement?
+        if SecCodeCopyDesignatedRequirement(
+            staticCode, [], &designatedRequirement
+        ) == errSecSuccess, let designatedRequirement {
+            var requirementText: CFString?
+            if SecRequirementCopyString(
+                designatedRequirement, [], &requirementText
+            ) == errSecSuccess,
+               let requirementText {
+                designatedRequirementDigest = SHA256.hash(
+                    data: Data((requirementText as String).utf8)
+                ).map { String(format: "%02x", $0) }.joined()
+            }
+        }
         return CodeIdentity(
             sandboxed: entitlements["com.apple.security.app-sandbox"] as? Bool ?? false,
-            signingIdentifier: dictionary[kSecCodeInfoIdentifier as String] as? String
+            signingIdentifier: dictionary[kSecCodeInfoIdentifier as String] as? String,
+            teamIdentifier: dictionary[kSecCodeInfoTeamIdentifier as String] as? String,
+            designatedRequirementDigest: designatedRequirementDigest
         )
     }
 
@@ -706,6 +859,30 @@ private extension MacOS27MenuBarOrderingBackend {
             return [seed.process.bundleIdentifier, seed.process.executableName]
                 .compactMap { $0 }.contains(where: tokens.contains)
         }
+    }
+
+    static func exactBundleApplicationIdentity(
+        seed: OwnerSeed,
+        table: [String: OrderingValue],
+        processes: [OrderingProcess],
+        codeIdentity: CodeIdentity?
+    ) -> OrderingApplicationCodeIdentity? {
+        guard let bundle = seed.process.bundleIdentifier,
+              let codeIdentity,
+              codeIdentity.signingIdentifier == bundle,
+              let applicationIdentity = codeIdentity.applicationIdentity else { return nil }
+        let associated = table.keys.compactMap(parseStatusKey).filter { parsed in
+            parsed.ownerToken == seed.process.bundleIdentifier
+                || parsed.ownerToken == seed.process.executableName
+        }
+        guard associated.contains(where: { $0.ownerToken == bundle }) else { return nil }
+        for parsed in associated {
+            guard processes.filter({ process in
+                      parsed.ownerToken == process.bundleIdentifier
+                          || parsed.ownerToken == process.executableName
+                  }) == [seed.process] else { return nil }
+        }
+        return applicationIdentity
     }
 
     static func parseStatusKey(_ key: String) -> (ownerToken: String, persistentIdentifier: String)? {
@@ -1332,6 +1509,8 @@ private extension MacOS27MenuBarOrderingBackend {
             if ownerPIDs.isEmpty { return }
             throw MacOS27MenuBarOrderingBackendError.staleSnapshot
         }
+        let table = try snapshot.table()
+        let processes = snapshot.afterProcesses
         let unchanged = await Task.detached(priority: .utility) {
             let deadline = ContinuousClock.now.advanced(by: axCaptureDeadline)
             return expected.allSatisfy { observation in
@@ -1339,7 +1518,6 @@ private extension MacOS27MenuBarOrderingBackend {
                     process: observation.process,
                     displayName: observation.displayName
                 )
-                let preferences = captureOwnerPreferences(seed: seed)
                 let geometryUnchanged: Bool
                 if requiresGeometry {
                     let ax = captureAXItems(pid: observation.process.pid, deadline: deadline)
@@ -1348,8 +1526,15 @@ private extension MacOS27MenuBarOrderingBackend {
                 } else {
                     geometryUnchanged = true
                 }
-                return geometryUnchanged
-                    && preferences.complete == observation.ownerPreferencesComplete
+                guard geometryUnchanged else { return false }
+                if let expectedIdentity = observation.applicationCodeIdentity {
+                    return exactBundleApplicationIdentity(
+                        seed: seed, table: table, processes: processes,
+                        codeIdentity: codeIdentity(pid: observation.process.pid)
+                    ) == expectedIdentity
+                }
+                let preferences = captureOwnerPreferences(seed: seed)
+                return preferences.complete == observation.ownerPreferencesComplete
                     && preferences.positions == observation.ownerSavedPositions
                     && preferences.namespace == observation.ownerPreferenceNamespace
                     && preferences.sourceIdentity == observation.ownerPreferenceSourceIdentity
@@ -1358,7 +1543,9 @@ private extension MacOS27MenuBarOrderingBackend {
         guard unchanged else { throw MacOS27MenuBarOrderingBackendError.staleSnapshot }
     }
 
-    static func readCorroboratedGroup() throws -> [String: OrderingValue] {
+    static func readCorroboratedGroup(
+        transition postWriteReadback: PostWriteReadback? = nil
+    ) throws -> [String: OrderingValue] {
         let firstRoot = try readPlistRoot()
         let group = try decodeGroup(firstRoot)
         let fileTable = try table(in: group)
@@ -1372,13 +1559,40 @@ private extension MacOS27MenuBarOrderingBackend {
         }
         let secondRoot = try readPlistRoot()
         let secondGroup = try decodeGroup(secondRoot)
-        guard group == secondGroup else {
-            throw MacOS27MenuBarOrderingBackendError.groupChangedDuringCapture
+        if OrderingPreferenceDiagnostics.enabled {
+            var groups = ["fileBefore": group, "fileAfter": secondGroup,
+                          "container": [tableKey: OrderingValue.dictionary(containerTable)]]
+            if let postWriteReadback {
+                groups["transitionBefore"] = postWriteReadback.previousGroup
+                groups["transitionExpected"] = postWriteReadback.expectedGroup
+            }
+            OrderingPreferenceDiagnostics.record("corroborated-read", groups: groups,
+                detail: fileTable == containerTable ? "sources-agree" : "sources-disagree")
         }
-        guard fileTable == containerTable else {
-            throw MacOS27MenuBarOrderingBackendError.groupSourcesDisagree
-        }
-        return secondGroup
+        return try corroboratedGroup(first: group, containerTable: containerTable, second: secondGroup)
+    }
+
+    static func readCorroboratedGroupAfterBoundedSettle(
+        transition postWriteReadback: PostWriteReadback? = nil
+    ) async throws -> [String: OrderingValue] {
+        // Arm before reading so a replacement between the first read and the
+        // wait cannot be missed. An event is only a wake-up, never verification.
+        let observation = OrderingPreferenceFileChange(url: groupPlistURL)
+        defer { observation?.cancel() }
+        return try await readCorroboratedGroupAfterBoundedSettle(
+            read: { try readCorroboratedGroup(transition: postWriteReadback) },
+            settle: {
+                OrderingPreferenceDiagnostics.record("readback-settlement-start")
+                let changed: Bool
+                if let observation { changed = try await observation.wait() }
+                else {
+                    try await Task.sleep(for: preferenceSettlementDeadline)
+                    changed = false
+                }
+                OrderingPreferenceDiagnostics.record("readback-settlement-end",
+                    detail: changed ? "file-event" : "bounded-deadline")
+            }
+        )
     }
 
     static func decodeGroup(_ root: [String: Any]) throws -> [String: OrderingValue] {
@@ -1560,14 +1774,17 @@ private extension MacOS27MenuBarOrderingBackend {
             result[entry.key] = try entry.value.toFoundation()
         }
         var writeError: Unmanaged<CFError>?
+        OrderingPreferenceDiagnostics.record("write-intent", groups: ["target": [tableKey: .dictionary(table)]])
         guard blenny_write_menu_bar_ordering_table(
             foundation as CFDictionary,
             groupContainerURL.path as CFString,
             &writeError
         ) else {
             _ = writeError?.takeRetainedValue()
+            OrderingPreferenceDiagnostics.record("write-rejected")
             throw MacOS27MenuBarOrderingBackendError.synchronizationFailed
         }
+        OrderingPreferenceDiagnostics.record("write-acknowledged")
     }
 }
 

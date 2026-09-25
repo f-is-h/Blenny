@@ -633,7 +633,8 @@ extension CoordinatedPolicyWriter {
                     table, expecting: current, ownerKeys: Set(before.keys)
                 )
             }
-            let observed = before == after ? current : try await backend.capture()
+            let observed = before == after ? current : try await backend
+                .captureConfigurationTransition(from: current, to: table)
             guard !stopped else { throw OrderingTransactionError.contextInvalidated }
             try validateConfiguredOrdering(plan, observed: observed, expectedGroup: proposed)
             var finalObserved = observed
@@ -653,7 +654,9 @@ extension CoordinatedPolicyWriter {
                     guard !stopped else { throw OrderingTransactionError.contextInvalidated }
                     receipt.policyPersistenceCommitted = true
                     if plan.schemaVersion == 4 {
-                        let postPolicy = try await backend.capture()
+                        let postPolicy = try await backend.captureConfigurationTransition(
+                            from: current, to: table
+                        )
                         guard !stopped else {
                             throw OrderingTransactionError.contextInvalidated
                         }
@@ -740,6 +743,7 @@ extension CoordinatedPolicyWriter {
             )
         } catch {
             let originalFailure = error
+            OrderingPreferenceDiagnostics.record("configuration-commit-failed", detail: error.localizedDescription)
             if let orderingError = originalFailure as? OrderingTransactionError,
                orderingError == .policyRecoveryRequired {
                 orderingRecoveryPending = true
@@ -776,6 +780,7 @@ extension CoordinatedPolicyWriter {
                 try await rollbackConfigurationCommitLocked(receipt, backend: backend, recovery: recovery)
                 orderingRecoveryPending = false
             } catch {
+                OrderingPreferenceDiagnostics.record("configuration-rollback-failed", detail: error.localizedDescription)
                 orderingRecoveryPending = true
                 throw error
             }
@@ -996,12 +1001,22 @@ extension CoordinatedPolicyWriter {
                   candidate.eligible, candidate.process == target.process,
                   Set(candidate.keys.map(\.key)) == Set(target.keys.map(\.key)),
                   let beforeObservation = plan.baseline.observationsByPID[target.process.pid],
-                  let afterObservation = observed.observationsByPID[target.process.pid],
-                  afterObservation.ownerPreferencesComplete,
-                  afterObservation.ownerSavedPositions == beforeObservation.ownerSavedPositions,
-                  afterObservation.ownerPreferenceNamespace == beforeObservation.ownerPreferenceNamespace,
-                  afterObservation.ownerPreferenceSourceIdentity == beforeObservation.ownerPreferenceSourceIdentity else {
+                  let afterObservation = observed.observationsByPID[target.process.pid] else {
                 throw OrderingTransactionError.movementNotVerified
+            }
+            if let identity = target.exactBundleCodeIdentity {
+                guard candidate.exactBundleCodeIdentity == identity,
+                      beforeObservation.applicationCodeIdentity == identity,
+                      afterObservation.applicationCodeIdentity == identity else {
+                    throw OrderingTransactionError.movementNotVerified
+                }
+            } else {
+                guard afterObservation.ownerPreferencesComplete,
+                      afterObservation.ownerSavedPositions == beforeObservation.ownerSavedPositions,
+                      afterObservation.ownerPreferenceNamespace == beforeObservation.ownerPreferenceNamespace,
+                      afterObservation.ownerPreferenceSourceIdentity == beforeObservation.ownerPreferenceSourceIdentity else {
+                    throw OrderingTransactionError.movementNotVerified
+                }
             }
         }
         let resolvedSystems = try OrderingSystemConfigurationIdentityResolver.resolve(
@@ -1034,7 +1049,8 @@ extension CoordinatedPolicyWriter {
             keys: byKey.values.sorted { $0.key < $1.key },
             ownerSavedPositions: incoming.ownerSavedPositions,
             ownerPreferenceNamespace: incoming.ownerPreferenceNamespace,
-            ownerPreferenceSourceIdentity: incoming.ownerPreferenceSourceIdentity
+            ownerPreferenceSourceIdentity: incoming.ownerPreferenceSourceIdentity,
+            exactBundleCodeIdentity: incoming.exactBundleCodeIdentity
         )
     }
 
@@ -1090,7 +1106,8 @@ extension CoordinatedPolicyWriter {
                 ownerKeys: Set(bindings.flatMap(\.keys).map(\.key))
             )
         }
-        let observed = restoredTable == table ? current : try await backend.capture()
+        let observed = restoredTable == table ? current : try await backend
+            .captureConfigurationTransition(from: current, to: restoredTable)
         let observedTable = try observed.table()
         guard committed.allSatisfy({ observedTable[$0.key] == $0.value }) else {
             try? await recovery.save(receipt)
@@ -1131,41 +1148,70 @@ extension CoordinatedPolicyWriter {
               let bindings = configurationBindings(receipt) else {
             throw OrderingTransactionError.invalidReceipt
         }
-        if let undo = receipt.undoPolicy, receipt.originalPolicy == nil {
-            guard let policyStore, let policyUndo, !stopped,
-                  policyUndo.oldPolicy == undo.after,
-                  policyUndo.newPolicy == undo.before,
-                  try await policyStore.load() == undo.after,
-                  policyUndo.report.newBaselinePlan != nil else {
-                throw OrderingTransactionError.contextInvalidated
-            }
-            // Persist policy recovery metadata before either inverse mutation.
-            receipt.undoPolicyRestoreIntent = true
-            receipt.originalPolicy = undo.before
-            receipt.originalPolicyBackup = undo.backup
-            receipt.proposedPolicy = undo.after
-            receipt.policyPersistenceCommitted = true
-            try await recovery.save(receipt)
-        }
         let current = try await backend.capture()
         try validateConfigurationRecoveryIdentity(bindings, current: current)
         let table = try current.table()
         let pending = receipt.pendingValues ?? committed
         if receipt.phase == .restoreIntent {
-            guard pending.allSatisfy({ table[$0.key] == $0.value }) else {
-                throw OrderingTransactionError.restorationAlreadyAttempted
-            }
-            if pending != original {
+            if pending.allSatisfy({ table[$0.key] == $0.value }) {
+                if pending != original {
+                    receipt.phase = .applied
+                    receipt.detail = "The interrupted revision rollback is confirmed at the last committed configuration."
+                    receipt.committedValues = pending
+                    receipt.pendingValues = nil
+                    receipt.configurationVerified = true
+                    receipt.physicalVerificationStatus = .unavailable
+                    try await recovery.save(receipt)
+                    orderingRecoveryPending = false
+                    return OrderingRestoreResult(preferencesRestored: true, relativeOrderVerified: false)
+                }
+            } else if pending == original,
+                      (receipt.configurationRestoreRetryCount ?? 0) == 0,
+                      committed.allSatisfy({ table[$0.key] == $0.value }) {
+                // The complete independent capture proves the preceding inverse
+                // attempt changed none of the controlled values. A new explicit
+                // Recover action may make one bounded retry; it is never retried
+                // inside the failed action and a second failure remains terminal.
                 receipt.phase = .applied
-                receipt.detail = "The interrupted revision rollback is confirmed at the last committed configuration."
-                receipt.committedValues = pending
+                receipt.detail = "The previous configuration Undo changed no controlled values; one explicit retry is being attempted."
                 receipt.pendingValues = nil
                 receipt.configurationVerified = true
                 receipt.physicalVerificationStatus = .unavailable
+                receipt.configurationRestoreRetryCount = 1
                 try await recovery.save(receipt)
-                orderingRecoveryPending = false
-                return OrderingRestoreResult(preferencesRestored: true, relativeOrderVerified: false)
+            } else {
+                throw OrderingTransactionError.restorationAlreadyAttempted
             }
+        }
+        if receipt.phase == .applied,
+           let undo = receipt.undoPolicy, receipt.originalPolicy == nil {
+            guard let policyStore, let policyUndo,
+                  let currentPolicy = try await policyStore.load() else {
+                throw OrderingTransactionError.contextInvalidated
+            }
+            let expectedCurrent = try undo.after.settingManagementEnabled(
+                currentPolicy.managementEnabled
+            )
+            let restoreTarget = try undo.before.settingManagementEnabled(
+                currentPolicy.managementEnabled
+            )
+            let recoveryCoordinatorMatchesManagementState = currentPolicy.managementEnabled
+                ? !stopped
+                : activePlan == nil
+            guard recoveryCoordinatorMatchesManagementState,
+                  currentPolicy == expectedCurrent,
+                  policyUndo.oldPolicy == expectedCurrent,
+                  policyUndo.newPolicy == restoreTarget,
+                  policyUndo.report.newBaselinePlan != nil else {
+                throw OrderingTransactionError.contextInvalidated
+            }
+            // Persist policy recovery metadata before either inverse mutation.
+            receipt.undoPolicyRestoreIntent = true
+            receipt.originalPolicy = restoreTarget
+            receipt.originalPolicyBackup = undo.backup
+            receipt.proposedPolicy = expectedCurrent
+            receipt.policyPersistenceCommitted = true
+            try await recovery.save(receipt)
         }
         for key in original.keys {
             guard let value = table[key],
@@ -1189,7 +1235,8 @@ extension CoordinatedPolicyWriter {
             }
             catch { receipt.detail = "Configuration Undo returned an error: \(error.localizedDescription)" }
         }
-        let observed = restoredTable == table ? current : try await backend.capture()
+        let observed = restoredTable == table ? current : try await backend
+            .captureConfigurationTransition(from: current, to: restoredTable)
         let observedTable = try observed.table()
         guard original.allSatisfy({ observedTable[$0.key] == $0.value }) else {
             try? await recovery.save(receipt)
@@ -1219,18 +1266,31 @@ extension CoordinatedPolicyWriter {
             }
             if currentPolicy == proposedPolicy {
                 if receipt.undoPolicyRestoreIntent == true {
-                    guard let baseline = policyUndo?.report.newBaselinePlan, !stopped else {
-                        throw OrderingTransactionError.contextInvalidated
-                    }
-                    if receipt.undoPolicyWriteAttempted != true {
-                        receipt.undoPolicyWriteAttempted = true
-                        try await recovery.save(receipt)
-                        try await transition(to: baseline, baselineReplacement: true)
-                    }
-                    // An interrupted inverse may be verified, never replayed blindly.
-                    guard try await assertionWriter.verifyActivePlan(baseline),
-                          try await persistentWriter.verifyManagedPlan(baseline.persistentSystemItems) else {
-                        throw OrderingTransactionError.restorationNotVerified
+                    if proposedPolicy.managementEnabled {
+                        guard let baseline = policyUndo?.report.newBaselinePlan, !stopped else {
+                            throw OrderingTransactionError.contextInvalidated
+                        }
+                        if receipt.undoPolicyWriteAttempted != true {
+                            receipt.undoPolicyWriteAttempted = true
+                            try await recovery.save(receipt)
+                            try await transition(to: baseline, baselineReplacement: true)
+                        }
+                        // An interrupted inverse may be verified, never replayed blindly.
+                        guard try await assertionWriter.verifyActivePlan(baseline),
+                              try await persistentWriter.verifyManagedPlan(baseline.persistentSystemItems) else {
+                            throw OrderingTransactionError.restorationNotVerified
+                        }
+                    } else {
+                        // Explicit Undo is allowed after Stop. The policy store and
+                        // order are restored without a visibility transition. A
+                        // freshly reopened app owns an inactive recovery writer,
+                        // while a same-process Stop owns a stopped writer; both
+                        // have no active plan and remain unrestricted.
+                        guard activePlan == nil,
+                              policyUndo?.oldPolicy == proposedPolicy,
+                              policyUndo?.newPolicy == originalPolicy else {
+                            throw OrderingTransactionError.contextInvalidated
+                        }
                     }
                 }
                 try await policyStore.restoreSnapshot(
@@ -1238,7 +1298,8 @@ extension CoordinatedPolicyWriter {
                     backup: receipt.originalPolicyBackup,
                     expecting: proposedPolicy
                 )
-                if let baseline = policyUndo?.report.newBaselinePlan {
+                if proposedPolicy.managementEnabled,
+                   let baseline = policyUndo?.report.newBaselinePlan {
                     await persistentWriter.finalizeCommittedPlan(baseline.persistentSystemItems)
                 }
             }
@@ -1280,14 +1341,28 @@ extension CoordinatedPolicyWriter {
         for binding in bindings {
             switch binding {
             case let .systemItem(system):
+                let currentBindings = current.systemHostBindings?.filter {
+                    $0.item == system.item
+                } ?? []
+                guard currentBindings.count == 1,
+                      let currentBinding = currentBindings.first else {
+                    throw OrderingTransactionError.recoveryIdentityConflict
+                }
+                let recordedHost = system.hostBinding.hostProcess
+                let currentHost = currentBinding.hostProcess
                 guard system.key.key == system.item.configurationKey,
                       system.hostBinding.item == system.item,
                       system.hostBinding.configurationKey == system.key.key,
-                      current.systemHostBindings?.filter({ $0.item == system.item })
-                        == [system.hostBinding],
+                      system.hostBinding.codeIdentityVerified,
+                      currentBinding.configurationKey == system.key.key,
+                      currentBinding.codeIdentityVerified,
+                      recordedHost.bundleIdentifier == system.item.hostBundleIdentifier,
+                      currentHost.bundleIdentifier == recordedHost.bundleIdentifier,
+                      currentHost.executableName == recordedHost.executableName,
+                      currentHost.isSystem,
                       inventory.filter({
                           $0.bundleIdentifier == system.item.hostBundleIdentifier
-                      }) == [system.hostBinding.hostProcess] else {
+                      }) == [currentHost] else {
                     throw OrderingTransactionError.recoveryIdentityConflict
                 }
                 if system.key.key.hasPrefix("status:") {
@@ -1297,7 +1372,7 @@ extension CoordinatedPolicyWriter {
                     )
                     guard inventory.filter({
                         $0.bundleIdentifier == token || $0.executableName == token
-                    }) == [system.hostBinding.hostProcess] else {
+                    }) == [currentHost] else {
                         throw OrderingTransactionError.recoveryIdentityConflict
                     }
                 }
@@ -1305,12 +1380,22 @@ extension CoordinatedPolicyWriter {
             case let .application(owner):
             let currentOwners = inventory.filter { $0.bundleIdentifier == owner.bundleIdentifier }
             if currentOwners.count == 1, let currentOwner = currentOwners.first {
-                guard let observation = current.observationsByPID[currentOwner.pid],
-                      observation.ownerPreferencesComplete,
-                      observation.ownerSavedPositions == owner.ownerSavedPositions,
-                      observation.ownerPreferenceNamespace == owner.ownerPreferenceNamespace,
-                      observation.ownerPreferenceSourceIdentity == owner.ownerPreferenceSourceIdentity else {
+                guard let observation = current.observationsByPID[currentOwner.pid] else {
                     throw OrderingTransactionError.recoveryIdentityConflict
+                }
+                if let identity = owner.exactBundleCodeIdentity {
+                    guard owner.keys.contains(where: { target in
+                        target.key.hasPrefix("status:\(owner.bundleIdentifier)::")
+                    }), observation.applicationCodeIdentity == identity else {
+                        throw OrderingTransactionError.recoveryIdentityConflict
+                    }
+                } else {
+                    guard observation.ownerPreferencesComplete,
+                          observation.ownerSavedPositions == owner.ownerSavedPositions,
+                          observation.ownerPreferenceNamespace == owner.ownerPreferenceNamespace,
+                          observation.ownerPreferenceSourceIdentity == owner.ownerPreferenceSourceIdentity else {
+                        throw OrderingTransactionError.recoveryIdentityConflict
+                    }
                 }
             }
             for target in owner.keys {

@@ -6,19 +6,11 @@ import Testing
 struct SystemItemPolicyCatalogTests {
     private let blenny = "xyz.fi5h.blenny"
 
-    @Test("New runtime build admission is isolated to Debug")
-    func runtimeBuildAdmissionIsDebugOnly() {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
-        #expect(ExperimentalMacOS27AssessmentFactory.supportedOperatingSystemBuilds == [
-            "26A5416b", "26A5425a",
-        ])
-        #expect(ExperimentalMacOS27AssessmentFactory.compatibilityFingerprint.contains("debug"))
-        #else
-        #expect(ExperimentalMacOS27AssessmentFactory.supportedOperatingSystemBuilds == [
-            "26A5416b",
-        ])
-        #expect(ExperimentalMacOS27AssessmentFactory.compatibilityFingerprint.contains("release"))
-        #endif
+    @Test("Assessment runtime admits the complete macOS 27 major")
+    func runtimeMajorVersionAdmission() {
+        #expect(ExperimentalMacOS27AssessmentFactory.supportedOperatingSystemMajorVersion == 27)
+        #expect(ExperimentalMacOS27AssessmentFactory.compatibilityFingerprint
+            == "arm64-macos27-assessment-contract-v5")
     }
 
     @Test("Debug catalog contains only the eight exact writable mappings")

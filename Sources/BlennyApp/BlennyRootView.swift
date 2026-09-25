@@ -92,11 +92,20 @@ struct BlennyRootView: View {
 
 private func debugAccessibilityFlag(_ key: String) -> Bool {
     #if DEBUG
-    ProcessInfo.processInfo.environment[key] == "YES"
+    DebugAccessibilityEnvironment.values[key] == "YES"
     #else
     false
     #endif
 }
+
+#if DEBUG
+private enum DebugAccessibilityEnvironment {
+    // A process environment cannot change after launch. Reading and bridging
+    // the full Foundation environment from every Board item makes SwiftUI's
+    // view-update hot path unnecessarily expensive.
+    static let values = ProcessInfo.processInfo.environment
+}
+#endif
 
 private enum BlennyDesign {
     static let navigationHeight: CGFloat = 54
@@ -633,14 +642,24 @@ private struct OrganizationBoard: View {
                     .stroke(Color.primary.opacity(0.7), lineWidth: 1.5)
             }
         }
-        .dropPreviewsFormation(.none)
-        .onDragSessionUpdated(updateDragSession)
+        .diagnosticBoardSession(updateDragSession)
+        #if DEBUG
+        .onChange(of: interaction) { _, _ in
+            DebugDragStartDiagnostics.record("board.interaction.changed", stack: true)
+        }
+        #endif
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Organization Board")
     }
 
     private func updateDragSession(_ session: DragSession) {
+        #if DEBUG
+        DebugDragStartDiagnostics.record("board.dragSession.\(String(describing: session.phase))")
+        #endif
         let identities = session.draggedItemIDs(for: PolicyDragPayload.ID.self)
+        #if DEBUG
+        DebugDragStartDiagnostics.record("board.identityCount.\(identities.count)")
+        #endif
         guard identities.count == 1, let identity = identities.first else {
             switch session.phase {
             case .ended(let operation) where operation != .move:
@@ -701,11 +720,9 @@ private struct OrganizationBoard: View {
         }
         activeDragSessionID = nil
         activeDragIdentity = nil
-        #if DEBUG
         if retirePayload, let identity {
-            model.retireOrderingDragSession(identity)
+            model.retireDragSession(identity)
         }
-        #endif
     }
 
     private func registerDelivery(
@@ -832,12 +849,12 @@ private struct OrganizationBoard: View {
 
     private var permissionMessage: String {
         model.accessibilityPromptRequested
-            ? "Enable Blenny in System Settings, then return here."
-            : "Allow Accessibility so Blenny can identify your menu bar items."
+            ? "Turn on Blenny in Device Control and Data Access, then return here."
+            : "Allow Device Control so Blenny can identify your menu bar items."
     }
 
     private var permissionButtonTitle: String {
-        model.accessibilityPromptRequested ? "Open System Settings" : "Set Up Accessibility…"
+        model.accessibilityPromptRequested ? "Open System Settings" : "Set Up Access…"
     }
 
     private var effectiveReduceMotion: Bool {
@@ -924,6 +941,18 @@ private struct PolicyLaneRow: View {
     #endif
 
     var body: some View {
+        #if DEBUG
+        if DebugDragStartDiagnostics.mode == .simpleLane {
+            simpleLane
+        } else {
+            fullLane
+        }
+        #else
+        fullLane
+        #endif
+    }
+
+    private var fullLane: some View {
         HStack(spacing: 0) {
             laneHeader
                 .frame(width: 154, alignment: .leading)
@@ -1048,11 +1077,12 @@ private struct PolicyLaneRow: View {
                         alignment: .leading
                     )
                     .contentShape(Rectangle())
-                    .dropDestination(for: PolicyDragPayload.self) { payloads, session in
-                        acceptDrop(payloads, in: session)
-                    }
-                    .dropConfiguration(dropConfiguration)
-                    .onDropSessionUpdated(updateDropSession)
+                    .diagnosticLaneDrop(
+                        accept: acceptDrop,
+                        configuration: dropConfiguration,
+                        update: updateDropSession,
+                        direct: acceptDiagnosticDrop
+                    )
                     .padding(.horizontal, 5)
                 }
                 .scrollIndicators(.hidden)
@@ -1077,6 +1107,50 @@ private struct PolicyLaneRow: View {
         .accessibilityLabel("\(policy.interfaceTitle), \(applicationCount) applications")
         .accessibilityHint(policy.interfaceDetail)
     }
+
+    private func acceptDiagnosticDrop(_ payloads: [PolicyDragPayload], _ location: CGPoint) -> Bool {
+        guard payloads.count == 1, let payload = payloads.first else { return false }
+        #if DEBUG
+        DebugDragStartDiagnostics.record("direct.drop.delivered")
+        guard let subject = model.orderingSubject(forDragIdentifier: payload.bundleIdentifier),
+              model.orderingLayoutDraft?.policy(of: subject) == payload.sourcePolicy else { return false }
+        // The real model validates the token, candidate generation and current draft.
+        let identifiers = model.orderingLayoutDraft?.subjects(in: policy).map {
+            model.dragIdentifier(for: $0)
+        } ?? []
+        let position = OrderingBoardLandingProjection.position(
+            at: location.x, itemExtent: DebugDragStartDiagnostics.mode == .simpleLane ? 48 : orderingItemExtent,
+            moving: payload.bundleIdentifier, among: identifiers
+        ) ?? .end
+        onLayoutDrop(payload, OrderingBoardLayoutDestination(policy: policy, position: position))
+        #else
+        onDrop(payload, policy)
+        #endif
+        return true
+    }
+
+    #if DEBUG
+    private var simpleLane: some View {
+        HStack(spacing: 0) {
+            Text(policy.interfaceTitle).frame(width: 100)
+            HStack(spacing: 0) {
+                ForEach(model.orderingLayoutDraft?.subjects(in: policy) ?? [], id: \.self) { subject in
+                    if let presentation = orderingLandingPresentation(for: subject) {
+                        DebugPlainBoardIcon(
+                            presentation: presentation,
+                            payload: model.beginOrderingDragPayload(subjectID: subject, sourcePolicy: policy)
+                        )
+                        .frame(width: 48, height: 48)
+                    }
+                }
+            }
+            .frame(minWidth: 700, minHeight: BlennyDesign.laneHeight, alignment: .leading)
+            .contentShape(Rectangle())
+            .dropDestination(for: PolicyDragPayload.self, action: acceptDiagnosticDrop)
+        }
+        .frame(height: BlennyDesign.laneHeight)
+    }
+    #endif
 
     private func acceptDrop(
         _ payloads: [PolicyDragPayload],
@@ -1169,9 +1243,16 @@ private struct PolicyLaneRow: View {
         .accessibilityLabel("Items that cannot be sorted")
     }
 
+    @ViewBuilder
     private func systemBoardItem(
         _ item: SystemMenuBarItemObservation
     ) -> some View {
+        #if DEBUG
+        if DebugDragStartDiagnostics.mode == .snapshotSystemItems
+            || DebugDragStartDiagnostics.mode == .noViewExtras {
+            DebugPlainBoardIcon(presentation: model.systemIcon(for: item), payload: nil)
+        } else {
+
         #if DEBUG
         SystemBoardItem(
             observation: item,
@@ -1194,13 +1275,46 @@ private struct PolicyLaneRow: View {
             onMove: performMove
         )
         #endif
+        }
+        #else
+
+        #if DEBUG
+        SystemBoardItem(
+            observation: item,
+            policy: policy,
+            model: model,
+            interaction: $interaction,
+            contrast: contrast,
+            actions: actions,
+            onMove: performMove,
+            orderingSubjectID: nil
+        )
+        #else
+        SystemBoardItem(
+            observation: item,
+            policy: policy,
+            model: model,
+            interaction: $interaction,
+            contrast: contrast,
+            actions: actions,
+            onMove: performMove
+        )
+        #endif
+        #endif
     }
 
     #if DEBUG
+    @ViewBuilder
     private func systemBoardItem(
         _ item: SystemMenuBarItemObservation,
         orderingSubjectID: OrderingSubjectID
     ) -> some View {
+        #if DEBUG
+        if DebugDragStartDiagnostics.mode == .snapshotSystemItems
+            || DebugDragStartDiagnostics.mode == .noViewExtras {
+            DebugPlainBoardIcon(presentation: model.systemIcon(for: item), payload: nil)
+        } else {
+
         SystemBoardItem(
             observation: item,
             policy: policy,
@@ -1211,6 +1325,20 @@ private struct PolicyLaneRow: View {
             onMove: performMove,
             orderingSubjectID: orderingSubjectID
         )
+        }
+        #else
+
+        SystemBoardItem(
+            observation: item,
+            policy: policy,
+            model: model,
+            interaction: $interaction,
+            contrast: contrast,
+            actions: actions,
+            onMove: performMove,
+            orderingSubjectID: orderingSubjectID
+        )
+        #endif
     }
     #endif
 
@@ -1370,6 +1498,16 @@ private struct PolicyLaneRow: View {
         _ candidate: PolicyCandidate,
         presentsAsSystemItem: Bool
     ) -> some View {
+        #if DEBUG
+        if DebugDragStartDiagnostics.mode == .noViewExtras {
+            DebugPlainBoardIcon(
+                presentation: model.applicationIcon(for: candidate.bundleIdentifier),
+                payload: model.isBlenny(candidate.bundleIdentifier) ? nil : model.beginOrderingDragPayload(
+                    subjectID: .application(candidate.bundleIdentifier), sourcePolicy: policy
+                )
+            )
+        } else {
+
         ApplicationBoardItem(
             candidate: candidate,
             policy: policy,
@@ -1381,6 +1519,21 @@ private struct PolicyLaneRow: View {
             presentsAsSystemItem: presentsAsSystemItem,
             onMove: performMove
         )
+        }
+        #else
+
+        ApplicationBoardItem(
+            candidate: candidate,
+            policy: policy,
+            model: model,
+            interaction: $interaction,
+            iconNamespace: iconNamespace,
+            reduceMotion: reduceMotion,
+            contrast: contrast,
+            presentsAsSystemItem: presentsAsSystemItem,
+            onMove: performMove
+        )
+        #endif
     }
 
     private var systemControlLabel: String {
@@ -1506,6 +1659,9 @@ private struct PolicyLaneRow: View {
     private func localIdentity(in session: DropSession) -> PolicyDragPayload.ID? {
         if session.itemsCount == 1, let localSession = session.localSession {
             let identities = localSession.draggedItemIDs(for: PolicyDragPayload.ID.self)
+            #if DEBUG
+            DebugDragStartDiagnostics.record("lane.identityCount.\(identities.count)")
+            #endif
             if identities.count == 1 { return identities[0] }
             if identities.count > 1 { return nil }
         }
@@ -1552,6 +1708,9 @@ private struct PolicyLaneRow: View {
     }
 
     private func updateDropSession(_ session: DropSession) {
+        #if DEBUG
+        DebugDragStartDiagnostics.record("lane.dropSession.\(String(describing: session.phase))")
+        #endif
         let animation: Animation = reduceMotion
             ? .easeOut(duration: 0.08)
             : .smooth(duration: 0.15, extraBounce: 0)
@@ -1794,10 +1953,7 @@ private struct ApplicationBoardItem: View {
             blenny: blenny,
             dragPayload: blenny
                 ? nil
-                : model.dragPayload(
-                    bundleIdentifier: candidate.bundleIdentifier,
-                    sourcePolicy: policy
-                )
+                : currentDragPayload
         )
         .contextMenu {
             if !blenny {
@@ -1877,6 +2033,23 @@ private struct ApplicationBoardItem: View {
         .zIndex(showsName ? 20 : isSelected ? 10 : 0)
     }
 
+    private var currentDragPayload: PolicyDragPayload? {
+        #if DEBUG
+        guard let subjectID = model.orderingSubject(
+            forDragIdentifier: candidate.bundleIdentifier
+        ) else { return nil }
+        return model.beginOrderingDragPayload(
+            subjectID: subjectID,
+            sourcePolicy: policy
+        )
+        #else
+        return model.preparedPolicyDragPayload(
+            bundleIdentifier: candidate.bundleIdentifier,
+            sourcePolicy: policy
+        )
+        #endif
+    }
+
     private func itemSurface(
         presentation: ResolvedPolicyIcon,
         blenny: Bool,
@@ -1889,9 +2062,7 @@ private struct ApplicationBoardItem: View {
                 dragPayload: dragPayload
             )
             .onTapGesture(perform: select)
-            .focusable()
-            .focusEffectDisabled()
-            .focused($isFocused)
+            .diagnosticFocusable($isFocused)
             .onKeyPress(keys: [.return, .space], action: handleSelectionKey)
         )
         let visualSurface = AnyView(
@@ -1905,9 +2076,7 @@ private struct ApplicationBoardItem: View {
                 }
             }
             .onHover { hovering in
-                withAnimation(.easeOut(duration: 0.10)) {
-                    interaction.setHovered(itemID, isHovered: hovering)
-                }
+                updateHover(hovering)
             }
         )
         return AnyView(
@@ -2009,38 +2178,24 @@ private struct ApplicationBoardItem: View {
     ) -> some View {
         if let payload {
             policyIcon(presentation: presentation)
-                .contentShape(
-                    .dragPreview,
-                    RoundedRectangle(cornerRadius: 8)
-                )
-                .draggable(PolicyDragPayload.self) {
-                    currentDragPayload(fallback: payload)
-                }
-                .dragConfiguration(DragConfiguration(allowMove: true))
-                .id(payload.id)
+                .policyBoardDragSource(payload)
         } else {
             policyIcon(presentation: presentation)
         }
-    }
-
-    private func currentDragPayload(fallback: PolicyDragPayload) -> PolicyDragPayload? {
-        #if DEBUG
-        guard let subjectID = model.orderingSubject(
-            forDragIdentifier: candidate.bundleIdentifier
-        ) else { return nil }
-        return model.beginOrderingDragPayload(
-            subjectID: subjectID,
-            sourcePolicy: policy
-        )
-        #else
-        return fallback
-        #endif
     }
 
     private func select() {
         withAnimation(interactionAnimation) {
             interaction.select(itemID)
         }
+    }
+
+    private func updateHover(_ hovering: Bool) {
+        // Native drag startup clears the hover presentation while the pointer
+        // is still over the source. Writing that hover straight back can
+        // remount the source and cancel the session, producing a layout loop.
+        guard interaction.draggedBundleIdentifier == nil else { return }
+        interaction.setHovered(itemID, isHovered: hovering)
     }
 
     #if DEBUG
@@ -2051,7 +2206,7 @@ private struct ApplicationBoardItem: View {
         }
         switch row.availability {
         case .ready: return nil
-        case .needsMapping: return "link.badge.plus"
+        case .needsMapping: return "minus.circle"
         case .unverified: return "info.circle"
         case .blocked: return "nosign"
         }
@@ -2104,7 +2259,10 @@ private struct ApplicationBoardItem: View {
     }
 
     private var isSelected: Bool { interaction.selectedItem == itemID }
-    private var showsName: Bool { interaction.namePresentationItem == itemID }
+    private var showsName: Bool {
+        interaction.draggedBundleIdentifier == nil
+            && interaction.namePresentationItem == itemID
+    }
     private var isDragSource: Bool {
         interaction.draggedBundleIdentifier == candidate.bundleIdentifier
     }
@@ -2180,7 +2338,7 @@ private struct ApplicationBoardItem: View {
         case .ready:
             return ", mapped for physical ordering"
         case .needsMapping:
-            return ", configurable, needs physical ordering mapping"
+            return ", visibility can be changed, sorting is unavailable"
         case .unverified:
             return ", configurable, mapping or observation unverified"
         case .blocked:
@@ -2303,9 +2461,7 @@ private struct SystemBoardItem: View {
         let inputSurface = AnyView(
             systemArtwork(presentation: presentation)
                 .onTapGesture(perform: select)
-                .focusable()
-                .focusEffectDisabled()
-                .focused($isFocused)
+                .diagnosticFocusable($isFocused)
                 .onKeyPress(
                     keys: [.return, .space],
                     action: handleSelectionKey
@@ -2316,16 +2472,14 @@ private struct SystemBoardItem: View {
                 .opacity(isDragSource ? 0.28 : 1)
                 .scaleEffect(isDragSource && !effectiveReduceMotion ? 0.96 : 1)
                 .animation(interactionAnimation, value: isDragSource)
-                .onChange(of: isFocused) {
-                    withAnimation(.easeOut(duration: 0.10)) {
-                        interaction.setFocused(itemID, isFocused: isFocused)
-                    }
+            .onChange(of: isFocused) {
+                withAnimation(.easeOut(duration: 0.10)) {
+                    interaction.setFocused(itemID, isFocused: isFocused)
                 }
-                .onHover { hovering in
-                    withAnimation(.easeOut(duration: 0.10)) {
-                        interaction.setHovered(itemID, isHovered: hovering)
-                    }
-                }
+            }
+            .onHover { hovering in
+                updateHover(hovering)
+            }
         )
         return AnyView(
             hoverSurface
@@ -2362,18 +2516,13 @@ private struct SystemBoardItem: View {
                     RoundedRectangle(cornerRadius: 9)
                         .stroke(itemOutline, lineWidth: itemOutlineWidth)
                 }
-            if let dragPayload {
+            if let dragPayload = sourcePayload {
                 NaturalAspectSystemIcon(
                     presentation: presentation,
                     pointSize: 21,
                     frame: CGSize(width: 29, height: 25)
                 )
-                .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 8))
-                .draggable(PolicyDragPayload.self) {
-                    currentSystemDragPayload()
-                }
-                .dragConfiguration(DragConfiguration(allowMove: true))
-                .id(dragPayload.id)
+                .policyBoardDragSource(dragPayload)
             } else {
                 NaturalAspectSystemIcon(
                     presentation: presentation,
@@ -2428,6 +2577,11 @@ private struct SystemBoardItem: View {
         }
     }
 
+    private func updateHover(_ hovering: Bool) {
+        guard interaction.draggedBundleIdentifier == nil else { return }
+        interaction.setHovered(itemID, isHovered: hovering)
+    }
+
     private func handleSelectionKey(_ keyPress: KeyPress) -> KeyPress.Result {
         select()
         return .handled
@@ -2443,21 +2597,31 @@ private struct SystemBoardItem: View {
         return false
         #endif
     }
-    private func currentSystemDragPayload() -> PolicyDragPayload? {
+    private var sourcePayload: PolicyDragPayload? {
         #if DEBUG
-        if let orderingSubjectID {
-            return model.beginOrderingDragPayload(subjectID: orderingSubjectID, sourcePolicy: policy)
+        switch DebugDragStartDiagnostics.mode {
+        case .applicationSourcesOnly:
+            return nil
+        case .systemPayloadOnly:
+            // Evaluate the original dependencies without registering a source.
+            let payload = dragPayload
+            DebugDragStartDiagnostics.record(payload == nil
+                ? "system.payload.absent" : "system.payload.present")
+            return nil
+        default:
+            break
         }
         #endif
-        return model.systemPolicyDragPayload(
-            for: observation.observationIdentifier,
-            sourcePolicy: policy
-        )
+        return dragPayload
     }
+
     private var dragPayload: PolicyDragPayload? {
         #if DEBUG
         if let orderingSubjectID {
-            return model.dragPayload(subjectID: orderingSubjectID, sourcePolicy: policy)
+            return model.beginOrderingDragPayload(
+                subjectID: orderingSubjectID,
+                sourcePolicy: policy
+            )
         }
         #endif
         guard isControllable else { return nil }
@@ -2565,7 +2729,10 @@ private struct SystemBoardItem: View {
         }
     }
     #endif
-    private var showsName: Bool { interaction.namePresentationItem == itemID }
+    private var showsName: Bool {
+        interaction.draggedBundleIdentifier == nil
+            && interaction.namePresentationItem == itemID
+    }
 
     private var itemBackground: Color {
         if isSelected { return Color.accentColor.opacity(0.07) }
@@ -2640,6 +2807,21 @@ private struct SystemBoardItem: View {
         #endif
     }
 }
+
+#if DEBUG
+@MainActor
+private func policyDragItemProvider(
+    for payload: PolicyDragPayload
+) -> NSItemProvider {
+    #if DEBUG
+    DebugDragStartDiagnostics.beginAttempt()
+    DebugDragStartDiagnostics.record("provider.request", stack: true)
+    #endif
+    let provider = NSItemProvider()
+    provider.register(payload)
+    return provider
+}
+#endif
 
 private struct SelectionDetailRail: View {
     @ObservedObject var model: ProductInterfaceModel
@@ -3083,7 +3265,7 @@ private struct ObservationAndDraftFooter: View {
             return "Changes not applied"
         }
         guard model.accessibilityTrusted else {
-            return "Accessibility required · Manual observation"
+            return "Device Control required · Manual observation"
         }
         guard model.model != nil else {
             return "No completed observation · Manual refresh only"
@@ -3098,7 +3280,7 @@ private struct ObservationAndDraftFooter: View {
 
     private var refreshHelp: String {
         if !model.accessibilityTrusted {
-            return "Grant Accessibility, then return to Blenny for one automatic refresh."
+            return "Turn on Device Control, then return to Blenny for one automatic refresh."
         }
         if model.hasDraftChanges {
             return "Apply or discard your changes before refreshing."
@@ -3133,8 +3315,8 @@ private struct SettingsView: View {
                 SettingsGridRow {
                     Label(
                         model.accessibilityTrusted
-                            ? "Accessibility granted"
-                            : "Accessibility not granted",
+                            ? "Device Control granted"
+                            : "Device Control not granted",
                         systemImage: model.accessibilityTrusted
                             ? "checkmark.shield.fill"
                             : "exclamationmark.shield.fill"
@@ -3195,16 +3377,16 @@ private struct SettingsView: View {
 
     private var permissionDescription: String {
         if model.accessibilityTrusted {
-            return "Allows Blenny to read menu bar items."
+            return "Allows Blenny to identify menu bar items and observe the overflow control."
         }
         if model.accessibilityPromptRequested {
-            return "Enable Blenny in System Settings, then return here."
+            return "Turn on Blenny in Device Control and Data Access, then return here."
         }
-        return "Allow Blenny to read menu bar items."
+        return "macOS grants broad control access. Blenny uses it for menu bar management."
     }
 
     private var permissionButtonTitle: String {
-        model.accessibilityPromptRequested ? "Open System Settings" : "Set Up Accessibility…"
+        model.accessibilityPromptRequested ? "Open System Settings" : "Set Up Access…"
     }
 
 }
@@ -3279,8 +3461,7 @@ private struct SupportView: View {
     }
 
     private var applicationVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
-            as? String ?? "0.5.0"
+        BlennyApplicationVersion.display
     }
 }
 
@@ -3415,3 +3596,93 @@ private extension MenuBarBundlePolicy {
         }
     }
 }
+
+
+private extension View {
+    /// Both application and system sources must expose the typed identity used
+    /// by the Board and lane session validators. A provider alone does not.
+    @ViewBuilder
+    func policyBoardDragSource(_ payload: PolicyDragPayload) -> some View {
+        #if DEBUG
+        if DebugDragStartDiagnostics.typedSource {
+            self.draggable(PolicyDragPayload.self) { payload }
+                .dragConfiguration(DragConfiguration(allowMove: true))
+        } else {
+            self.onDrag { policyDragItemProvider(for: payload) }
+                .dragConfiguration(DragConfiguration(allowMove: true))
+        }
+        #else
+        self.draggable(PolicyDragPayload.self) { payload }
+            .dragConfiguration(DragConfiguration(allowMove: true))
+        #endif
+    }
+
+    @ViewBuilder
+    func diagnosticFocusable(_ focus: FocusState<Bool>.Binding) -> some View {
+        #if DEBUG
+        if DebugDragStartDiagnostics.mode == .noFocus {
+            self
+        } else {
+            self.focusable().focusEffectDisabled().focused(focus)
+        }
+        #else
+        self.focusable().focusEffectDisabled().focused(focus)
+        #endif
+    }
+
+    @ViewBuilder
+    func diagnosticBoardSession(_ update: @escaping (DragSession) -> Void) -> some View {
+        #if DEBUG
+        if DebugDragStartDiagnostics.mode == .minimalSession || DebugDragStartDiagnostics.mode == .simpleLane {
+            self
+        } else {
+            self.dropPreviewsFormation(.none).onDragSessionUpdated(update)
+        }
+        #else
+        self.dropPreviewsFormation(.none).onDragSessionUpdated(update)
+        #endif
+    }
+
+    @ViewBuilder
+    func diagnosticLaneDrop(
+        accept: @escaping ([PolicyDragPayload], DropSession) -> Void,
+        configuration: @escaping (DropSession) -> DropConfiguration,
+        update: @escaping (DropSession) -> Void,
+        direct: @escaping ([PolicyDragPayload], CGPoint) -> Bool
+    ) -> some View {
+        #if DEBUG
+        if DebugDragStartDiagnostics.mode == .minimalSession {
+            self.dropDestination(for: PolicyDragPayload.self, action: direct)
+        } else {
+            self.dropDestination(for: PolicyDragPayload.self, action: accept)
+                .dropConfiguration(configuration).onDropSessionUpdated(update)
+        }
+        #else
+        self.dropDestination(for: PolicyDragPayload.self, action: accept)
+            .dropConfiguration(configuration).onDropSessionUpdated(update)
+        #endif
+    }
+}
+
+#if DEBUG
+/// Immutable source leaf; deliberately omits all selection and focus machinery.
+private struct DebugPlainBoardIcon: View {
+    let presentation: ResolvedPolicyIcon
+    let payload: PolicyDragPayload?
+
+    var body: some View {
+        Group {
+            if let payload {
+                icon.policyBoardDragSource(payload)
+            } else {
+                icon
+            }
+        }
+        .frame(width: BlennyDesign.itemFrame.width, height: BlennyDesign.itemFrame.height)
+    }
+
+    private var icon: some View {
+        NaturalAspectSystemIcon(presentation: presentation, pointSize: 21, frame: CGSize(width: 29, height: 25))
+    }
+}
+#endif
