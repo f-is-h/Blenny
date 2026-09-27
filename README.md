@@ -1,8 +1,8 @@
 # Blenny
 
-> Version 0.11.0 completes the local permissions and interaction-stability milestone.
-> See the [release record](docs/RELEASE_0.11.0.md). Public release preparation
-> continues in 0.12.0.
+> Version 0.12.0 is a local macOS 27 experimental milestone. It is not a
+> public release candidate. See the [roadmap](docs/ROADMAP.md) for the next
+> product iteration and remaining publication gates.
 
 
 Blenny is a minimal, native menu bar organizer for macOS 27 and later. It uses
@@ -13,7 +13,7 @@ three explicit intent areas:
   a bounded reveal session.
 - **Hidden** items stay out of ordinary reveal sessions.
 
-Policy is owned at the application bundle level. The current experimental 0.11.0
+Policy is owned at the application bundle level. The current experimental 0.12.0
 configuration also retains reviewed preferred-position changes for attributable
 third-party owners. Every configured key associated with one owner moves as a
 block, and the same serial coordinator, durable receipt and bounded verification
@@ -21,9 +21,11 @@ contract protect policy and ordering writes.
 
 ## Current status
 
-Version `0.11.0` completed as a local experimental milestone on 2026-09-25.
-[The release record](docs/RELEASE_0.11.0.md) distinguishes owner acceptance,
-automated checks and remaining distribution gates.
+Version `0.12.0` is being closed as a local experimental milestone. Its tested
+scope includes self-signed build continuity, opt-in Sparkle packaging, startup
+Resume, Dock presentation, system-item Board capabilities, and the accepted
+Build 59 Resume behavior. The unbundled Gaming and Wine visibility limitation
+remains open; see [Known limitations](docs/KNOWN_LIMITATIONS.md).
 
 On macOS 27.0 build `26A428`, the owner confirms Build 15 native dragging and
 Apply work normally after the shared application/system drag-source correction.
@@ -47,9 +49,11 @@ ordinary ordering Undo. Once enabled, placement follows successful Organize Appl
 and ordering Undo; Undo Control Placement turns this adjustment off. Expansion and collapse do
 not reposition it, and a fixed screen coordinate is not promised.
 
-Version 0.12.0 owns the remaining onboarding/accessibility acceptance, Release
-ordering review, licensing, signing, notarization, installation/update and
-publication gates. One canonical repository remains the publication model;
+The planned 0.13.0 iteration owns right-click menu productization, Debug
+feature cleanup, and replacement menu-bar and app icons. Public release remains
+a later milestone, with onboarding/accessibility acceptance, Release ordering
+review, licensing, signing, installation/update and publication gates still
+open. One canonical repository remains the publication model;
 changing visibility or publishing any ref is a separate action. See
 [the 0.11.0 technical spike](docs/TECH_SPIKE_0.11.0.md) for the final fixes and
 superseded investigation steps, and [the roadmap](docs/ROADMAP.md) for open gates.
@@ -126,7 +130,7 @@ development tool, not part of the shipped application.
 
 ## License
 
-License adoption and distribution notices remain 0.12.0 public-release gates.
+License adoption and distribution notices remain future public-release gates.
 No license files are tracked in this milestone. The project is a clean
 implementation and does not use or link Ice or Thaw code or binaries.
 

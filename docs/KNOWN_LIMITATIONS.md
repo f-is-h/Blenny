@@ -61,6 +61,51 @@ for the bounded searches and rejected alternatives. No compatible repair was
 found in the final round; further parameter and delay trials are deferred beyond
 0.9.0 unless new backend evidence changes the premises.
 
+## Unmanaged extras may disappear after Resume
+
+On macOS 27.0 `26A428`, Build 59 can Resume, but the active assessment backend
+can suppress original menu extras even when Blenny does not manage or move
+them. The owner accepts this as a known issue on 2026-09-27; it is not fixed,
+and no backend replacement or automatic Stop/Resume workaround is adopted.
+
+MenuBarAgent's assessment filter rejects status items with no application
+Bundle ID before matching its bundle allow-list. The observed GamePolicyAgent
+and Wine tray hosts have no application Bundle IDs. Build 54's signing-ID and
+Build 58's containing-app-ID allow-list trials failed to preserve the physical
+Gaming icon. Earlier physical evidence shows it returning after normal Quit.
+Wine disappearance was owner-reported; a complete physical lifecycle matrix
+for Wine was not independently established. Board/AX presence is not evidence
+of physical visibility.
+
+The native System Settings > Menu Bar > Allow in the Menu Bar mechanism is a
+potential **supplementary hiding route**, not an override of assessment:
+
+- The owner verified the disposable BT host's native switch hides and restores
+  its original icon, and reports D4Mac's switch controls the Wine/Battle.net icon.
+- The owner reports Usage4Claude and ChatGPT do not hide through their switches.
+- Gaming and Now Playing have no corresponding entries in that application
+  list. Now Playing retains its separate existing Blenny system-item route.
+
+A helper process without a Bundle ID may still be attributed to an owning app
+by the native settings mechanism; do not conflate that mapping with assessment
+allow-list identity. Any supplementary integration needs exact owner/item
+mapping, per-target physical hide/show evidence, and proven durable restoration.
+It may affect multiple items belonging to one application.
+
+Combining both mechanisms does not guarantee preservation after Resume:
+assessment can still exclude an item that the native application switch allows.
+Preserving these extras while managing everything else would require sufficient
+non-assessment coverage or a genuine assessment exception, neither established.
+Keep the current backend and the distinction between Visible, Revealable and
+Hidden. Do not repeat failed allow-list guesses or promote the research writer.
+
+The custom admission-preference trial did not physically hide BT. Its constructed
+`menuItemLocations` differed from the native record, its in-process readback
+disagreed with the file, and a temporary row later reappeared after point-in-time
+restoration checks. Native switch success therefore does not validate that
+writer. Full Stop/Quit/relaunch/reboot acceptance and durable research-row cleanup
+remain unverified. See the [investigation and handoff](UNBUNDLED_MENU_EXTRA_COMPATIBILITY_0.12.0.md).
+
 ## 0.10.0 local milestone
 
 See [the release record](RELEASE_0.10.0.md) for accepted scope and remaining 0.11.0

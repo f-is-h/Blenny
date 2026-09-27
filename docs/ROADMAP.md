@@ -5,11 +5,18 @@ stability milestone on 2026-09-25, on macOS 27.0 build `26A428`. Build 15 native
 dragging and Apply are owner-accepted; repeated mixed Apply/Undo runs verify the
 preference-settlement fix. See [the release record](RELEASE_0.11.0.md).
 
-Version 0.12.0 is the next public source and signed-binary candidate. Every
-outstanding distribution gate remains required. Ordering stays in Debug or the
+Version 0.12.0 is a local experimental milestone. Public release remains a
+later milestone after the planned 0.13.0 product iteration. Every outstanding
+distribution gate remains required. Ordering stays in Debug or the
 explicitly opted-in optimized trial; ordinary Release excludes it. Siri, Time
 Machine and Control Center ordering, native-arrow adjacency and the documented
 Clock/Notification Center conflict remain unresolved boundaries.
+
+System icon artwork and editing are separate in 0.12.0. The Board grants each
+observed item only its currently verified visibility and ordering capabilities;
+the exact writer target, recovery path, owner identity, and operation-specific
+preflight must agree. Presentation-only icon names do not authorize writes.
+This gating adds no new system-item writer target or Release ordering promotion.
 
 Blenny advances by verified exit criteria, not by elapsed time or commit count. Versions before `1.0.0` may use unsupported macOS behavior and are not compatibility promises.
 
@@ -18,7 +25,8 @@ Blenny advances by verified exit criteria, not by elapsed time or commit count. 
 - `0.0.x` versions are private engineering-foundation milestones. They may add bounded experimental capability, may be Debug-only, and are not public releases.
 - `0.y.0` versions beginning with `0.1.0` introduce a coherent pre-release product capability built on the validated engineering foundation.
 - `0.y.z` patch versions after a `0.y.0` milestone contain fixes and compatibility updates without expanding that milestone's scope.
-- `0.12.x` versions are the first public, open-source release candidates. Source and signed binaries ship together.
+- The first public, open-source release candidate is not yet assigned a version.
+  Its source and signed binaries must ship together.
 - `1.0.0` begins the stable product contract and published macOS compatibility policy.
 - A version advances only when every required exit criterion is verified and restoration is complete.
 - An explicitly scoped safety-feasibility investigation may close with an evidenced no-go; that does not mean the proposed feature or its implementation gate passed.
@@ -861,9 +869,161 @@ No new ordering support is claimed for Siri, Time Machine or Control Center.
 Clock remains an accepted limitation after the formal-build recheck. Broader
 hardware/display coverage and public distribution are not claimed complete.
 
-## 0.12.0 — First public release candidate
+## 0.12.0 — Local system-item and lifecycle milestone
 
-Status: **Planned.** Remaining pre-publication work moves here from 0.11.0.
+Status: **Closure in progress.** This is a local experimental version; the
+publication gates below are deferred to a future public release.
+The owner has chosen to investigate permission continuity without a paid Apple
+Developer certificate. The durable self-signed Build 24→25 trial kept Device
+Control without regrant, but 19 ordering-position values changed during the
+upgrade and the bookmark remains stale. This local trial does not meet the
+Developer ID/notarization publication gates below. A public binary release
+model compatible with the no-paid-certificate choice remains undecided; do not
+mark these gates complete from local code-signing evidence.
+The [Sparkle integration](SPARKLE_UPDATES_0.12.0.md) pins Sparkle 2.10.0,
+separates app and update-archive signing keys, and enables manual checks only
+for builds with a public HTTPS feed. Packaging and local signature checks do
+not establish hosted-feed or installed-update acceptance.
+
+The local Build 28 lifecycle change retains an accepted Resume choice on normal
+Quit and rechecks it through the existing bounded startup preflight. A stopped
+choice remains stopped; failed startup still releases assertions and requires
+explicit Resume. Closing the main window returns Blenny to menu-bar-only mode,
+while opening it shows a Dock icon. Xcode 27 passed 623 Debug tests and the
+ordinary Release build. Signed Build 28 was installed at the existing path with
+the same designated requirement; its stopped startup kept private app state
+byte-identical, and the open main window appeared in the Dock. The live
+close/reopen edge also passed: the process remained running, changed from
+regular to accessory activation, disappeared from the Dock, then reopened with
+regular activation and a Dock icon. Private app state stayed byte-identical.
+The owner then selected Resume in Build 28. The saved policy recorded
+`managementEnabled=true`. Normal Quit ended the process without changing that
+flag. Relaunch displayed "Management on" and Stop, with the saved flag still
+true. The ordering recovery record and the inspected Control Center preference file
+had identical SHA-256 digests before Quit, after Quit, and after relaunch. The
+inspected preference file was `com.apple.controlcenter.plist`, not the actual
+`com.apple.MenuBar.plist` ordering-table source, so this run does not establish
+complete ordering-table continuity. It passes the tested active normal-Quit/
+relaunch management path; it is not a macOS reboot or forced-termination result.
+The owner separately quit Build 28 directly while Resume was active and observed
+the managed menu-bar icons return. On reopening Blenny, those icons were hidden
+again by the accepted policy. This is owner-observed visibility restoration and
+startup reapplication, distinct from the Dock icon close/reopen result above;
+the individual system assertions were not independently captured in this run.
+
+The 0.12.0 Board presentation follow-up maps the new machine's Spotlight
+identity and the 23 exact macOS 27 ControlCenter menu-extra candidates to
+recognizable artwork and names. The [system icon catalog](SYSTEM_MENU_BAR_ICONS_0.12.0.md)
+records the Apple guide coverage, observed identity boundary, and remaining
+gallery cases. This is presentation only; unknown items remain read-only with
+fallback artwork, and no new system write route is authorized. All 626 Debug
+tests and the ordinary Release compile pass. Installed signed Builds 29 through
+31 report Spotlight as "System symbol" instead of Build 28's "Fallback icon";
+the row remains read-only and private Blenny app-state files are unchanged.
+Build 31 starts with management on. The remaining gallery widget candidates
+and label-only built-in cases have test coverage only, not live UI confirmation.
+
+The owner then requested a direct Spotlight sorting and three-state trial. The
+[0.12.0 technical spike](TECH_SPIKE_0.12.0.md) records the read-only
+`com.apple.campo` identity, exact position key, private Boolean getter/setter,
+snapshot and recovery contract. Signed Debug Build 33 exposes Spotlight
+movement and Visible / Revealable / Hidden actions in the Board; the installed
+UI and tests pass. The owner confirmed physical Spotlight sorting in Build 33.
+The first Visible-to-Revealable Apply failed with
+`SharedSystemItemTrialError error 1`; the failed visibility receipt was
+restored and removed, and the unapplied Board draft was discarded without
+reversing the successful order. A signed read-only diagnostic found a valid
+Spotlight baseline and hide proposal. Build 35 narrows the suspected
+post-write validation mismatch between the private `showSpotlight` getter and
+Campo's retained NSStatusItem preference. Xcode 27 passes 629 Debug tests and
+the ordinary Release compile; Build 35 is installed with the same designated
+requirement and no draft. The owner then confirmed Revealable Apply hid the
+icon and explicit expand revealed it. A later read-only inspection found the saved
+policy and Board still Revealable, the applied hidden receipt present, and the
+private getter false. The owner then moved Spotlight back to Visible and
+Applied; the Board and saved policy became Visible, the getter and preference
+became true, and the visibility receipt was removed. Revealable and its Visible
+inverse have therefore passed live. The owner then confirmed Hidden Apply hid
+Spotlight and ordinary expand did
+not reveal it. Returning to Visible and Apply restored the icon; read-only
+checks found saved policy Visible, private getter and target preference true,
+and no Spotlight visibility receipt. The live three-state trial now passes on
+this macOS 27 host. This remains a Debug-only candidate, not a Release
+capability; other OS builds and update lifecycle are untested for Spotlight.
+The owner subsequently reported about a one-second gap between Spotlight and
+the other icons during ordinary expand/conceal. Signed Debug Build 36 removes
+the two fixed settlement sleeps only from ordinary Spotlight reveal, retaining
+the waited exact restoration for Stop, Quit, explicit Visible Apply and failure
+compensation. Xcode 27 passes 631 Debug tests and the ordinary Release compile.
+Build 36 is installed at the same path and signing identity, with Revealable
+policy restored after normal Quit/relaunch. The owner reports no longer seeing
+the expand/conceal wait. Spotlight menu interaction after reveal was not
+explicitly confirmed in that follow-up, and the earlier conceal-side gap was
+not independently traced to the ordinary-reveal waits.
+
+Build 44 repairs the Now Playing Board duplicate caused by a live MenuBarAgent
+observation plus a differently owned recovery placeholder. The installed Board
+again exposes one card with three-state and sorting actions while the saved
+Revealable policy and exact hide receipt remain intact; a fresh physical
+Now Playing drag/Apply has not been performed. The same build shows observed
+unbundled Wine and Apple GamePolicyAgent menu extras as read-only unidentified
+cards. These observations do not enter policy preflight or a writer. Build 44
+starts with management on; 633 Xcode 27 Debug tests, the packaged lifecycle
+self-check, Release compilation and signature verification pass. Fish/arrow
+pinning and a state-specific Clock placement discrepancy remain unverified.
+Later Builds 50-57 confirmed a management boundary: the private assessment
+assertion cannot guarantee visibility for the observed Wine and
+GamePolicyAgent icons because their processes have no application Bundle IDs.
+A Build 54 Debug-only trial adding their valid code-signing identifiers to the
+allow-list still hid the physical GamePolicyAgent rocket; the Wine-owned icon
+was not conclusively mapped in the screenshot. Build 57 keeps management
+paused while these icons are present and retains them as read-only Board cards.
+Keeping them visible during active
+management requires a separately verified backend route; it is not accepted.
+The installed Build 57 cannot Resume in this layout. Read-only runtime
+inspection found no PID or signing-identifier exception in its current
+assessment configuration, and the selected Apple per-item preference routes
+do not replace bundle-wide third-party visibility management.
+Build 58 also tried the containing application Bundle IDs under a bounded Debug
+gate; the Game icon still disappeared during active management. A read-only AX
+probe found no settable visibility attribute on the four managed third-party
+items or the Game and Wine items. Build 57 was restored after the trial.
+
+The owner then made functional Resume the acceptance priority and accepted that
+unattributed icons may disappear while management is active. Build 59 removed
+their activation guard while keeping them read-only and outside writer scope.
+On this host, startup, Stop, explicit Resume, normal Quit, and another startup
+reached the expected management states with the two Board observations present.
+The accepted policy and previous-policy backup hashes stayed unchanged. This
+supersedes Build 57's paused-state requirement. Physical captures showed the
+GamePolicyAgent rocket absent during management and restored after normal
+Quit; the Wine icon was not conclusively mapped. Wider macOS compatibility
+remains unverified.
+The owner subsequently requested that these unmanaged extras remain visible
+without losing active management. No verified exception or per-item backend
+currently provides that result; the capability remains open rather than
+accepted in Build 59.
+
+The 2026-09-26 [independent compatibility investigation](UNBUNDLED_MENU_EXTRA_COMPATIBILITY_0.12.0.md)
+locates nil-Bundle-ID rejection in MenuBarAgent's assessment filter in both
+architecture slices. A later authorized disposable-helper preference write did
+not physically hide BT and exposed unreliable readback/durable restoration.
+The owner's native Settings switch did hide/show BT; D4Mac/Wine also worked in
+owner testing, while Usage4Claude and ChatGPT did not. Gaming and Now Playing
+have no entry in that application list. The owner accepts Resume-time loss of
+unmanaged extras as a [known issue](KNOWN_LIMITATIONS.md#unmanaged-extras-may-disappear-after-resume)
+on 2026-09-27. Keep the current backend; the native mechanism is only a possible
+per-target supplementary hiding route, not a way to override assessment or a
+verified full replacement. Neither Gaming nor Wine preservation is marked fixed.
+
+## 0.13.0 — Product presentation and controls
+
+Status: **Planned.** Productize the right-click menu, organize Debug-only
+controls, and replace the menu-bar and application icons. Scope and exit tests
+will be defined before implementation. This is not designated as the final
+version before publication.
+
+## Future public release — Version to be assigned
 
 Publish the repository and signed prerelease together only when:
 
@@ -872,7 +1032,8 @@ Publish the repository and signed prerelease together only when:
   alone does not promote a private implementation.
 - Keep the established `xyz.fi5h.blenny` identifier stable through signing,
   installation and updates. Validate Developer ID identity, Device Control and
-  exact-file grant continuity, including revocation and regrant.
+  exact-file grant continuity, including revocation and regrant. See the
+  [0.12.0 signing and permission continuity investigation](SIGNING_PERMISSION_CONTINUITY_0.12.0.md).
 - Complete onboarding, final UI, keyboard and VoiceOver acceptance for the
   intentionally minimal bundle-level Visible, Revealable and Hidden experience.
 - Validate installation, LaunchServices registration, update delivery, restart,

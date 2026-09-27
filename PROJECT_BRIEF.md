@@ -2,12 +2,13 @@
 
 > A minimal, native menu bar organizer for macOS 27 and later.
 
-> Version 0.11.0 completes the local permissions and interaction-stability milestone.
-> See the [release record](docs/RELEASE_0.11.0.md). Earlier history and tags are unchanged.
+> Version 0.12.0 is being closed as a local experimental milestone.
+> Public release remains a later milestone after the planned 0.13.0 iteration.
 
 ## Current status
 
-Current phase: `0.11.0` complete as an owner-accepted local experimental milestone on 2026-09-25. Public release preparation moves to `0.12.0`.
+Current phase: `0.12.0` local experimental milestone, closure in progress.
+The 0.11.0 owner-accepted milestone was completed on 2026-09-25.
 
 Build 15 on macOS 27.0 build `26A428` is the accepted local baseline. The owner
 confirms native dragging and Apply work normally, including the previously
@@ -33,6 +34,13 @@ revocation and stable distribution-signature continuity remain unverified.
 Ordering remains available only in Debug and the explicitly opted-in optimized
 trial. Ordinary Release excludes ordering. Sorting for Siri, Time Machine and
 Control Center is deferred; existing three-state capabilities remain unchanged.
+For the 0.12.0 system-icon follow-up, Board editing is assessed per observed
+item and operation. Exact owner identity and a ready item-specific visibility
+target can expose three-state policy; an eligible exact position row separately
+controls sorting. Artwork and a recognized name alone confer neither ability.
+The installed Debug Build 41 exposes an observed Now Playing item through its
+existing target after the Apple-agent exact-ID check; Focus remains read-only.
+No new physical Now Playing or Focus mutation was performed in that build.
 Weather and Input Menu retain their exact-owner ordering route. The native
 overflow arrow has no established writable ordering identity, so fish/arrow
 adjacency is not a product guarantee. Accepted explicit Blenny control placement
@@ -46,14 +54,16 @@ build. No automatic Stop/Resume workaround is added. See
 [Known limitations](docs/KNOWN_LIMITATIONS.md) and the
 [technical report](docs/NOTIFICATION_CENTER_TECHNICAL_REPORT_2026-09-12.md).
 
-Version 0.12.0 retains all outstanding public-release gates: final onboarding and
+The future public release retains all outstanding gates: final onboarding and
 accessibility review, stable signing and permission continuity, Release ordering
 promotion, install/update/uninstall and interrupted-recovery validation, broader
 compatibility, license selection, notarization and publication audit. This local
-closure does not satisfy those gates or authorize a push. See
-[the roadmap](docs/ROADMAP.md) and [the technical spike](docs/TECH_SPIKE_0.11.0.md).
+milestone does not satisfy those gates or authorize a push. Version 0.13.0 is
+planned for right-click menu productization, Debug feature cleanup, and menu-bar
+and application icon replacement. See [the roadmap](docs/ROADMAP.md) and
+[the 0.12.0 technical spike](docs/TECH_SPIKE_0.12.0.md).
 
-Local packages identify candidates as `0.11.0 (Build N)`. Build numbers advance
+Local packages identify candidates as `0.12.0 (Build N)`. Build numbers advance
 from ignored local state and do not themselves complete a milestone.
 
 ## Current product contract
@@ -70,10 +80,18 @@ visibility and positions from immediately before the latest successful Apply. St
 restrictions. Retained preferred positions do not guarantee visibility after
 management ends or placement relative to the native overflow arrow.
 
+The saved Resume choice survives normal Quit and is revalidated on the next
+launch; explicit Stop stays stopped. A failed startup preflight releases
+assertions and requires explicit Resume. The Dock icon is present while the
+main window is open and disappears when it closes; the menu-bar control remains
+available.
+
 ## Document map
 
 - [README.md](README.md) is the concise public-facing project entry point.
 - [docs/ROADMAP.md](docs/ROADMAP.md) defines version boundaries and exit criteria.
+- [docs/SPARKLE_UPDATES_0.12.0.md](docs/SPARKLE_UPDATES_0.12.0.md) records the
+  local signing and update integration and its remaining distribution checks.
 - [docs/TECH_SPIKE_0.9.0.md](docs/TECH_SPIKE_0.9.0.md) is the detailed 0.9.0
   contract, evidence record and historical experiment log.
 - [docs/HISTORICAL_DEVELOPMENT_NOTES.md](docs/HISTORICAL_DEVELOPMENT_NOTES.md)
