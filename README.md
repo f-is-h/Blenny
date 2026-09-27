@@ -1,8 +1,8 @@
 # Blenny
 
-> Version 0.12.0 is a local macOS 27 experimental milestone. It is not a
-> public release candidate. See the [roadmap](docs/ROADMAP.md) for the next
-> product iteration and remaining publication gates.
+> Version 0.12.0 completed as a local macOS 27 experimental milestone on
+> 2026-09-27. It is not a public release candidate. See the
+> [release record](docs/RELEASE_0.12.0.md) and [roadmap](docs/ROADMAP.md).
 
 
 Blenny is a minimal, native menu bar organizer for macOS 27 and later. It uses
@@ -21,7 +21,7 @@ contract protect policy and ordering writes.
 
 ## Current status
 
-Version `0.12.0` is being closed as a local experimental milestone. Its tested
+Version `0.12.0` completed as a local experimental milestone. Its tested
 scope includes self-signed build continuity, opt-in Sparkle packaging, startup
 Resume, Dock presentation, system-item Board capabilities, and the accepted
 Build 59 Resume behavior. The unbundled Gaming and Wine visibility limitation

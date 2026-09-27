@@ -103,8 +103,11 @@ The custom admission-preference trial did not physically hide BT. Its constructe
 `menuItemLocations` differed from the native record, its in-process readback
 disagreed with the file, and a temporary row later reappeared after point-in-time
 restoration checks. Native switch success therefore does not validate that
-writer. Full Stop/Quit/relaunch/reboot acceptance and durable research-row cleanup
-remain unverified. See the [investigation and handoff](UNBUNDLED_MENU_EXTRA_COMPATIBILITY_0.12.0.md).
+writer. A later exact-row cleanup removed the research registration and verified
+its absence after System Settings reopened. Reboot persistence and OS grant
+revocation remain unverified, as does the full Stop/Quit/relaunch/reboot matrix
+for a replacement backend. See the
+[investigation and handoff](UNBUNDLED_MENU_EXTRA_COMPATIBILITY_0.12.0.md).
 
 ## 0.10.0 local milestone
 

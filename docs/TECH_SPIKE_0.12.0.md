@@ -1,6 +1,7 @@
 # Technical spike 0.12.0: Spotlight visibility and ordering trial
 
-Status: **Build 59 restores startup and explicit Resume in the observed layout.
+Status: **Complete as a local experimental milestone on 2026-09-27. Build 59
+restores startup and explicit Resume in the observed layout.
 The owner accepted that unattributed icons may disappear during active
 management; they remain read-only and are never writer targets. The earlier
 draft was discarded by owner direction. The owner observed Spotlight sorting,
@@ -10,6 +11,10 @@ This is not Release promotion or a claim that macOS 27 provides a public
 cross-process system-item API. The Build 50-58 activation-guard history below
 records the earlier visibility-preservation requirement, which the owner
 superseded for Resume in Build 59.
+The admission-trial menu-bar registration was subsequently removed and
+verified absent after System Settings reopened. Reboot persistence and
+OS-maintained grant revocation were not tested; see the
+[release record](RELEASE_0.12.0.md).
 
 ## Build 44 observation and recovery follow-up
 

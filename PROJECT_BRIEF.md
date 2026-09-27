@@ -2,13 +2,21 @@
 
 > A minimal, native menu bar organizer for macOS 27 and later.
 
-> Version 0.12.0 is being closed as a local experimental milestone.
+> Version 0.12.0 completed as a local experimental milestone on 2026-09-27.
 > Public release remains a later milestone after the planned 0.13.0 iteration.
 
 ## Current status
 
-Current phase: `0.12.0` local experimental milestone, closure in progress.
+Current phase: `0.12.0` complete as a local experimental milestone on 2026-09-27.
 The 0.11.0 owner-accepted milestone was completed on 2026-09-25.
+
+The 0.12.0 scope includes self-signed signing continuity, local Sparkle
+packaging, startup Resume and Dock behavior, per-item Board capability gating,
+and the owner-accepted Build 59 Resume behavior. GamePolicyAgent and Wine
+menu extras may disappear during active management and remain read-only.
+The disposable admission-trial preference row was removed and verified absent
+after System Settings reopened. OS grant revocation and reboot persistence were
+not established. See [the release record](docs/RELEASE_0.12.0.md).
 
 Build 15 on macOS 27.0 build `26A428` is the accepted local baseline. The owner
 confirms native dragging and Apply work normally, including the previously

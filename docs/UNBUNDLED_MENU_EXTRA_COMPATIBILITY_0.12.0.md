@@ -56,6 +56,24 @@ preference writer: previous point-in-time removal did not prove durable removal.
 No system service restart or broader preference reset was attempted. This is
 an explicitly retained residue, not a claim of complete system-state cleanup.
 
+### Subsequent exact-row cleanup (2026-09-27)
+
+The owner explicitly requested removal of the remaining
+`xyz.fi5h.blenny.admission-trial` Settings entry. System Settings was quit before
+one targeted preference write. A fresh snapshot and API/file agreement were
+required; only that exact location/value pair was removed from the current
+array. All other current rows and preference keys were preserved. Independent
+fresh-process reads verified the intended bytes, absence of the target and
+unchanged unrelated preferences. System Settings was then reopened and its
+Menu Bar application list no longer contained the research entry. Another
+fresh API/file check after reopening confirmed the same state.
+
+This supersedes the retained-row status above: the entry is now removed and
+verified absent across this Settings relaunch. No system service restart or
+preference reset was needed. Reboot persistence and OS authorization revocation
+were not tested. The private cleanup snapshot and verification record remain;
+the one-off compiled cleanup executable was removed.
+
 The requested result is to leave the original GamePolicyAgent and Wine
 Battle.net extras unmanaged and unmoved, yet physically visible while Blenny
 manages other applications. It must preserve Visible / Revealable / Hidden
@@ -305,7 +323,9 @@ The saved pre-launch snapshot for this native contrast also shows that the old
 constructed denied helper row had reappeared after the earlier point-in-time
 restoration checks. Therefore those checks did not prove durable restoration
 of the system's effective state. The native switch was returned to on by the
-owner, but full removal of the research row and durable cleanup remain pending.
+owner. At that point full removal of the research row was pending; the later
+exact-row cleanup above verified absence across a System Settings relaunch.
+Reboot persistence remains untested.
 An unrelated application row changed during the native contrast as well; any
 cleanup must preserve it rather than restoring the whole older preference blob.
 Resolve the writer's adoption and durable inverse before claiming product-ready

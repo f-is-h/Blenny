@@ -871,8 +871,10 @@ hardware/display coverage and public distribution are not claimed complete.
 
 ## 0.12.0 — Local system-item and lifecycle milestone
 
-Status: **Closure in progress.** This is a local experimental version; the
-publication gates below are deferred to a future public release.
+Status: **Complete on 2026-09-27 as a local experimental milestone.** The
+[release record](RELEASE_0.12.0.md) separates tested behavior, accepted known
+issues and unverified future gates. The publication gates below are deferred
+to a future public release.
 The owner has chosen to investigate permission continuity without a paid Apple
 Developer certificate. The durable self-signed Build 24→25 trial kept Device
 Control without regrant, but 19 ordering-position values changed during the
