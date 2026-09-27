@@ -349,6 +349,44 @@ struct ManagementLoopControllerTests {
         #expect(await terminationWriter.restoreCount == 1)
     }
 
+    @Test("Normal quit restores assertions and keeps the saved Resume choice for relaunch")
+    func normalQuitRetainsResumeIntent() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BlennyRelaunchTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try PersistentBundlePolicyStore(
+            policyURL: directory.appendingPathComponent("bundle-policies.json"),
+            backupURL: directory.appendingPathComponent("bundle-policies.previous.blenny-backup.json")
+        )
+        let enabled = try policy(enabled: true)
+        try await store.save(enabled)
+
+        let firstWriter = ManagementTestWriter()
+        let firstLoop = ManagementLoopController(writerProvider: { firstWriter })
+        #expect(await firstLoop.recover(acceptedPolicy: enabled, baseline: baseline)
+            == .active(baseline.fingerprint))
+        await firstLoop.terminate()
+        #expect(await firstWriter.restoreCount == 1)
+        #expect(await firstLoop.activePlanSnapshot() == nil)
+
+        let savedForRelaunch = try #require(try await store.load())
+        #expect(savedForRelaunch.managementEnabled)
+        let secondWriter = ManagementTestWriter()
+        let secondLoop = ManagementLoopController(writerProvider: { secondWriter })
+        #expect(await secondLoop.recover(acceptedPolicy: savedForRelaunch, baseline: baseline)
+            == .active(baseline.fingerprint))
+        await secondLoop.terminate()
+
+        let stopped = try enabled.settingManagementEnabled(false)
+        try await store.save(stopped)
+        let stoppedWriter = ManagementTestWriter()
+        let stoppedLoop = ManagementLoopController(writerProvider: { stoppedWriter })
+        #expect(await stoppedLoop.recover(
+            acceptedPolicy: try #require(try await store.load()), baseline: nil
+        ) == .stopped)
+        #expect(await stoppedWriter.appliedPlans.isEmpty)
+    }
+
     @Test("Ordinary reveal activation failure preserves a verified baseline")
     func failedRevealPreservesBaseline() async throws {
         let writer = ManagementTestWriter(failReveal: true)

@@ -123,6 +123,92 @@ struct SystemItemPolicyCatalogTests {
         #endif
     }
 
+    @Test("System control capabilities require a unique exact owner and writer target")
+    func observedCapabilityIdentity() {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        let wifi = SystemMenuBarItemObservation(
+            observationIdentifier: "com.apple.menuextra.wifi",
+            ownerBundleIdentifier: "com.apple.controlcenter",
+            displayName: "Wi-Fi", observationCount: 1
+        )
+        #expect(SystemItemCapabilityIdentity.policyIdentifier(for: wifi)
+            == "com.apple.menuextra.wifi")
+        #expect(SystemItemCapabilityIdentity.orderingItem(for: wifi) == .wifi)
+
+        let spotlight = SystemMenuBarItemObservation(
+            observationIdentifier: MenuBarItemIdentity(
+                ownerBundleIdentifier: "com.apple.campo",
+                accessibilityIdentifier: nil,
+                semanticLabel: "Spotlight",
+                role: "AXMenuBarItem", subrole: "AXMenuExtra",
+                instanceOrdinal: 0, confidence: .moderate
+            ).stableKey,
+            ownerBundleIdentifier: "com.apple.campo",
+            displayName: "Spotlight", observationCount: 1
+        )
+        #expect(SystemItemCapabilityIdentity.policyIdentifier(for: spotlight)
+            == "com.apple.menuextra.spotlight")
+        #expect(SystemItemCapabilityIdentity.orderingItem(for: spotlight) == .spotlight)
+
+        let agentNowPlaying = SystemMenuBarItemObservation(
+            observationIdentifier: "com.apple.menuextra.now-playing",
+            ownerBundleIdentifier: "com.apple.MenuBarAgent",
+            displayName: "Now Playing", observationCount: 1
+        )
+        #expect(SystemItemCapabilityIdentity.policyIdentifier(for: agentNowPlaying)
+            == agentNowPlaying.observationIdentifier)
+        #expect(SystemItemCapabilityIdentity.orderingItem(for: agentNowPlaying)
+            == .nowPlaying)
+
+        for observation in [
+            SystemMenuBarItemObservation(
+                observationIdentifier: wifi.observationIdentifier,
+                ownerBundleIdentifier: "com.example.Impersonator",
+                displayName: "Wi-Fi", observationCount: 1
+            ),
+            SystemMenuBarItemObservation(
+                observationIdentifier: wifi.observationIdentifier,
+                ownerBundleIdentifier: wifi.ownerBundleIdentifier,
+                displayName: "Wi-Fi", observationCount: 2
+            ),
+            SystemMenuBarItemObservation(
+                observationIdentifier: "com.apple.menuextra.focusmode",
+                ownerBundleIdentifier: "com.apple.controlcenter",
+                displayName: "Focus", observationCount: 1
+            ),
+            SystemMenuBarItemObservation(
+                observationIdentifier: spotlight.observationIdentifier,
+                ownerBundleIdentifier: "com.example.Impersonator",
+                displayName: "Spotlight", observationCount: 1
+            ),
+            SystemMenuBarItemObservation(
+                observationIdentifier: "com.apple.MenuBarAgent|:now playing|axmenubaritem",
+                ownerBundleIdentifier: "com.apple.MenuBarAgent",
+                displayName: "Now Playing", observationCount: 1
+            ),
+        ] {
+            #expect(SystemItemCapabilityIdentity.policyIdentifier(for: observation) == nil)
+            #expect(SystemItemCapabilityIdentity.orderingItem(for: observation) == nil)
+        }
+
+        let absent = SystemMenuBarItemObservation(
+            observationIdentifier: wifi.observationIdentifier,
+            ownerBundleIdentifier: "com.apple.MenuBarAgent",
+            displayName: "Wi-Fi", observationCount: 0
+        )
+        #expect(SystemItemCapabilityIdentity.policyIdentifier(for: absent) == nil)
+        #expect(SystemItemCapabilityIdentity.policyIdentifier(
+            for: absent, retainedWhileAbsent: true
+        ) == wifi.observationIdentifier)
+        #else
+        #expect(SystemItemCapabilityIdentity.policyIdentifier(for: .init(
+            observationIdentifier: "com.apple.menuextra.clock",
+            ownerBundleIdentifier: "com.apple.controlcenter",
+            displayName: "Clock", observationCount: 1
+        )) == nil)
+        #endif
+    }
+
     @Test("Tampered receipt keys cannot decode into a writable policy")
     func tamperedPersistenceDecodeFailsClosed() throws {
         #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL

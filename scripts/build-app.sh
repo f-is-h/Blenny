@@ -17,10 +17,19 @@ esac
 ordering_trial=${BLENNY_ORDERING_TRIAL:-NO}
 shared_system_item_trial=${BLENNY_SHARED_SYSTEM_ITEM_TRIAL:-NO}
 code_sign_identity=${BLENNY_CODE_SIGN_IDENTITY:--}
+update_feed_url=${BLENNY_UPDATE_FEED_URL:-}
 build_number_override=${BLENNY_BUILD_NUMBER:-}
 
 if [[ -z "$code_sign_identity" ]]; then
   print -u2 "BLENNY_CODE_SIGN_IDENTITY must not be empty"
+  exit 64
+fi
+if [[ -n "$update_feed_url" && "$update_feed_url" != https://* ]]; then
+  print -u2 "BLENNY_UPDATE_FEED_URL must be an HTTPS URL"
+  exit 64
+fi
+if [[ -n "$update_feed_url" && "$code_sign_identity" == "-" ]]; then
+  print -u2 "A Sparkle-enabled package requires a persistent code-signing identity"
   exit 64
 fi
 
@@ -118,6 +127,9 @@ app_iconset_directory="$app_icon_work_directory/BlennyAppIcon.iconset"
 
 trap 'rm -rf "$app_icon_work_directory"' EXIT
 
+# A prior build may contain a different embedded framework or stale resources.
+rm -rf "$application_directory"
+
 app_icon_width=$(/usr/bin/sips -g pixelWidth "$app_icon_source" 2>/dev/null | awk '/pixelWidth/ { print $2 }')
 app_icon_height=$(/usr/bin/sips -g pixelHeight "$app_icon_source" 2>/dev/null | awk '/pixelHeight/ { print $2 }')
 if [[ "$app_icon_width" != 1024 || "$app_icon_height" != 1024 ]]; then
@@ -128,11 +140,20 @@ fi
 mkdir -p "$executable_directory" "$resources_directory"
 mkdir -p "$app_iconset_directory"
 cp "$binary_directory/Blenny" "$executable_directory/Blenny"
+build_framework_rpath="$binary_directory/PackageFrameworks"
+if otool -l "$executable_directory/Blenny" | grep -Fq "path $build_framework_rpath "; then
+  install_name_tool -delete_rpath "$build_framework_rpath" \
+    "$executable_directory/Blenny"
+fi
 cp "$repository_root/Config/Info.plist" "$contents_directory/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" \
   "$contents_directory/Info.plist"
 if [[ "$configuration" == "release" && "$ordering_trial" != "YES" ]]; then
   /usr/libexec/PlistBuddy -c 'Delete :NSAppDataUsageDescription' \
+    "$contents_directory/Info.plist"
+fi
+if [[ -n "$update_feed_url" ]]; then
+  plutil -insert SUFeedURL -string "$update_feed_url" \
     "$contents_directory/Info.plist"
 fi
 cp "$repository_root/Assets/MenuBar/BlennyMenuBarTemplate.svg" "$resources_directory/BlennyMenuBarTemplate.svg"
@@ -159,11 +180,44 @@ render_app_icon 1024 icon_512x512@2x.png
   "$app_iconset_directory"
 
 bundle_identifier=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$repository_root/Config/Info.plist")
+sparkle_source="$binary_directory/Sparkle.framework"
+sparkle_target="$contents_directory/Frameworks/Sparkle.framework"
+if [[ ! -d "$sparkle_source" ]]; then
+  print -u2 "SwiftPM did not produce Sparkle.framework"
+  exit 65
+fi
+mkdir -p "$contents_directory/Frameworks"
+ditto "$sparkle_source" "$sparkle_target"
+sparkle_current="$sparkle_target/Versions/Current"
+for nested in \
+  "$sparkle_current/XPCServices/Installer.xpc" \
+  "$sparkle_current/XPCServices/Downloader.xpc" \
+  "$sparkle_current/Autoupdate" \
+  "$sparkle_current/Updater.app"; do
+  if [[ ! -e "$nested" ]]; then
+    print -u2 "Sparkle component missing: $nested"
+    exit 65
+  fi
+  codesign --force --sign "$code_sign_identity" --options runtime \
+    --preserve-metadata=entitlements "$nested"
+done
+codesign --force --sign "$code_sign_identity" --options runtime \
+  "$sparkle_target"
 codesign_options=(--force --sign "$code_sign_identity" --identifier "$bundle_identifier")
 if [[ "$configuration" == "debug" || "$ordering_trial" == "YES" ]]; then
   codesign_options+=(--entitlements "$repository_root/Config/OrderingTrial.entitlements")
 fi
 codesign "${codesign_options[@]}" "$application_directory"
+codesign --verify --deep --strict "$application_directory"
+if [[ -n "$update_feed_url" ]]; then
+  requirement=$(codesign -dr - "$application_directory" 2>&1)
+  expected_identity_hash=$(<"$repository_root/Config/SigningIdentity.sha1")
+  expected_requirement="identifier \"xyz.fi5h.blenny\" and certificate root = H\"${expected_identity_hash:l}\""
+  if [[ "$requirement" != *"$expected_requirement"* ]]; then
+    print -u2 "A Sparkle-enabled package must use the pinned Blenny signing certificate"
+    exit 65
+  fi
+fi
 marketing_version=$(/usr/libexec/PlistBuddy \
   -c 'Print :CFBundleShortVersionString' "$contents_directory/Info.plist")
 print -r -- "Built Blenny $marketing_version (Build $build_number)"

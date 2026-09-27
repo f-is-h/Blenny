@@ -61,6 +61,35 @@ struct FallbackPositionRecoveryTests {
         }
     }
 
+    @Test("An unattributed visible item blocks a claimed complete control boundary")
+    func unattributedBoundary() throws {
+        let seed = try receipt().baseline
+        let process = OrderingProcess(bundleIdentifier: nil,
+            executableName: "wine", pid: 1972,
+            launchTime: Date(timeIntervalSince1970: 100), isSystem: false)
+        let observation = OrderingOwnerObservation(process: process,
+            displayName: "Wine", axComplete: true,
+            itemFrames: [RectSnapshot(x: 810, y: 3, width: 22, height: 22)],
+            ownerPreferencesComplete: false, ownerSavedPositions: [:])
+        let snapshot = try OrderingSnapshot(group: seed.group,
+            beforeProcesses: seed.beforeProcesses + [process],
+            afterProcesses: seed.afterProcesses + [process],
+            observationsByPID: [process.pid: observation],
+            osBuild: seed.osBuild, architecture: seed.architecture,
+            runtimeContractVerified: seed.runtimeContractVerified,
+            displaySignature: seed.displaySignature, displayCount: seed.displayCount,
+            displayFrame: seed.displayFrame,
+            lifecycleGeneration: seed.lifecycleGeneration,
+            policyFingerprint: seed.policyFingerprint,
+            orderingAllowedBundleIdentifiers: seed.orderingAllowedBundleIdentifiers,
+            capturedAt: seed.capturedAt)
+        let policy = try PersistentBundlePolicyDocument(managementEnabled: true, policies: [])
+        #expect(throws: FallbackBoundaryCandidate.Failure.unattributedItems) {
+            try FallbackBoundaryCandidate.make(snapshot: snapshot, policy: policy,
+                includeFish: true)
+        }
+    }
+
     @Test("An explicitly supplied private export can be assessed without launching the app")
     func localEvidence() throws {
         guard let path = ProcessInfo.processInfo.environment["BLENNY_BOUNDARY_FIXTURE_PATH"] else { return }

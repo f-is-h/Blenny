@@ -937,7 +937,10 @@ private extension MacOS27MenuBarOrderingBackend {
         return ExactSystemOrderingItem.allCases.compactMap { item in
             guard item.admitsConfigurationTable(table),
                   (item != .controlCenter || controlCenterBinaryContract),
-                  let host = verifiedHosts[item.hostBundleIdentifier] else { return nil }
+                  let host = verifiedHosts[item.hostBundleIdentifier],
+                  (item != .spotlight || host.executableName == "Siri AI") else {
+                return nil
+            }
             return OrderingSystemHostBinding(
                 item: item, configurationKey: item.configurationKey,
                 hostProcess: host, codeIdentityVerified: true

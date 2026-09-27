@@ -50,6 +50,48 @@ struct PolicyEditorViewModelTests {
         )
     }
 
+    @Test("Unbundled menu items are shown without entering policy validation")
+    func unbundledMenuItemIsReadOnly() throws {
+        let snapshot = MenuBarOwnershipSnapshotBuilder.make(from: report(items: [
+            item(bundleIdentifier: nil, pid: 1972, itemHelp: "战网"),
+        ]))
+        let inventory = PolicyCandidateInventory(observations: snapshot.observations)
+        let model = try PolicyEditorViewModel(
+            acceptedPolicy: policy(),
+            candidateInventory: inventory,
+            unattributedItems: snapshot.unattributedItems,
+            blennyBundleIdentifier: blenny
+        )
+
+        #expect(snapshot.observations.isEmpty)
+        #expect(snapshot.unattributedItems == [
+            .init(processIdentifier: 1972, observationCount: 1, itemHelp: "战网"),
+        ])
+        #expect(snapshot.isComplete)
+        #expect(snapshot.observedMenuBarItemCount(forProcessIdentifier: 1972) == 1)
+        #expect(snapshot.observedMenuBarItemCount(forProcessIdentifier: 10) == 0)
+        let discovery = ApplicationMenuBarDiscovery(
+            application: .init(processIdentifier: 1972, bundleIdentifier: nil),
+            rootReadResult: 0,
+            hasValidRoot: true,
+            observationCount: 1
+        )
+        let launchAssessment = ManagementLifecyclePolicy.assessApplicationLaunch(
+            discovery: discovery,
+            observedMenuBarItemCount: snapshot.observedMenuBarItemCount(
+                forProcessIdentifier: 1972
+            ),
+            captureComplete: true
+        )
+        #expect(ManagementLifecyclePolicy.invalidates(
+            applicationLaunchAssessment: launchAssessment
+        ))
+        #expect(inventory.candidates.isEmpty && inventory.issues.isEmpty)
+        #expect(model.unattributedItems == snapshot.unattributedItems)
+        #expect(model.validationScope.approvedBundleIdentifiers
+            .allSatisfy { $0 != "unknown.bundle" })
+    }
+
     @Test("A known Time Machine identifier does not require localized AX text")
     func timeMachineIdentifierWithoutTextIsVisible() {
         let snapshot = MenuBarOwnershipSnapshotBuilder.make(from: report(items: [
@@ -67,6 +109,21 @@ struct PolicyEditorViewModelTests {
                 observationCount: 1
             ),
         ])
+    }
+
+    @Test("Spotlight composite identity has a real name even without AX description")
+    func spotlightWithoutObservedText() {
+        let snapshot = MenuBarOwnershipSnapshotBuilder.make(from: report(items: [
+            systemItem(
+                identifier: nil,
+                description: nil,
+                ownerBundleIdentifier: "com.apple.campo",
+                stableIdentityLabel: "spotlight"
+            ),
+        ]))
+        #expect(snapshot.systemItems.count == 1)
+        #expect(snapshot.systemItems.first?.displayName == "Spotlight")
+        #expect(snapshot.systemItems.first?.ownerBundleIdentifier == "com.apple.campo")
     }
 
     @Test("Only exact Debug Apple owner candidates leave the read-only system group")
@@ -259,6 +316,7 @@ struct PolicyEditorViewModelTests {
             "com.apple.systemuiserver|:siri|axmenubaritem",
             "com.apple.systemuiserver|:time machine|axmenubaritem",
             "com.apple.controlcenter|:now playing|axmenubaritem",
+            "18:blenny-identity-v2|15:com.apple.campo|0:|9:spotlight|13:axmenubaritem|11:axmenuextra|1:0",
         ]
         for composite in composites {
             let canonical = try #require(
@@ -506,8 +564,9 @@ struct PolicyEditorViewModelTests {
     }
 
     private func item(
-        bundleIdentifier: String,
+        bundleIdentifier: String?,
         pid: Int32,
+        itemHelp: String? = nil,
         classification: MenuBarElementClassification = .manageableCandidate
     ) -> MenuBarItemRecord {
         MenuBarItemRecord(
@@ -519,6 +578,7 @@ struct PolicyEditorViewModelTests {
             subrole: "AXMenuExtra",
             title: nil,
             itemDescription: nil,
+            itemHelp: itemHelp,
             accessibilityIdentifier: nil,
             frame: nil,
             actions: [],

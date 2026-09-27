@@ -33,7 +33,7 @@ public enum ManagementLifecyclePolicy {
 
     public static func assessApplicationLaunch(
         discovery: ApplicationMenuBarDiscovery?,
-        attributableMenuBarItemCount: Int,
+        observedMenuBarItemCount: Int,
         captureComplete: Bool
     ) -> ApplicationLaunchAssessment {
         guard let discovery else { return .unavailable }
@@ -44,7 +44,7 @@ public enum ManagementLifecyclePolicy {
             return .unavailable
         case .observed:
             guard captureComplete else { return .unavailable }
-            return attributableMenuBarItemCount > 0
+            return observedMenuBarItemCount > 0
                 ? .menuBarItemsPresent : .noMenuBarItems
         }
     }

@@ -2,6 +2,7 @@ import AppKit
 import BlennyCore
 import Darwin
 import ServiceManagement
+import Sparkle
 #if DEBUG
 import CryptoKit
 #endif
@@ -22,6 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         messagingTimeoutSeconds: 0.1
     )
     private var isRefreshing = false
+    private var updaterController: SPUStandardUpdaterController?
+    private var hasUpdateFeed: Bool {
+        UpdateFeedConfiguration.isUsable(
+            feedURL: Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
+            publicEDKey: Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String
+        )
+    }
     private var lastKnownAccessibilityTrust: Bool?
     private var accessibilityOnboarding = AccessibilityOnboardingState()
     private var accessibilityGrantRefresh = AccessibilityGrantRefreshState()
@@ -180,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onOpenKoFi: { [weak self] in self?.openKoFi() },
         onSetLaunchAtLogin: { [weak self] enabled in self?.setLaunchAtLogin(enabled) },
         onOpenLoginItemsSettings: { [weak self] in self?.openLoginItemsSettings() },
+        onCheckForUpdates: hasUpdateFeed ? { [weak self] in self?.checkForUpdates(nil) } : nil,
         onShowFishPlacementGuide: { [weak self] in self?.showFishPlacementGuide() },
         onHideSharedSystemItem: { [weak self] target in
             self?.hideSharedSystemItem(target)
@@ -210,7 +219,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWindow.didBecomeKeyNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(editorWindowWillClose(_:)),
+            name: NSWindow.willCloseNotification,
+            object: editorWindowController.window
+        )
         configureMainMenu()
+        if hasUpdateFeed {
+            updaterController = SPUStandardUpdaterController(
+                startingUpdater: true,
+                updaterDelegate: nil,
+                userDriverDelegate: nil
+            )
+        }
         #if DEBUG
         configureOrderingInterface()
         restoreSavedMenuBarLayoutAccess()
@@ -280,6 +302,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if !terminateImmediatelyToReleaseConnection,
+           editorWindowController.hasDraftChanges {
+            showEditor()
+            editorWindowController.setStatus(
+                "Apply or discard the local Draft before quitting or installing an update.",
+                isError: true
+            )
+            return .terminateCancel
+        }
         interactionGate.terminate()
         ordinaryReveal.suspend()
         nativeOverflowObserver.stop()
@@ -379,7 +410,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    @objc private func editorWindowWillClose(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.accessory)
+    }
+
     private func showEditor() {
+        NSApplication.shared.setActivationPolicy(.regular)
         editorWindowController.showEditor()
     }
 
@@ -388,6 +424,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let applicationItem = NSMenuItem()
         let applicationMenu = NSMenu(title: "Blenny")
+        if hasUpdateFeed {
+            let updateItem = NSMenuItem(
+                title: "Check for Updates…",
+                action: #selector(checkForUpdates(_:)),
+                keyEquivalent: ""
+            )
+            updateItem.target = self
+            applicationMenu.addItem(updateItem)
+            applicationMenu.addItem(.separator())
+        }
         let quitItem = NSMenuItem(
             title: "Quit Blenny",
             action: #selector(NSApplication.terminate(_:)),
@@ -409,6 +455,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(windowItem)
         NSApplication.shared.mainMenu = mainMenu
         NSApplication.shared.windowsMenu = windowMenu
+    }
+
+    @objc private func checkForUpdates(_ sender: Any?) {
+        if editorWindowController.hasDraftChanges {
+            showEditor()
+            editorWindowController.setStatus(
+                "Apply or discard the local Draft before checking for updates.",
+                isError: true
+            )
+            return
+        }
+        updaterController?.checkForUpdates(sender)
     }
 
     private func refresh() {
@@ -515,24 +573,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
             let loadedPolicy = try await store.load()
-            var accepted = try loadedPolicy ?? initialPolicy(
+            let accepted = try loadedPolicy ?? initialPolicy(
                 blennyBundleIdentifier: blennyBundleIdentifier
             )
-            #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
-            // Manual system-item trials use an isolated store and always wait
-            // for an explicit Apply/Resume after launch. Refresh must not stop
-            // an already active owner-operated test.
-            if editorModel == nil {
-                accepted = try accepted.settingManagementEnabled(false)
-                if !isReadOnlyValidation, loadedPolicy != accepted {
-                    if loadedPolicy == nil {
-                        try await store.save(accepted)
-                    } else {
-                        _ = try await store.disableManualTrialManagementPreservingBackup()
-                    }
-                }
-            }
-            #endif
             let candidateInventory = PolicyCandidateInventory(
                 observations: snapshot.observations
             )
@@ -540,6 +583,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 acceptedPolicy: accepted,
                 candidateInventory: candidateInventory,
                 systemItems: snapshot.systemItems,
+                unattributedItems: snapshot.unattributedItems,
                 blennyBundleIdentifier: blennyBundleIdentifier
             )
             let interfaceStore = PolicyInterfaceStore(
@@ -588,6 +632,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 accepted: accepted,
                 backup: backup,
                 model: model,
+                snapshot: snapshot,
                 candidateGeneration: editorWindowController.candidateGeneration
             )
             presentManagementState(
@@ -628,6 +673,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accepted: PersistentBundlePolicyDocument,
         backup: PersistentBundlePolicyBackup?,
         model: PolicyEditorViewModel,
+        snapshot: MenuBarOwnershipSnapshot,
         candidateGeneration: UUID
     ) async -> ManagementLoopState {
         guard !interactionGate.isTerminating else { return .terminating }
@@ -1144,6 +1190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         acceptedPolicy: model.acceptedPolicy,
                         candidateInventory: observation.candidates,
                         systemItems: model.systemItems,
+                        unattributedItems: observation.unattributedItems,
                         blennyBundleIdentifier: model.blennyBundleIdentifier
                     )
                     preparationRunning = observation.runningBundleIdentifiers
@@ -1243,7 +1290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     isError: true
                 )
                 // Failures invoked from the status menu must also be visible.
-                editorWindowController.showEditor()
+                showEditor()
             }
         }
     }
@@ -1264,7 +1311,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let currentObservation: (
                 candidates: PolicyCandidateInventory,
-                runningBundleIdentifiers: Set<String>
+                runningBundleIdentifiers: Set<String>,
+                unattributedItems: [UnattributedMenuBarItemObservation]
             )
             if prepared.newPolicy.managementEnabled {
                 editorWindowController.setStatus("Checking managed apps…", isError: false)
@@ -1274,7 +1322,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // process churn must never obstruct this safety cleanup.
                 currentObservation = (
                     candidates: model.candidateInventory,
-                    runningBundleIdentifiers: observedRunningBundleIdentifiers
+                    runningBundleIdentifiers: observedRunningBundleIdentifiers,
+                    unattributedItems: model.unattributedItems
                 )
             }
             guard editorModel?.draft == model.draft,
@@ -1334,7 +1383,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func captureApplyPreflight() async throws -> (
         candidates: PolicyCandidateInventory,
-        runningBundleIdentifiers: Set<String>
+        runningBundleIdentifiers: Set<String>,
+        unattributedItems: [UnattributedMenuBarItemObservation]
     ) {
         guard AccessibilityAuthorization.isTrusted else {
             throw PolicyInterfaceWriteError.applyPreflightUnavailable(
@@ -1364,7 +1414,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return (
             PolicyCandidateInventory(observations: snapshot.observations),
             runningBundleIdentifiers.union(admittedPassThroughBundleIdentifiers)
-                .union([blennyBundleIdentifier])
+                .union([blennyBundleIdentifier]),
+            snapshot.unattributedItems
         )
     }
 
@@ -1864,12 +1915,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let discovery = report.applicationDiscoveries.first {
                 $0.processIdentifier == descriptor.processIdentifier
             }
-            let itemCount = ownership.observations
-                .filter { $0.processIdentifier == descriptor.processIdentifier }
-                .reduce(0) { $0 + $1.menuBarItemCount }
+            let itemCount = ownership.observedMenuBarItemCount(
+                forProcessIdentifier: descriptor.processIdentifier
+            )
             let assessment = ManagementLifecyclePolicy.assessApplicationLaunch(
                 discovery: discovery,
-                attributableMenuBarItemCount: itemCount,
+                observedMenuBarItemCount: itemCount,
                 captureComplete: captureComplete
             )
             sessionDiagnostic(
@@ -2336,6 +2387,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applications = applications.filter { application in
             application.activationPolicy != .prohibited
                 || isReadOnlySystemMenuBarOwner(application.bundleIdentifier)
+                || application.bundleIdentifier == nil
         }
         applications.sort { first, second in
             scanPriority(for: first) < scanPriority(for: second)
@@ -2369,6 +2421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if isReadOnlySystemMenuBarOwner(application.bundleIdentifier) { return 1 }
         if application.processIdentifier == ProcessInfo.processInfo.processIdentifier { return 2 }
+        if application.activationPolicy == .prohibited { return 4 }
         return 3
     }
 

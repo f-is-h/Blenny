@@ -30,7 +30,7 @@ public actor AccessibilityInventory {
         let startedAt = DispatchTime.now().uptimeNanoseconds
         var notes = [
             "Read-only capture: no Accessibility attribute or system preference was changed.",
-            "Scope is limited to AXExtrasMenuBar trees and MenuBarAgent; titles, descriptions, and identifiers are truncated to 256 characters.",
+            "Scope is limited to AXExtrasMenuBar trees and MenuBarAgent; titles, descriptions, help, and identifiers are truncated to 256 characters.",
             "The report excludes process names, window contents, file paths, images, and unrelated Accessibility trees."
         ]
 
@@ -207,6 +207,7 @@ public actor AccessibilityInventory {
             let subrole = copySanitizedString(current.element, name: kAXSubroleAttribute as CFString)
             let title = copySanitizedString(current.element, name: kAXTitleAttribute as CFString)
             let itemDescription = copySanitizedString(current.element, name: kAXDescriptionAttribute as CFString)
+            let itemHelp = copySanitizedString(current.element, name: kAXHelpAttribute as CFString)
             let accessibilityIdentifier = copySanitizedString(current.element, name: kAXIdentifierAttribute as CFString)
             let positionResult = copyAttribute(current.element, name: kAXPositionAttribute as CFString)
             let sizeResult = copyAttribute(current.element, name: kAXSizeAttribute as CFString)
@@ -242,6 +243,7 @@ public actor AccessibilityInventory {
                         subrole: subrole,
                         title: title,
                         itemDescription: itemDescription,
+                        itemHelp: itemHelp,
                         accessibilityIdentifier: accessibilityIdentifier,
                         frame: frame(
                             positionValue: positionResult.value,

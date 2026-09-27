@@ -277,6 +277,7 @@ public enum ExactSystemOrderingItem: String, Codable, CaseIterable, Hashable, Se
     case controlCenter
     case siri
     case timeMachine
+    case spotlight
 
     /// Product availability is separate from historical identity and recovery.
     /// These identities remain decodable so existing receipts can be restored.
@@ -284,6 +285,12 @@ public enum ExactSystemOrderingItem: String, Codable, CaseIterable, Hashable, Se
         switch self {
         case .siri, .timeMachine, .controlCenter: false
         case .bluetooth, .wifi, .sound, .nowPlaying: true
+        case .spotlight:
+            #if DEBUG
+            true
+            #else
+            false
+            #endif
         }
     }
 
@@ -314,6 +321,10 @@ public enum ExactSystemOrderingItem: String, Codable, CaseIterable, Hashable, Se
         } else if normalized == "com.apple.menuextra.timemachine"
                     || normalized.contains(":time machine|") {
             self = .timeMachine
+        } else if PersistentSystemItemPolicyCatalog.controllableItem(
+            forObservationIdentifier: observationIdentifier
+        )?.identifier == "com.apple.menuextra.spotlight" {
+            self = .spotlight
         } else {
             return nil
         }
@@ -328,6 +339,7 @@ public enum ExactSystemOrderingItem: String, Codable, CaseIterable, Hashable, Se
         case .controlCenter: "module:BentoBox-0"
         case .siri: "status:com.apple.systemuiserver::Siri"
         case .timeMachine: "status:com.apple.systemuiserver::com.apple.menuextra.TimeMachine"
+        case .spotlight: "status:com.apple.campo::Item-0"
         }
     }
 
@@ -336,6 +348,7 @@ public enum ExactSystemOrderingItem: String, Codable, CaseIterable, Hashable, Se
         case .bluetooth, .wifi, .sound, .nowPlaying, .controlCenter:
             "com.apple.controlcenter"
         case .siri, .timeMachine: "com.apple.systemuiserver"
+        case .spotlight: "com.apple.campo"
         }
     }
 
@@ -348,6 +361,7 @@ public enum ExactSystemOrderingItem: String, Codable, CaseIterable, Hashable, Se
         case .controlCenter: "com.apple.menuextra.controlcenter"
         case .siri: "com.apple.menuextra.siri"
         case .timeMachine: "com.apple.menuextra.TimeMachine"
+        case .spotlight: "com.apple.menuextra.spotlight"
         }
     }
 
@@ -360,6 +374,7 @@ public enum ExactSystemOrderingItem: String, Codable, CaseIterable, Hashable, Se
         case .controlCenter: "Control Center"
         case .siri: "Siri"
         case .timeMachine: "Time Machine"
+        case .spotlight: "Spotlight"
         }
     }
 
@@ -372,6 +387,7 @@ public enum ExactSystemOrderingItem: String, Codable, CaseIterable, Hashable, Se
         case .controlCenter: "switch.2"
         case .siri: "siri"
         case .timeMachine: "clock.arrow.circlepath"
+        case .spotlight: "magnifyingglass"
         }
     }
 
@@ -387,6 +403,10 @@ public enum ExactSystemOrderingItem: String, Codable, CaseIterable, Hashable, Se
     public func hasAdmissibleConfigurationNamespace(
         _ table: [String: OrderingValue]
     ) -> Bool {
+        if self == .spotlight {
+            let campoKeys = table.keys.filter { $0.hasPrefix("status:com.apple.campo::") }
+            return campoKeys == [configurationKey]
+        }
         guard self == .controlCenter else { return true }
         let bentoBoxKeys = table.keys.filter {
             $0 == "module:BentoBox" || $0.hasPrefix("module:BentoBox-")

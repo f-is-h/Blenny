@@ -19,6 +19,7 @@ struct ProductInterfaceActions {
     let openKoFi: () -> Void
     let setLaunchAtLogin: (Bool) -> Void
     let openLoginItemsSettings: () -> Void
+    let checkForUpdates: (() -> Void)?
     let showFishPlacementGuide: () -> Void
     let hideSharedSystemItem: (SharedSystemItemTrialTarget) -> Void
     let restoreSharedSystemItem: (SharedSystemItemTrialTarget) -> Void
@@ -310,14 +311,20 @@ final class ProductInterfaceModel: ObservableObject {
         return model?.hasDraftChanges == true
         #endif
     }
+    var unattributedMenuBarItems: [UnattributedMenuBarItemObservation] {
+        model?.unattributedItems ?? []
+    }
+
     var systemItems: [SystemMenuBarItemObservation] {
         var items = model?.systemItems ?? []
         #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         for target in SharedSystemItemTrialTarget.allCases {
             let presentation = sharedSystemItemTrialPresentation(for: target)
-            guard presentation == .ready || presentation == .recoveryRequired,
+            guard presentation == .recoveryRequired,
                   !items.contains(where: {
-                      sharedSystemItemTrialTarget(for: $0.observationIdentifier) == target
+                      SystemItemCapabilityIdentity.policyIdentifier(
+                          for: $0, retainedWhileAbsent: $0.observationCount == 0
+                      ) == target.observationIdentifier
                   }) else {
                 continue
             }
@@ -331,24 +338,70 @@ final class ProductInterfaceModel: ObservableObject {
             )
         }
         #endif
-        return items.sorted {
-            ($0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending)
+        var uniqueItems: [SystemMenuBarItemObservation] = []
+        for item in items where !uniqueItems.contains(item) {
+            uniqueItems.append(item)
+        }
+        return uniqueItems.sorted { first, second in
+            let firstIsClock = first.observationIdentifier == SystemMenuBarItemObservation.clockIdentifier
+            let secondIsClock = second.observationIdentifier == SystemMenuBarItemObservation.clockIdentifier
+            if firstIsClock != secondIsClock { return !firstIsClock }
+            return first.displayName.localizedCaseInsensitiveCompare(second.displayName)
+                == .orderedAscending
         }
     }
 
     func systemItems(in policy: MenuBarBundlePolicy) -> [SystemMenuBarItemObservation] {
         systemItems.filter { observation in
-            if isControllableSystemItem(observation.observationIdentifier) {
-                return effectiveSystemItemPolicy(
-                    for: observation.observationIdentifier
-                ) == policy
+            if let assigned = effectiveSystemItemPolicy(
+                for: observation.observationIdentifier
+            ) {
+                return assigned == policy
             }
             return policy == .visible
         }
     }
 
     func isControllableSystemItem(_ observationIdentifier: String) -> Bool {
-        systemItemPolicyIdentifier(for: observationIdentifier) != nil
+        guard let observation = systemItem(
+            observationIdentifier: observationIdentifier
+        ), let identifier = SystemItemCapabilityIdentity.policyIdentifier(
+            for: observation,
+            retainedWhileAbsent: retainedSystemItem(observation)
+        ) else { return false }
+        guard systemItems.filter({ candidate in
+            SystemItemCapabilityIdentity.policyIdentifier(
+                for: candidate,
+                retainedWhileAbsent: retainedSystemItem(candidate)
+            ) == identifier
+        }).count == 1 else { return false }
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        if let target = SharedSystemItemTrialTarget.allCases.first(where: {
+            $0.observationIdentifier == identifier
+        }) {
+            switch sharedSystemItemTrialPresentation(for: target) {
+            case .ready:
+                return true
+            case .recoveryRequired:
+                return effectiveSystemItemPolicy(for: identifier) != .visible
+            case .checking, .hidden, .busy, .unavailable:
+                return false
+            }
+        }
+        #endif
+        return true
+    }
+
+    private func retainedSystemItem(
+        _ observation: SystemMenuBarItemObservation
+    ) -> Bool {
+        guard observation.observationCount == 0 else { return false }
+        return model?.systemItems.contains(where: {
+            $0.observationIdentifier == observation.observationIdentifier
+                && $0.observationCount == 0
+        }) == true || effectiveSystemItemPolicy(
+            for: observation.observationIdentifier
+        ) != .visible
     }
 
     func isInteractiveSystemItem(_ observationIdentifier: String) -> Bool {
@@ -366,6 +419,60 @@ final class ProductInterfaceModel: ObservableObject {
             return []
         }
         return [.visible, .revealable, .hidden]
+    }
+
+    func systemItemCapabilityExplanation(
+        for observationIdentifier: String
+    ) -> String {
+        guard let observation = systemItem(
+            observationIdentifier: observationIdentifier
+        ) else { return "Refresh to check this system item." }
+        if observation.observationIdentifier == SystemMenuBarItemObservation.clockIdentifier {
+            return "Clock is fixed on this macOS build."
+        }
+        guard let identifier = SystemItemCapabilityIdentity.policyIdentifier(
+            for: observation,
+            retainedWhileAbsent: retainedSystemItem(observation)
+        ) else {
+            if observation.observationCount > 1 {
+                return "Multiple instances share this identity; no unique write target."
+            }
+            if observation.observationCount == 0 {
+                return "This item was not observed. Refresh after it appears."
+            }
+            return "No verified item-specific writer and recovery path for this identity."
+        }
+        if systemItems.filter({ candidate in
+            SystemItemCapabilityIdentity.policyIdentifier(
+                for: candidate,
+                retainedWhileAbsent: retainedSystemItem(candidate)
+            ) == identifier
+        }).count != 1 {
+            return "This writer target has more than one Board identity; refresh to resolve it."
+        }
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        if let target = SharedSystemItemTrialTarget.allCases.first(where: {
+            $0.observationIdentifier == identifier
+        }) {
+            switch sharedSystemItemTrialPresentation(for: target) {
+            case .ready:
+                break
+            case .recoveryRequired:
+                if effectiveSystemItemPolicy(for: identifier) == .visible {
+                    return "Restore the existing item receipt before assigning a new policy."
+                }
+            case .checking:
+                return "Checking the exact visibility target."
+            case .hidden:
+                return "This item is hidden outside Blenny; restore it in macOS before assigning it."
+            case .busy:
+                return "A system-item operation is in progress."
+            case let .unavailable(reason):
+                return "Exact visibility preflight failed: \(reason)"
+            }
+        }
+        #endif
+        return "Three-state visibility is available for this exact item."
     }
 
     func effectiveSystemItemPolicy(
@@ -401,9 +508,19 @@ final class ProductInterfaceModel: ObservableObject {
     func sharedSystemItemTrialTarget(
         for observationIdentifier: String
     ) -> SharedSystemItemTrialTarget? {
-        SharedSystemItemTrialTarget.matchingSystemItem(
+        guard let observation = systemItem(
             observationIdentifier: observationIdentifier
-        )
+        ), let identifier = SystemItemCapabilityIdentity.policyIdentifier(
+            for: observation,
+            retainedWhileAbsent: observation.observationCount == 0
+        ) else { return nil }
+        guard let target = SharedSystemItemTrialTarget.allCases.first(where: {
+            $0.observationIdentifier == identifier
+        }), observation.observationCount == 1
+                || sharedSystemItemTrialPresentation(for: target) == .recoveryRequired else {
+            return nil
+        }
+        return target
     }
 
     func sharedSystemItemTrialPresentation(
@@ -557,7 +674,9 @@ final class ProductInterfaceModel: ObservableObject {
         _ target: SharedSystemItemTrialTarget,
         presentation: SharedSystemItemTrialPresentation
     ) {
+        guard sharedSystemItemTrials[target] != presentation else { return }
         sharedSystemItemTrials[target] = presentation
+        preparePolicyDragPayloads()
     }
     #endif
 
@@ -676,6 +795,27 @@ final class ProductInterfaceModel: ObservableObject {
         case .blocked:
             return "Sorting unavailable. \(row.reason ?? "")"
         }
+    }
+
+    func availableSystemOrderingItem(
+        for observationIdentifier: String
+    ) -> ExactSystemOrderingItem? {
+        guard let observation = systemItem(
+            observationIdentifier: observationIdentifier
+        ), let item = SystemItemCapabilityIdentity.orderingItem(
+            for: observation,
+            retainedWhileAbsent: retainedSystemItem(observation)
+        ), item.isOrderingOffered,
+           let row = orderingRow(for: .systemItem(item)),
+           row.availability == .ready, row.isEligible,
+           row.systemKey == item.configurationKey else { return nil }
+        guard systemItems.filter({ candidate in
+            SystemItemCapabilityIdentity.orderingItem(
+                for: candidate,
+                retainedWhileAbsent: retainedSystemItem(candidate)
+            ) == item
+        }).count == 1 else { return nil }
+        return item
     }
 
     func initializeOrderingLayoutFromCurrentRows(force: Bool = false) {
@@ -910,6 +1050,12 @@ final class ProductInterfaceModel: ObservableObject {
         guard let subjectID = orderingSubject(forDragIdentifier: payload.bundleIdentifier) else {
             return .rejected("This item is no longer available.")
         }
+        if case let .systemItem(item) = subjectID,
+           !systemItems.contains(where: {
+               availableSystemOrderingItem(for: $0.observationIdentifier) == item
+           }) {
+            return .rejected("This system item's exact sorting preflight is no longer available.")
+        }
         let source = OrderingBoardLayoutItemID(
             subjectID: subjectID,
             sourcePolicy: payload.sourcePolicy,
@@ -934,6 +1080,12 @@ final class ProductInterfaceModel: ObservableObject {
 
         let policyChanged = payload.sourcePolicy != destination.policy
         if policyChanged {
+            if case let .systemItem(item) = subjectID,
+               !isControllableSystemItem(item.observationIdentifier) {
+                return .rejected(
+                    "Three-state visibility is unavailable for this system item."
+                )
+            }
             guard var editor = model else {
                 return .rejected("This item is no longer available.")
             }
@@ -1032,20 +1184,13 @@ final class ProductInterfaceModel: ObservableObject {
     ) -> [DebugExactSystemBoardItem] {
         let rows = orderingPresentation.rows.compactMap { row -> DebugExactSystemBoardItem? in
             guard case let .systemItem(item) = row.subjectID,
-                  item.isOrderingOffered,
                   effectiveOrderingPolicy(for: row.subjectID) == policy else { return nil }
             let observed = systemItems.first {
-                ExactSystemOrderingItem(
-                    observationIdentifier: $0.observationIdentifier
+                availableSystemOrderingItem(
+                    for: $0.observationIdentifier
                 ) == item
             }
-            guard row.systemKey != nil || observed != nil else { return nil }
-            let observation = observed ?? SystemMenuBarItemObservation(
-                observationIdentifier: item.observationIdentifier,
-                ownerBundleIdentifier: item.hostBundleIdentifier,
-                displayName: item.displayName,
-                observationCount: 0
-            )
+            guard let observation = observed else { return nil }
             return DebugExactSystemBoardItem(item: item, observation: observation, row: row)
         }
         guard let layout = orderingLayoutDraft else {
@@ -1084,6 +1229,12 @@ final class ProductInterfaceModel: ObservableObject {
         guard let layout = orderingLayoutDraft,
               layout.candidateGeneration == candidateGeneration,
               layout.policy(of: subjectID) == sourcePolicy else { return nil }
+        if case let .systemItem(item) = subjectID,
+           !systemItems.contains(where: {
+               availableSystemOrderingItem(for: $0.observationIdentifier) == item
+           }) {
+            return nil
+        }
         return orderingDragPayload(
             subjectID: subjectID,
             sourcePolicy: sourcePolicy,
@@ -1327,8 +1478,9 @@ final class ProductInterfaceModel: ObservableObject {
             )
         }
 
-        for observation in model.systemItems {
-            guard let identifier = systemItemPolicyIdentifier(
+        for observation in systemItems {
+            guard isControllableSystemItem(observation.observationIdentifier),
+                  let identifier = systemItemPolicyIdentifier(
                 for: observation.observationIdentifier
             ), let policy = effectiveSystemItemPolicy(
                 for: observation.observationIdentifier
@@ -1398,7 +1550,8 @@ final class ProductInterfaceModel: ObservableObject {
         for observationIdentifier: String,
         sourcePolicy: MenuBarBundlePolicy
     ) -> PolicyDragPayload? {
-        guard let policyIdentifier = systemItemPolicyIdentifier(
+        guard isControllableSystemItem(observationIdentifier),
+              let policyIdentifier = systemItemPolicyIdentifier(
             for: observationIdentifier
         ) else { return nil }
         return preparedPolicyDragPayload(
@@ -1489,7 +1642,8 @@ final class ProductInterfaceModel: ObservableObject {
         guard !isApplying, !isRefreshing, !requiresObservationRefresh else {
             return .rejected(.interactionInProgress)
         }
-        guard let policyIdentifier = systemItemPolicyIdentifier(for: identifier) else {
+        guard isControllableSystemItem(identifier),
+              let policyIdentifier = systemItemPolicyIdentifier(for: identifier) else {
             return .rejected(.unknownCandidate)
         }
         guard var editor = model else { return .rejected(.unknownCandidate) }
@@ -1680,6 +1834,7 @@ final class PolicyEditorWindowController: NSWindowController {
         onOpenKoFi: @escaping () -> Void,
         onSetLaunchAtLogin: @escaping (Bool) -> Void,
         onOpenLoginItemsSettings: @escaping () -> Void,
+        onCheckForUpdates: (() -> Void)?,
         onShowFishPlacementGuide: @escaping () -> Void,
         onHideSharedSystemItem: @escaping (SharedSystemItemTrialTarget) -> Void,
         onRestoreSharedSystemItem: @escaping (SharedSystemItemTrialTarget) -> Void
@@ -1744,6 +1899,7 @@ final class PolicyEditorWindowController: NSWindowController {
             openKoFi: onOpenKoFi,
             setLaunchAtLogin: onSetLaunchAtLogin,
             openLoginItemsSettings: onOpenLoginItemsSettings,
+            checkForUpdates: onCheckForUpdates,
             showFishPlacementGuide: onShowFishPlacementGuide,
             hideSharedSystemItem: onHideSharedSystemItem,
             restoreSharedSystemItem: onRestoreSharedSystemItem

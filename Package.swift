@@ -11,6 +11,9 @@ let package = Package(
         .executable(name: "Blenny", targets: ["BlennyApp"]),
         .executable(name: "BlennyLayoutProbe", targets: ["BlennyLayoutProbe"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0")
+    ],
     targets: [
         .target(
             name: "BlennyCore",
@@ -22,7 +25,15 @@ let package = Package(
         ),
         .executableTarget(
             name: "BlennyApp",
-            dependencies: ["BlennyCore", "BlennyPrivateABIShim"]
+            dependencies: [
+                "BlennyCore", "BlennyPrivateABIShim",
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"
+                ])
+            ]
         ),
         .target(
             name: "BlennyPrivateABIShim",

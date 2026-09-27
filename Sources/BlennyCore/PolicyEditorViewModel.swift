@@ -73,17 +73,27 @@ extension MenuBarOwnershipSnapshotIssue: CustomStringConvertible {
 public struct MenuBarOwnershipSnapshot: Equatable, Sendable {
     public let observations: [MenuBarPolicyOwnershipObservation]
     public let systemItems: [SystemMenuBarItemObservation]
+    public let unattributedItems: [UnattributedMenuBarItemObservation]
     public let issues: [MenuBarOwnershipSnapshotIssue]
 
     public var isComplete: Bool { issues.isEmpty }
 
+    public func observedMenuBarItemCount(forProcessIdentifier processIdentifier: Int32) -> Int {
+        observations.filter { $0.processIdentifier == processIdentifier }
+            .reduce(0) { $0 + $1.menuBarItemCount }
+            + unattributedItems.filter { $0.processIdentifier == processIdentifier }
+                .reduce(0) { $0 + $1.observationCount }
+    }
+
     public init(
         observations: [MenuBarPolicyOwnershipObservation],
         systemItems: [SystemMenuBarItemObservation],
+        unattributedItems: [UnattributedMenuBarItemObservation] = [],
         issues: [MenuBarOwnershipSnapshotIssue]
     ) {
         self.observations = observations
         self.systemItems = systemItems
+        self.unattributedItems = unattributedItems
         self.issues = issues
     }
 }
@@ -106,6 +116,20 @@ public struct SystemMenuBarItemObservation: Equatable, Sendable {
         self.ownerBundleIdentifier = ownerBundleIdentifier
         self.displayName = displayName
         self.observationCount = observationCount
+    }
+}
+
+/// A live menu extra without bundle ownership is presentation only. Its PID
+/// identifies this refresh's row, never a persistent policy or writer target.
+public struct UnattributedMenuBarItemObservation: Equatable, Sendable {
+    public let processIdentifier: Int32
+    public let observationCount: Int
+    public let itemHelp: String?
+
+    public init(processIdentifier: Int32, observationCount: Int, itemHelp: String? = nil) {
+        self.processIdentifier = processIdentifier
+        self.observationCount = observationCount
+        self.itemHelp = itemHelp
     }
 }
 
@@ -137,12 +161,23 @@ public enum MenuBarOwnershipSnapshotBuilder {
                         item.ownerBundleIdentifier
                     ))
         }
-        let grouped = Dictionary(grouping: topLevelMenuExtras) { item in
+        let grouped = Dictionary(grouping: topLevelMenuExtras.filter {
+            $0.ownerBundleIdentifier != nil
+        }) { item in
             OwnerKey(
                 processIdentifier: item.ownerPID,
                 bundleIdentifier: item.ownerBundleIdentifier
             )
         }
+        let unattributedItems = Dictionary(grouping: topLevelMenuExtras.filter {
+            $0.ownerBundleIdentifier == nil
+        }, by: \.ownerPID).map { processIdentifier, items in
+            UnattributedMenuBarItemObservation(
+                processIdentifier: processIdentifier,
+                observationCount: items.count,
+                itemHelp: items.count == 1 ? items[0].itemHelp : nil
+            )
+        }.sorted { $0.processIdentifier < $1.processIdentifier }
         let observations = grouped.map { key, items in
             MenuBarPolicyOwnershipObservation(
                 bundleIdentifier: key.bundleIdentifier,
@@ -159,6 +194,7 @@ public enum MenuBarOwnershipSnapshotBuilder {
         return MenuBarOwnershipSnapshot(
             observations: observations,
             systemItems: systemItems,
+            unattributedItems: unattributedItems,
             issues: issues
         )
     }
@@ -237,17 +273,7 @@ public enum MenuBarOwnershipSnapshotBuilder {
     }
 
     private static func knownSystemItemDisplayName(identifier: String) -> String? {
-        let knownNames = [
-            "com.apple.menuextra.bluetooth": "Bluetooth",
-            "com.apple.menuextra.clock": "Clock",
-            "com.apple.menuextra.controlcenter": "Control Center",
-            "com.apple.menuextra.now-playing": "Now Playing",
-            "com.apple.menuextra.siri": "Siri",
-            "com.apple.menuextra.sound": "Sound",
-            "com.apple.menuextra.timemachine": "Time Machine",
-            "com.apple.menuextra.wifi": "Wi-Fi",
-        ]
-        return knownNames[identifier.lowercased()]
+        PolicyIconResolver.systemItemDisplayName(observationIdentifier: identifier)
     }
 
     private static func isCriticalSystemOwner(_ bundleIdentifier: String?) -> Bool {
@@ -266,6 +292,7 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
     public let acceptedPolicy: PersistentBundlePolicyDocument
     public let candidateInventory: PolicyCandidateInventory
     public let systemItems: [SystemMenuBarItemObservation]
+    public let unattributedItems: [UnattributedMenuBarItemObservation]
     public let blennyBundleIdentifier: String
     public private(set) var draft: BundlePolicyDraft
 
@@ -275,12 +302,14 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
         acceptedPolicy: PersistentBundlePolicyDocument,
         candidateInventory: PolicyCandidateInventory,
         systemItems: [SystemMenuBarItemObservation] = [],
+        unattributedItems: [UnattributedMenuBarItemObservation] = [],
         blennyBundleIdentifier: String
     ) throws {
         self.acceptedPolicy = try acceptedPolicy.validated(
             forBlennyBundleIdentifier: blennyBundleIdentifier
         )
         self.candidateInventory = candidateInventory
+        self.unattributedItems = unattributedItems
         var retainedSystemItems = systemItems
         let retainedPolicies = Self.acceptedSystemItemPolicies(acceptedPolicy)
         for (identifier, policy) in retainedPolicies where policy != .visible {
@@ -320,6 +349,7 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
             acceptedPolicy: accepted,
             candidateInventory: candidateInventory,
             systemItems: systemItems,
+            unattributedItems: unattributedItems,
             blennyBundleIdentifier: blennyBundleIdentifier
         )
         if preservingDraft { updated.draft = draft }

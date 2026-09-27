@@ -13,6 +13,7 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
     private static let siriDomain = "com.apple.Siri"
     private static let timeMachineDomain = "com.apple.systemuiserver"
     private static let nowPlayingDomain = "com.apple.controlcenter"
+    private static let spotlightDomain = "com.apple.campo"
 
     private var bridge: ControlCenterPreferenceBridge?
 
@@ -67,6 +68,15 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
                 // authoritative visibility state; the persisted values remain
                 // part of the exact recovery snapshot.
                 effectiveVisible: bridge.visibility(for: .timeMachine)
+            )
+        case .spotlight:
+            let bridge = try bridge ?? ControlCenterPreferenceBridge()
+            self.bridge = bridge
+            let key = "NSStatusItem VisibleCC Item-0"
+            return try SharedSystemItemPreferenceSnapshot(
+                target: target,
+                values: [key: try ExactPreferenceValue(copy(Self.spotlightDomain, key))],
+                effectiveVisible: bridge.visibility(for: .spotlight)
             )
         }
     }
@@ -128,10 +138,12 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
         _ snapshot: SharedSystemItemPreferenceSnapshot
     ) async throws {
         #if DEBUG
-        // Owner-requested timing trial, confined to ordinary Time Machine
-        // reveal. Exact cleanup and compensation keep both recovery barriers.
+        // Ordinary Time Machine and Spotlight reveal use immediate exact
+        // readback. Exact cleanup and compensation retain both recovery waits.
         try await restoreSnapshot(
-            snapshot, waitsForSettlement: snapshot.target != .timeMachine
+            snapshot,
+            waitsForSettlement: snapshot.target != .timeMachine
+                && snapshot.target != .spotlight
         )
         #else
         try await restoreExact(snapshot)
@@ -169,6 +181,9 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
             host = kCFPreferencesAnyHost
         case .timeMachine:
             domain = Self.timeMachineDomain
+            host = kCFPreferencesAnyHost
+        case .spotlight:
+            domain = Self.spotlightDomain
             host = kCFPreferencesAnyHost
         }
         for (key, exactValue) in snapshot.values {
@@ -260,6 +275,8 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
         private let siriSetter: UnsafeMutableRawPointer
         private let timeMachineGetter: UnsafeMutableRawPointer
         private let timeMachineSetter: UnsafeMutableRawPointer
+        private let spotlightGetter: UnsafeMutableRawPointer
+        private let spotlightSetter: UnsafeMutableRawPointer
 
         init() throws {
             guard let handle = dlopen(Self.frameworkPath, RTLD_NOW | RTLD_LOCAL) else {
@@ -287,6 +304,14 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
                     "$s13ControlCenter28SystemItemMenuBarPreferencesC15showTimeMachineSbvs",
                     in: handle
                 )
+                spotlightGetter = try Self.symbol(
+                    "$s13ControlCenter28SystemItemMenuBarPreferencesC13showSpotlightSbvg",
+                    in: handle
+                )
+                spotlightSetter = try Self.symbol(
+                    "$s13ControlCenter28SystemItemMenuBarPreferencesC13showSpotlightSbvs",
+                    in: handle
+                )
                 release = unsafeBitCast(
                     try Self.symbol("swift_release", in: handle),
                     to: ReleaseFunction.self
@@ -308,8 +333,7 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
             guard target != .nowPlaying else {
                 throw SharedSystemItemTrialError.unsupportedRuntime
             }
-            let getter = target == .siri ? siriGetter : timeMachineGetter
-            let setter = target == .siri ? siriSetter : timeMachineSetter
+            let (getter, setter) = functions(for: target)
             let before = blenny_swift_call_bool_getter(getter, object)
             if before != visible {
                 blenny_swift_call_bool_setter(setter, object, visible)
@@ -321,8 +345,19 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
 
         func visibility(for target: SharedSystemItemTrialTarget) -> Bool {
             precondition(target != .nowPlaying)
-            let getter = target == .siri ? siriGetter : timeMachineGetter
+            let (getter, _) = functions(for: target)
             return blenny_swift_call_bool_getter(getter, object)
+        }
+
+        private func functions(
+            for target: SharedSystemItemTrialTarget
+        ) -> (UnsafeMutableRawPointer, UnsafeMutableRawPointer) {
+            switch target {
+            case .nowPlaying: preconditionFailure("Now Playing has a separate preference path")
+            case .siri: (siriGetter, siriSetter)
+            case .timeMachine: (timeMachineGetter, timeMachineSetter)
+            case .spotlight: (spotlightGetter, spotlightSetter)
+            }
         }
 
         deinit {

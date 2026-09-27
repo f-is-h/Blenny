@@ -10,10 +10,12 @@ public struct FallbackBoundaryCandidate: Sendable {
     public enum Failure: Error, LocalizedError {
         case noRevealableItems
         case noBoundary
+        case unattributedItems
         public var errorDescription: String? {
             switch self {
             case .noRevealableItems: "No running Revealable items need an arrow boundary."
             case .noBoundary: "Revealable and Visible items do not have a clear saved boundary. Arrange the groups in Organize, choose Apply, then try again."
+            case .unattributedItems: "A menu bar item without verified application ownership is present. Blenny cannot establish a complete control boundary for this layout."
             }
         }
     }
@@ -22,6 +24,10 @@ public struct FallbackBoundaryCandidate: Sendable {
                             policy: PersistentBundlePolicyDocument,
                             includeFish: Bool = false) throws -> Self {
         let table = try snapshot.table()
+        guard !snapshot.afterProcesses.contains(where: { process in
+            process.bundleIdentifier == nil
+                && snapshot.observationsByPID[process.pid]?.itemFrames.isEmpty == false
+        }) else { throw Failure.unattributedItems }
         var classified: [String: MenuBarBundlePolicy] = [:]
         let policies = Dictionary(uniqueKeysWithValues: policy.policies.map {
             ($0.bundleIdentifier.lowercased(), $0.policy)

@@ -2,12 +2,14 @@ public enum SharedSystemItemTrialTarget: String, CaseIterable, Codable, Sendable
     case nowPlaying
     case siri
     case timeMachine
+    case spotlight
 
     public var displayName: String {
         switch self {
         case .nowPlaying: "Now Playing"
         case .siri: "Siri"
         case .timeMachine: "Time Machine"
+        case .spotlight: "Spotlight"
         }
     }
 
@@ -16,6 +18,7 @@ public enum SharedSystemItemTrialTarget: String, CaseIterable, Codable, Sendable
         case .nowPlaying: "com.apple.menuextra.now-playing"
         case .siri: "com.apple.menuextra.siri"
         case .timeMachine: "com.apple.menuextra.TimeMachine"
+        case .spotlight: "com.apple.menuextra.spotlight"
         }
     }
 
@@ -23,6 +26,7 @@ public enum SharedSystemItemTrialTarget: String, CaseIterable, Codable, Sendable
         switch self {
         case .nowPlaying: "com.apple.controlcenter"
         case .siri, .timeMachine: "com.apple.systemuiserver"
+        case .spotlight: "com.apple.campo"
         }
     }
 
@@ -43,6 +47,11 @@ public enum SharedSystemItemTrialTarget: String, CaseIterable, Codable, Sendable
         if normalized == "com.apple.menuextra.timemachine"
             || normalized.contains(":time machine|") {
             return .timeMachine
+        }
+        if PersistentSystemItemPolicyCatalog.controllableItem(
+            forObservationIdentifier: observationIdentifier
+        )?.identifier == "com.apple.menuextra.spotlight" {
+            return .spotlight
         }
         return nil
     }
@@ -144,6 +153,7 @@ public struct SharedSystemItemPreferenceSnapshot: Codable, Equatable, Sendable {
         "menuExtras",
     ]
     public static let nowPlayingKeys = ["NowPlaying"]
+    public static let spotlightKeys = ["NSStatusItem VisibleCC Item-0"]
 
     public let target: SharedSystemItemTrialTarget
     public let values: [String: ExactPreferenceValue]
@@ -166,6 +176,7 @@ public struct SharedSystemItemPreferenceSnapshot: Codable, Equatable, Sendable {
         case .nowPlaying: expectedKeys = Self.nowPlayingKeys
         case .siri: expectedKeys = Self.siriKeys
         case .timeMachine: expectedKeys = Self.timeMachineKeys
+        case .spotlight: expectedKeys = Self.spotlightKeys
         }
         guard values.keys.sorted() == expectedKeys,
               values.values.allSatisfy({ $0.encodedValue?.count ?? 0 <= 1_048_576 }) else {
@@ -192,6 +203,11 @@ public struct SharedSystemItemPreferenceSnapshot: Codable, Equatable, Sendable {
             _ = try values[
                 "NSStatusItem Preferred Position com.apple.menuextra.TimeMachine"
             ]?.optionalInteger()
+        case .spotlight:
+            // The private getter is the live visibility authority. Campo may
+            // retain its NSStatusItem preference while that getter reports
+            // hidden, so preserve the value without treating it as a mirror.
+            _ = try values["NSStatusItem VisibleCC Item-0"]?.optionalBoolean()
         }
     }
 
@@ -208,6 +224,13 @@ public struct SharedSystemItemPreferenceSnapshot: Codable, Equatable, Sendable {
             return applied == (try hidingProposal())
         case .siri:
             return applied == (try hidingProposal())
+        case .spotlight:
+            let key = "NSStatusItem VisibleCC Item-0"
+            let value = try applied.values[key]?.optionalBoolean()
+            let baselineValue = try values[key]?.optionalBoolean()
+            // Accept only target-local normalization: explicit false, removal,
+            // or an unchanged preference with the getter reporting hidden.
+            return value == false || value == nil || value == baselineValue
         case .timeMachine:
             let baselineEntries = try values["menuExtras"]?.stringArray() ?? []
             let appliedEntries = try applied.values["menuExtras"]?.stringArray() ?? []
@@ -240,6 +263,8 @@ public struct SharedSystemItemPreferenceSnapshot: Codable, Equatable, Sendable {
         case .siri:
             proposed["StatusMenuVisible"] = try ExactPreferenceValue(false)
             proposed["SiriPrefStashedStatusMenuVisible"] = try ExactPreferenceValue(nil)
+        case .spotlight:
+            proposed["NSStatusItem VisibleCC Item-0"] = try ExactPreferenceValue(false)
         case .timeMachine:
             let entries = try values["menuExtras"]?.stringArray() ?? []
             guard entries.filter({ $0 == Self.timeMachineMenuExtraPath }).count == 1 else {

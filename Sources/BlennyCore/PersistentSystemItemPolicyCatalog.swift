@@ -18,6 +18,7 @@ public enum PersistentSystemItemPolicyCatalog {
         .init(identifier: "com.apple.menuextra.now-playing", displayName: "Now Playing"),
         .init(identifier: "com.apple.menuextra.siri", displayName: "Siri"),
         .init(identifier: "com.apple.menuextra.TimeMachine", displayName: "Time Machine"),
+        .init(identifier: "com.apple.menuextra.spotlight", displayName: "Spotlight"),
     ]
     #else
     public static let items: [PersistentSystemItemPolicyCatalogItem] = []
@@ -75,6 +76,11 @@ public enum PersistentSystemItemPolicyCatalog {
             policyIdentifier: "com.apple.menuextra.TimeMachine",
             ownerBundleIdentifier: "com.apple.systemuiserver",
             semanticLabel: "time machine"
+        ),
+        .init(
+            policyIdentifier: "com.apple.menuextra.spotlight",
+            ownerBundleIdentifier: "com.apple.campo",
+            semanticLabel: "spotlight"
         ),
     ]
 

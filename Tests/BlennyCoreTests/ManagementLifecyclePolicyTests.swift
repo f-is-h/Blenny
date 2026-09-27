@@ -110,7 +110,7 @@ struct ManagementLifecyclePolicyTests {
     ) -> ManagementLifecyclePolicy.ApplicationLaunchAssessment {
         ManagementLifecyclePolicy.assessApplicationLaunch(
             discovery: discovery,
-            attributableMenuBarItemCount: itemCount,
+            observedMenuBarItemCount: itemCount,
             captureComplete: complete
         )
     }

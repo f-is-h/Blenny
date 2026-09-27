@@ -94,6 +94,7 @@ public struct MenuBarItemRecord: Codable, Equatable, Sendable {
     public let subrole: String?
     public let title: String?
     public let itemDescription: String?
+    public let itemHelp: String?
     public let accessibilityIdentifier: String?
     public let frame: RectSnapshot?
     public let actions: [String]
@@ -113,6 +114,7 @@ public struct MenuBarItemRecord: Codable, Equatable, Sendable {
         subrole: String?,
         title: String?,
         itemDescription: String?,
+        itemHelp: String? = nil,
         accessibilityIdentifier: String?,
         frame: RectSnapshot?,
         actions: [String],
@@ -131,6 +133,7 @@ public struct MenuBarItemRecord: Codable, Equatable, Sendable {
         self.subrole = subrole
         self.title = title
         self.itemDescription = itemDescription
+        self.itemHelp = itemHelp
         self.accessibilityIdentifier = accessibilityIdentifier
         self.frame = frame
         self.actions = actions

@@ -966,16 +966,22 @@ private struct PolicyLaneRow: View {
                     let candidates = model.applicationCandidates(in: policy)
                     let appleSystemCandidates = model.appleSystemCandidates(in: policy)
                     let systemItems = model.systemItems(in: policy)
+                    let clockItems = systemItems.filter {
+                        $0.observationIdentifier == SystemMenuBarItemObservation.clockIdentifier
+                    }
                     #if DEBUG
                     let exactSystemItems = model.exactSystemOrderingItems(in: policy)
                     let orderingItems = mixedOrderingItems(
                         applications: candidates,
                         systemItems: exactSystemItems
                     )
+                    let orderedIdentifiers = Set(exactSystemItems.map {
+                        $0.observation.observationIdentifier
+                    })
                     let residualSystemItems = systemItems.filter { observation in
-                        ExactSystemOrderingItem(
-                            observationIdentifier: observation.observationIdentifier
-                        )?.isOrderingOffered != true
+                        !orderedIdentifiers.contains(observation.observationIdentifier)
+                            && observation.observationIdentifier
+                                != SystemMenuBarItemObservation.clockIdentifier
                     }
                     let mixedLandingPreview = mixedLandingPreview(among: orderingItems)
                     #else
@@ -990,7 +996,8 @@ private struct PolicyLaneRow: View {
                     #endif
                     #if DEBUG
                     if candidates.isEmpty && exactSystemItems.isEmpty
-                        && residualSystemItems.isEmpty {
+                        && residualSystemItems.isEmpty && clockItems.isEmpty
+                        && (policy != .visible || model.unattributedMenuBarItems.isEmpty) {
                         ZStack(alignment: .leading) {
                             mixedOrderingStrip(
                                 orderingItems,
@@ -1010,11 +1017,16 @@ private struct PolicyLaneRow: View {
                                 systemBoardItem(item)
                             }
                         }
+                        unidentifiedMenuBarItems
+                        ForEach(clockItems, id: \.observationIdentifier) { item in
+                            systemBoardItem(item)
+                        }
                     }
                     #else
                     if candidates.isEmpty && appleSystemCandidates.isEmpty
                         && applicationLandingPreview == nil
-                        && appleSystemLandingPreview == nil && systemItems.isEmpty {
+                        && appleSystemLandingPreview == nil && systemItems.isEmpty
+                        && (policy != .visible || model.unattributedMenuBarItems.isEmpty) {
                         emptyState
                     } else {
                         applicationStrip(
@@ -1058,9 +1070,19 @@ private struct PolicyLaneRow: View {
                                 landingPreviewView(appleSystemLandingPreview)
                             }
 
-                            ForEach(systemItems, id: \.observationIdentifier) { item in
+                            ForEach(systemItems.filter {
+                                $0.observationIdentifier
+                                    != SystemMenuBarItemObservation.clockIdentifier
+                            }, id: \.observationIdentifier) { item in
                                 systemBoardItem(item)
                             }
+                        }
+                        unidentifiedMenuBarItems
+                        ForEach(systemItems.filter {
+                            $0.observationIdentifier
+                                == SystemMenuBarItemObservation.clockIdentifier
+                        }, id: \.observationIdentifier) { item in
+                            systemBoardItem(item)
                         }
                     }
                     #endif
@@ -1106,6 +1128,20 @@ private struct PolicyLaneRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(policy.interfaceTitle), \(applicationCount) applications")
         .accessibilityHint(policy.interfaceDetail)
+    }
+
+    @ViewBuilder
+    private var unidentifiedMenuBarItems: some View {
+        if policy == .visible && !model.unattributedMenuBarItems.isEmpty {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(width: 1, height: 34)
+                .padding(.horizontal, 3)
+                .accessibilityHidden(true)
+            ForEach(model.unattributedMenuBarItems, id: \.processIdentifier) { observation in
+                UnidentifiedMenuBarBoardItem(observation: observation)
+            }
+        }
     }
 
     private func acceptDiagnosticDrop(_ payloads: [PolicyDragPayload], _ location: CGPoint) -> Bool {
@@ -1850,9 +1886,9 @@ private struct PolicyLaneRow: View {
         destination: MenuBarBundlePolicy
     ) {
         #if DEBUG
-        if let item = ExactSystemOrderingItem(
-            observationIdentifier: bundleIdentifier
-        ), item.isOrderingOffered {
+        if let item = model.availableSystemOrderingItem(
+            for: bundleIdentifier
+        ) {
             let subjectID = OrderingSubjectID.systemItem(item)
             guard let source = model.orderingLayoutDraft?.policy(of: subjectID) else {
                 return
@@ -2409,6 +2445,57 @@ private struct NaturalAspectSystemIcon: View {
     }
 }
 
+private struct UnidentifiedMenuBarBoardItem: View {
+    let observation: UnattributedMenuBarItemObservation
+
+    private var owner: NSRunningApplication? {
+        NSWorkspace.shared.runningApplications.first {
+            $0.processIdentifier == observation.processIdentifier
+        }
+    }
+
+    private var presentation: (name: String, symbol: String, detail: String) {
+        let path = owner?.executableURL?.path ?? ""
+        if path == "/usr/libexec/GamePolicyAgent" {
+            return ("Game", "gamecontroller.fill",
+                    "Apple GamePolicyAgent owns this menu extra. Its exact item identity is unverified.")
+        }
+        if path.contains(".app/Contents/SharedSupport/Wine/")
+            && owner?.executableURL?.lastPathComponent == "wine" {
+            if observation.itemHelp == "战网" || observation.itemHelp == "Battle.net" {
+                return ("Battle.net", "wineglass.fill",
+                        "A Wine loader owns this menu extra; its Accessibility help identifies Battle.net. The Windows process is not a Blenny writer target.")
+            }
+            return ("Wine", "wineglass.fill",
+                    "A Wine loader owns this menu extra. The Windows program behind it is unverified.")
+        }
+        return (owner?.localizedName ?? "Unknown", "questionmark.app",
+                "This process owns a menu extra but has no application Bundle ID.")
+    }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Image(systemName: presentation.symbol)
+                .font(.system(size: 20))
+                .frame(width: BlennyDesign.itemFrame.width,
+                       height: BlennyDesign.itemFrame.height)
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 7.5))
+                        .foregroundStyle(.secondary)
+                        .padding(3)
+                }
+            Text(presentation.name)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: 54)
+        .help("\(presentation.detail) Blenny cannot manage it without an exact recovery-backed target. Refresh after the application changes.")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(presentation.name) menu bar item, process \(observation.processIdentifier), read only; \(presentation.detail)")
+    }
+}
+
 private struct SystemBoardItem: View {
     let observation: SystemMenuBarItemObservation
     let policy: MenuBarBundlePolicy
@@ -2565,7 +2652,9 @@ private struct SystemBoardItem: View {
 
     private var isOrderingDeferred: Bool {
         #if DEBUG
-        ExactSystemOrderingItem(observationIdentifier: observation.observationIdentifier)?.isOrderingOffered == false
+        model.availableSystemOrderingItem(
+            for: observation.observationIdentifier
+        ) == nil
         #else
         false
         #endif
@@ -2692,21 +2781,29 @@ private struct SystemBoardItem: View {
                 destinations: policyDestinations,
                 onMove: onMove
             )
-            #if DEBUG
-            Divider()
-            orderingMoveActions
-            #endif
         } else {
             #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
             if let target = sharedTrialTarget {
                 sharedTrialButton(target)
             } else {
+                #if DEBUG
+                Text(orderingSubjectID == nil
+                    ? "This macOS item is read only"
+                    : "Visibility is unavailable")
+                #else
                 Text("This macOS item is read only")
+                #endif
             }
             #else
             Text("This macOS item is read only")
             #endif
         }
+        #if DEBUG
+        if orderingSubjectID != nil {
+            Divider()
+            orderingMoveActions
+        }
+        #endif
     }
 
     #if DEBUG
@@ -2769,8 +2866,12 @@ private struct SystemBoardItem: View {
             return "Clock is fixed: it cannot be sorted or moved to another group. While Blenny manages visibility, open Notification Center by swiping left from the trackpad’s right edge; clicking Clock is unavailable on the tested macOS build."
         }
         #if DEBUG
-        if ExactSystemOrderingItem(observationIdentifier: observation.observationIdentifier)?.isOrderingOffered == false {
-            return description + "\nSorting is not supported in this version. Moving between Visible, Revealable, and Hidden remains available."
+        if model.availableSystemOrderingItem(
+            for: observation.observationIdentifier
+        ) == nil {
+            return description + "\n" + model.systemItemCapabilityExplanation(
+                for: observation.observationIdentifier
+            ) + "\nSorting is unavailable until its exact position preflight succeeds."
         }
         if orderingSubjectID != nil {
             return description + "\nThis exact system control participates independently in the reviewed configuration order."
@@ -2793,6 +2894,11 @@ private struct SystemBoardItem: View {
 
     private var controllabilityDescription: String {
         guard isControllable || hasSharedTrialControl else {
+            #if DEBUG
+            if orderingSubjectID != nil {
+                return "Exact sorting available; three-state visibility unavailable"
+            }
+            #endif
             if observation.observationIdentifier == SystemMenuBarItemObservation.clockIdentifier {
                 return "Read only; Clock is fixed by macOS"
             }
@@ -3041,21 +3147,22 @@ private struct SelectionDetailRail: View {
             return "Clock clicks may not open Notification Center while managing visibility. See Support for the trackpad gesture."
         }
         #if DEBUG
-        if ExactSystemOrderingItem(observationIdentifier: identifier)?.isOrderingOffered == false {
-            return "Visibility can change. Sorting is not supported."
+        if model.availableSystemOrderingItem(for: identifier) != nil,
+           model.systemItemPolicyDestinations(for: identifier)
+                == [.visible, .revealable, .hidden] {
+            return "Choose Visible, Revealable or Hidden. Drag to change its menu bar order."
         }
         #endif
         if model.systemItemPolicyDestinations(for: identifier)
             == [.visible, .revealable, .hidden] {
-            return "Choose Visible, Revealable or Hidden. macOS controls on-screen placement."
+            return "Choose Visible, Revealable or Hidden. Sorting requires a verified exact position."
         }
         #if DEBUG
-        if let item = ExactSystemOrderingItem(observationIdentifier: identifier),
-           model.orderingRow(for: .systemItem(item)) != nil {
+        if model.availableSystemOrderingItem(for: identifier) != nil {
             return "This exact system item can be reordered, but no three-state visibility policy is currently available."
         }
         #endif
-        return "This macOS item does not expose a three-state Blenny policy."
+        return model.systemItemCapabilityExplanation(for: identifier)
     }
 }
 
@@ -3308,7 +3415,7 @@ private struct SettingsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 ProductPageHeader(
                     title: "Settings",
-                    subtitle: "Permissions and startup."
+                    subtitle: "Permissions, startup, and updates."
                 )
 
             ProductPageSection(title: "Permission", systemImage: "hand.raised") {
@@ -3363,6 +3470,22 @@ private struct SettingsView: View {
                         .accessibilityValue(
                             model.launchAtLoginState.isToggleOn ? "On" : "Off"
                         )
+                    }
+                }
+            }
+
+            ProductPageSection(title: "Updates", systemImage: "arrow.triangle.2.circlepath") {
+                SettingsGridRow {
+                    Text("Software Updates")
+                } detail: {
+                    Text(actions.checkForUpdates == nil
+                         ? "An update feed is not configured for this build."
+                         : "Check for signed updates when you choose.")
+                        .foregroundStyle(.secondary)
+                } control: {
+                    if let checkForUpdates = actions.checkForUpdates {
+                        Button("Check for Updates…", action: checkForUpdates)
+                            .controlSize(.small)
                     }
                 }
             }

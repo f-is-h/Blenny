@@ -26,7 +26,7 @@ struct SystemOrderingCoreTests {
     @Test("Deferred sorting retains exact identities for historical recovery")
     func deferredProductAvailability() throws {
         #expect(ExactSystemOrderingItem.allCases.filter(\.isOrderingOffered)
-            == [.bluetooth, .wifi, .sound, .nowPlaying])
+            == [.bluetooth, .wifi, .sound, .nowPlaying, .spotlight])
         for item in [ExactSystemOrderingItem.siri, .timeMachine, .controlCenter] {
             #expect(!item.isOrderingOffered)
             #expect(ExactSystemOrderingItem(configurationKey: item.configurationKey) == item)
@@ -37,7 +37,7 @@ struct SystemOrderingCoreTests {
 
     @Test("The bounded catalog has stable item, key, host, and Board identities")
     func exactCatalogMappings() throws {
-        #expect(ExactSystemOrderingItem.allCases.count == 7)
+        #expect(ExactSystemOrderingItem.allCases.count == 8)
         for item in ExactSystemOrderingItem.allCases {
             #expect(ExactSystemOrderingItem(configurationKey: item.configurationKey) == item)
             #expect(ExactSystemOrderingItem(observationIdentifier: item.observationIdentifier) == item)
@@ -50,6 +50,23 @@ struct SystemOrderingCoreTests {
         #expect(ExactSystemOrderingItem(configurationKey: "module:Clock") == nil)
         #expect(ExactSystemOrderingItem(configurationKey: "module:AudioVideoModule") == nil)
         #expect(OrderingSubjectID(boardID: "system:clock") == nil)
+    }
+
+    @Test("Spotlight ordering requires its exact singleton Campo configuration key")
+    func spotlightNamespace() {
+        let item = ExactSystemOrderingItem.spotlight
+        let exact: [String: OrderingValue] = [
+            item.configurationKey: .real(113),
+            "module:Clock": .integer(90),
+        ]
+        #expect(item.admitsConfigurationTable(exact))
+        #expect(!item.admitsConfigurationTable(exact.merging([
+            "status:com.apple.campo::Item-1": .real(112)
+        ]) { _, new in new }))
+        #expect(!item.admitsConfigurationTable([item.configurationKey: .real(0)]))
+        #expect(ExactSystemOrderingItem(observationIdentifier:
+            "18:blenny-identity-v2|15:com.apple.campo|0:|9:spotlight|13:axmenubaritem|11:axmenuextra|1:0"
+        ) == .spotlight)
     }
 
     @Test("Control Center requires the exact singleton namespace and binary pins")

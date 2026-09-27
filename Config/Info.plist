@@ -19,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.11.0</string>
+	<string>0.12.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
@@ -32,6 +32,12 @@
 	<string>Blenny uses access to menu bar settings to save and undo the order you choose.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>SUPublicEDKey</key>
+	<string>5arG8vODzC8cPJDK43ESO54F5sVtQzxFZuFBcd0+NJc=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>UTExportedTypeDeclarations</key>

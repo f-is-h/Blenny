@@ -71,13 +71,29 @@ enum OrderingBoardLifecycleSelfCheck {
                     displayName: ExactSystemOrderingItem.siri.displayName,
                     observationCount: 1
                 ),
+                SystemMenuBarItemObservation(
+                    observationIdentifier: SystemMenuBarItemObservation.clockIdentifier,
+                    ownerBundleIdentifier: "com.apple.MenuBarAgent",
+                    displayName: "Clock", observationCount: 1
+                ),
+                SystemMenuBarItemObservation(
+                    observationIdentifier: "com.apple.menuextra.controlcenter",
+                    ownerBundleIdentifier: "com.apple.MenuBarAgent",
+                    displayName: "Control Center", observationCount: 1
+                ),
             ],
             blennyBundleIdentifier: blenny
         )
         let model = ProductInterfaceModel()
+        model.setSharedSystemItemTrial(.siri, presentation: .ready)
         model.display(
             model: editor, observationCount: observations.count,
             recoveryAvailable: false
+        )
+        try require(
+            model.systemItems(in: .visible).last?.observationIdentifier
+                == SystemMenuBarItemObservation.clockIdentifier,
+            "Clock must remain the last Visible system item"
         )
 
         setRows(model, alphaFirst: true)
@@ -92,6 +108,128 @@ enum OrderingBoardLifecycleSelfCheck {
                 for: siriObservationIdentifier
             )) == Set(MenuBarBundlePolicy.allCases),
             "deferred Siri ordering lost its three-state policy controls"
+        )
+        try require(
+            model.availableSystemOrderingItem(for: siriObservationIdentifier) == nil,
+            "deferred Siri sorting became available from its presentation row"
+        )
+        model.setSharedSystemItemTrial(.siri, presentation: .checking)
+        try require(
+            model.systemItemPolicyDestinations(for: siriObservationIdentifier).isEmpty,
+            "Siri remained editable while its exact visibility preflight was pending"
+        )
+        model.setSharedSystemItemTrial(.siri, presentation: .ready)
+        try require(
+            Set(model.systemItemPolicyDestinations(for: siriObservationIdentifier))
+                == Set(MenuBarBundlePolicy.allCases),
+            "Siri policy controls did not reopen after a ready preflight"
+        )
+        let absentNowPlaying = SystemMenuBarItemObservation(
+            observationIdentifier: SharedSystemItemTrialTarget.nowPlaying.observationIdentifier,
+            ownerBundleIdentifier: SharedSystemItemTrialTarget.nowPlaying.ownerBundleIdentifier,
+            displayName: "Now Playing", observationCount: 0
+        )
+        let retainedEditor = try PolicyEditorViewModel(
+            acceptedPolicy: accepted,
+            candidateInventory: inventory,
+            systemItems: [absentNowPlaying, absentNowPlaying],
+            blennyBundleIdentifier: blenny
+        )
+        let retainedModel = ProductInterfaceModel()
+        retainedModel.setSharedSystemItemTrial(.nowPlaying, presentation: .ready)
+        retainedModel.display(
+            model: retainedEditor, observationCount: observations.count,
+            recoveryAvailable: false
+        )
+        try require(
+            retainedModel.systemItems.filter {
+                $0.observationIdentifier == absentNowPlaying.observationIdentifier
+            }.count == 1,
+            "an absent persistent item was duplicated by the recovery placeholder"
+        )
+        let unobservedEditor = try PolicyEditorViewModel(
+            acceptedPolicy: accepted,
+            candidateInventory: inventory,
+            systemItems: [],
+            blennyBundleIdentifier: blenny
+        )
+        let unobservedModel = ProductInterfaceModel()
+        unobservedModel.setSharedSystemItemTrial(.nowPlaying, presentation: .ready)
+        unobservedModel.display(
+            model: unobservedEditor, observationCount: observations.count,
+            recoveryAvailable: false
+        )
+        try require(
+            unobservedModel.systemItems.allSatisfy {
+                $0.observationIdentifier != absentNowPlaying.observationIdentifier
+            },
+            "an unobserved ready item appeared as a Board placeholder"
+        )
+        unobservedModel.setSharedSystemItemTrial(
+            .nowPlaying, presentation: .recoveryRequired
+        )
+        try require(
+            unobservedModel.systemItems.filter {
+                $0.observationIdentifier == absentNowPlaying.observationIdentifier
+            }.count == 1,
+            "an absent item with a recovery receipt lost its restoration row"
+        )
+
+        let agentNowPlaying = SystemMenuBarItemObservation(
+            observationIdentifier: absentNowPlaying.observationIdentifier,
+            ownerBundleIdentifier: "com.apple.MenuBarAgent",
+            displayName: "Now Playing", observationCount: 1
+        )
+        let revealableNowPlayingPolicy = try PersistentBundlePolicyDocument(
+            managementEnabled: false,
+            policies: accepted.policies,
+            systemItemPolicies: [absentNowPlaying.observationIdentifier: .revealable]
+        )
+        let agentEditor = try PolicyEditorViewModel(
+            acceptedPolicy: revealableNowPlayingPolicy,
+            candidateInventory: inventory,
+            systemItems: [agentNowPlaying],
+            blennyBundleIdentifier: blenny
+        )
+        let agentModel = ProductInterfaceModel()
+        agentModel.setSharedSystemItemTrial(
+            .nowPlaying, presentation: .recoveryRequired
+        )
+        agentModel.display(
+            model: agentEditor, observationCount: observations.count,
+            recoveryAvailable: false
+        )
+        try require(
+            agentModel.systemItems.filter {
+                $0.observationIdentifier == agentNowPlaying.observationIdentifier
+            } == [agentNowPlaying],
+            "a live MenuBarAgent item was duplicated by its recovery placeholder"
+        )
+        try require(
+            Set(agentModel.systemItemPolicyDestinations(
+                for: agentNowPlaying.observationIdentifier
+            )) == Set(MenuBarBundlePolicy.allCases),
+            "a live MenuBarAgent item lost three-state recovery controls"
+        )
+
+        let unattributedInventory = PolicyCandidateInventory(observations: [])
+        let unattributedEditor = try PolicyEditorViewModel(
+            acceptedPolicy: accepted,
+            candidateInventory: unattributedInventory,
+            unattributedItems: [
+                .init(processIdentifier: 1234, observationCount: 1),
+            ],
+            blennyBundleIdentifier: blenny
+        )
+        let unattributedModel = ProductInterfaceModel()
+        unattributedModel.display(
+            model: unattributedEditor, observationCount: 1,
+            recoveryAvailable: false
+        )
+        try require(
+            unattributedModel.unattributedMenuBarItems.map(\.processIdentifier) == [1234]
+                && unattributedModel.model?.candidateInventory.candidates.isEmpty == true,
+            "an unattributed menu item must remain visible but never editable"
         )
 
         try runUnchangedDropCheck(model: model, alpha: alpha, beta: beta)
@@ -501,6 +639,7 @@ enum OrderingBoardLifecycleSelfCheck {
             blennyBundleIdentifier: blenny
         )
         let model = ProductInterfaceModel()
+        model.setSharedSystemItemTrial(.siri, presentation: .ready)
         model.display(
             model: editor,
             observationCount: observationsCount,

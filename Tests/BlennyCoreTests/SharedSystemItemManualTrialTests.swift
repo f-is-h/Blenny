@@ -27,6 +27,14 @@ struct SharedSystemItemManualTrialTests {
             observationIdentifier: "com.apple.controlcenter|:now playing|axmenubaritem"
         ) == .nowPlaying)
         #expect(SharedSystemItemTrialTarget.matchingSystemItem(
+            observationIdentifier:
+                "18:blenny-identity-v2|15:com.apple.campo|0:|9:spotlight|13:axmenubaritem|11:axmenuextra|1:0"
+        ) == .spotlight)
+        #expect(SharedSystemItemTrialTarget.matchingSystemItem(
+            observationIdentifier:
+                "18:blenny-identity-v2|18:com.apple.not-campo|0:|9:spotlight|13:axmenubaritem|11:axmenuextra|1:0"
+        ) == nil)
+        #expect(SharedSystemItemTrialTarget.matchingSystemItem(
             observationIdentifier: "com.apple.menuextra.clock"
         ) == nil)
         #expect(SharedSystemItemTrialTarget.siri.observationIdentifier
@@ -35,6 +43,8 @@ struct SharedSystemItemManualTrialTests {
             == "com.apple.menuextra.TimeMachine")
         #expect(SharedSystemItemTrialTarget.nowPlaying.observationIdentifier
             == "com.apple.menuextra.now-playing")
+        #expect(SharedSystemItemTrialTarget.spotlight.observationIdentifier
+            == "com.apple.menuextra.spotlight")
     }
 
     @Test("Persistent item hide proposals preserve exact unrelated target state")
@@ -64,6 +74,12 @@ struct SharedSystemItemManualTrialTests {
         ] == timeMachine.values[
             "NSStatusItem Preferred Position com.apple.menuextra.TimeMachine"
         ])
+
+        let spotlight = try makeSpotlightSnapshot()
+        let hiddenSpotlight = try spotlight.hidingProposal()
+        #expect(try hiddenSpotlight.values["NSStatusItem VisibleCC Item-0"]?
+            .optionalBoolean() == false)
+        #expect(try spotlight.acceptsAppliedHide(hiddenSpotlight))
     }
 
     @Test("Now Playing absent baseline restores as absence")
@@ -295,6 +311,7 @@ struct SharedSystemItemManualTrialTests {
         let backend = FakeSharedSystemItemTrialBackend(states: [
             .siri: try makeSiriSnapshot(),
             .timeMachine: try makeTimeMachineSnapshot(),
+            .spotlight: try makeSpotlightSnapshot(),
         ])
         let writer = SharedSystemItemManualTrialWriter(
             backend: backend, receiptDirectory: directory
@@ -506,6 +523,53 @@ struct SharedSystemItemManualTrialTests {
         #expect(backend.states[.timeMachine] == baseline)
     }
 
+    @Test("Spotlight ordinary reveal uses immediate readback and cleanup stays exact")
+    func spotlightOrdinaryRevealRoute() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeSpotlightSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(
+            states: [.spotlight: baseline], retainSpotlightPreferenceOnHide: true
+        )
+        let writer = SharedSystemItemManualTrialWriter(backend: backend, receiptDirectory: directory)
+        let identifier = SharedSystemItemTrialTarget.spotlight.observationIdentifier
+        try await writer.applyManagedPlan([identifier: .hidden])
+        try await writer.applyManagedPlan([identifier: .revealed])
+        #expect(backend.ordinaryRevealCounts[.spotlight] == 1)
+        #expect(backend.restoreCounts[.spotlight, default: 0] == 0)
+        #expect(try await writer.verifyManagedPlan([identifier: .revealed]))
+        try await writer.applyManagedPlan([identifier: .hidden])
+        #expect(await writer.restoreAllManagedItems())
+        #expect(backend.restoreCounts[.spotlight] == 1)
+        #expect(backend.states[.spotlight] == baseline)
+    }
+
+    @Test("A failed Spotlight reveal restores its hidden checkpoint and receipt")
+    func spotlightOrdinaryRevealFailure() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeSpotlightSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(
+            states: [.spotlight: baseline], retainSpotlightPreferenceOnHide: true
+        )
+        let writer = SharedSystemItemManualTrialWriter(backend: backend, receiptDirectory: directory)
+        let identifier = SharedSystemItemTrialTarget.spotlight.observationIdentifier
+        try await writer.applyManagedPlan([identifier: .hidden])
+        let hidden = backend.states[.spotlight]
+        let receiptURL = directory.appendingPathComponent("spotlight.json")
+        let receipt = try Data(contentsOf: receiptURL)
+        backend.failOrdinaryRevealVerification = true
+        await #expect(throws: SharedSystemItemTrialError.restorationFailed) {
+            try await writer.applyManagedPlan([identifier: .revealed])
+        }
+        #expect(backend.ordinaryRevealCounts[.spotlight] == 1)
+        #expect(backend.restoreCounts[.spotlight] == 1)
+        #expect(backend.states[.spotlight] == hidden)
+        #expect(try Data(contentsOf: receiptURL) == receipt)
+        #expect(await writer.restoreAllManagedItems())
+        #expect(backend.states[.spotlight] == baseline)
+    }
+
     @Test("Managed persistent items implement all three policy states")
     func managedThreeStateLifecycle() async throws {
         let directory = temporaryDirectory()
@@ -514,6 +578,7 @@ struct SharedSystemItemManualTrialTests {
             .nowPlaying: try makeNowPlayingSnapshot(),
             .siri: try makeSiriSnapshot(),
             .timeMachine: try makeTimeMachineSnapshot(),
+            .spotlight: try makeSpotlightSnapshot(),
         ]
         let backend = FakeSharedSystemItemTrialBackend(states: baselines)
         let writer = SharedSystemItemManualTrialWriter(
@@ -555,6 +620,51 @@ struct SharedSystemItemManualTrialTests {
         #expect(backend.maximumConcurrentMutations == 1)
     }
 
+    @Test("Spotlight getter may hide while its target preference remains unchanged")
+    func spotlightRetainedPreferenceLifecycle() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeSpotlightSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(
+            states: [.spotlight: baseline], retainSpotlightPreferenceOnHide: true
+        )
+        let writer = SharedSystemItemManualTrialWriter(
+            backend: backend, receiptDirectory: directory
+        )
+        let identifier = SharedSystemItemTrialTarget.spotlight.observationIdentifier
+        try await writer.applyManagedPlan([identifier: .hidden])
+        #expect(try await writer.verifyManagedPlan([identifier: .hidden]))
+        #expect(backend.states[.spotlight]?.effectiveVisible == false)
+        #expect(backend.states[.spotlight]?.values == baseline.values)
+        #expect(await writer.hasRecoveryReceipt(for: .spotlight))
+
+        try await writer.applyManagedPlan([identifier: .revealed])
+        #expect(try await writer.verifyManagedPlan([identifier: .revealed]))
+        #expect(backend.states[.spotlight] == baseline)
+        #expect(await writer.restoreAllManagedItems())
+        #expect(!(await writer.hasRecoveryReceipt(for: .spotlight)))
+    }
+
+    @Test("A Spotlight post-write mismatch restores its exact baseline")
+    func spotlightFailedVerificationRestores() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeSpotlightSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(
+            states: [.spotlight: baseline], failNextHideVerification: true,
+            retainSpotlightPreferenceOnHide: true
+        )
+        let writer = SharedSystemItemManualTrialWriter(
+            backend: backend, receiptDirectory: directory
+        )
+        await #expect(throws: SharedSystemItemTrialError.verificationFailed) {
+            try await writer.hide(.spotlight)
+        }
+        #expect(backend.states[.spotlight] == baseline)
+        #expect(backend.restoreCounts[.spotlight] == 1)
+        #expect(!(await writer.hasRecoveryReceipt(for: .spotlight)))
+    }
+
     @Test("Removing a persistent policy restores and relinquishes its receipt")
     func omittedTargetMeansRestored() async throws {
         let directory = temporaryDirectory()
@@ -584,6 +694,7 @@ struct SharedSystemItemManualTrialTests {
             .nowPlaying: try makeNowPlayingSnapshot(),
             .siri: try makeSiriSnapshot(),
             .timeMachine: try makeTimeMachineSnapshot(),
+            .spotlight: try makeSpotlightSnapshot(),
         ]
         let backend = FakeSharedSystemItemTrialBackend(
             states: baselines, failNextHideVerification: true
@@ -703,6 +814,14 @@ struct SharedSystemItemManualTrialTests {
         )
     }
 
+    private func makeSpotlightSnapshot() throws -> SharedSystemItemPreferenceSnapshot {
+        try SharedSystemItemPreferenceSnapshot(
+            target: .spotlight,
+            values: ["NSStatusItem VisibleCC Item-0": try ExactPreferenceValue(true)],
+            effectiveVisible: true
+        )
+    }
+
     private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("BlennySharedSystemItemTests-\(UUID().uuidString)")
@@ -723,19 +842,22 @@ private final class FakeSharedSystemItemTrialBackend: SharedSystemItemTrialBacke
     private var failNextHideVerification: Bool
     private let normalizeTimeMachineHide: Bool
     private let normalizeTimeMachineAfterFirstAppliedCapture: Bool
+    private let retainSpotlightPreferenceOnHide: Bool
     private var timeMachineNormalizationPending = false
 
     init(
         states: [SharedSystemItemTrialTarget: SharedSystemItemPreferenceSnapshot],
         failNextHideVerification: Bool = false,
         normalizeTimeMachineHide: Bool = false,
-        normalizeTimeMachineAfterFirstAppliedCapture: Bool = false
+        normalizeTimeMachineAfterFirstAppliedCapture: Bool = false,
+        retainSpotlightPreferenceOnHide: Bool = false
     ) {
         self.states = states
         self.failNextHideVerification = failNextHideVerification
         self.normalizeTimeMachineHide = normalizeTimeMachineHide
         self.normalizeTimeMachineAfterFirstAppliedCapture =
             normalizeTimeMachineAfterFirstAppliedCapture
+        self.retainSpotlightPreferenceOnHide = retainSpotlightPreferenceOnHide
     }
 
     func capture(_ target: SharedSystemItemTrialTarget) throws
@@ -786,13 +908,17 @@ private final class FakeSharedSystemItemTrialBackend: SharedSystemItemTrialBacke
             timeMachineNormalizationPending = true
         } else if target == .timeMachine, normalizeTimeMachineHide {
             states[target] = try normalizedTimeMachineHiddenState(from: state)
+        } else if target == .spotlight, retainSpotlightPreferenceOnHide {
+            states[target] = try SharedSystemItemPreferenceSnapshot(
+                target: .spotlight, values: state.values, effectiveVisible: false
+            )
         } else {
             states[target] = try state.hidingProposal()
         }
     }
 
     func restoreForOrdinaryReveal(_ snapshot: SharedSystemItemPreferenceSnapshot) async throws {
-        guard snapshot.target == .timeMachine else {
+        guard snapshot.target == .timeMachine || snapshot.target == .spotlight else {
             try await restoreExact(snapshot)
             return
         }
