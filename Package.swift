@@ -43,6 +43,7 @@ let package = Package(
             name: "BlennyLayoutProbe",
             dependencies: ["BlennyCore"]
         ),
+        .testTarget(name: "BlennyAppTests", dependencies: ["BlennyApp"]),
         .testTarget(
             name: "BlennyCoreTests",
             dependencies: ["BlennyCore"]

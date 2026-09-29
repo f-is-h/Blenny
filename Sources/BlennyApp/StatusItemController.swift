@@ -35,14 +35,19 @@ final class StatusItemController: NSObject {
     private let debugSaveBoundaryItem = NSMenuItem(title: "Save Boundary Snapshot",
         action: #selector(debugSaveBoundarySnapshot), keyEquivalent: "")
     #endif
-    private let permissionItem = NSMenuItem(title: "Accessibility: Checking…", action: nil, keyEquivalent: "")
-    private let managementStateItem = NSMenuItem(title: "Management: Checking…", action: nil, keyEquivalent: "")
+    private let openItem = NSMenuItem(title: "Open Blenny", action: #selector(openDiagnostics), keyEquivalent: "o")
     private let ordinaryRevealItem = NSMenuItem(title: "Expand Revealable Items", action: #selector(toggleOrdinaryReveal), keyEquivalent: "")
+    #if DEBUG
+    private let debugMenu = NSMenu(title: "Debug")
     private let refreshItem = NSMenuItem(title: "Refresh Menu Bar Items", action: #selector(refresh), keyEquivalent: "r")
+    #endif
+    private var isRefreshing = false
     private let resumeManagingItem = NSMenuItem(title: "Resume Managing", action: #selector(resumeManaging), keyEquivalent: "")
     private let stopManagingItem = NSMenuItem(title: "Stop Managing", action: #selector(stopManaging), keyEquivalent: "")
-    private let restorePreviousPolicyItem = NSMenuItem(title: "Restore Previous Visibility", action: #selector(restorePreviousPolicy), keyEquivalent: "")
-    private let menu = NSMenu()
+    let menu = NSMenu()
+    private let checkForUpdatesItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "")
+    private let onCheckForUpdates: () -> Void
+    private let canCheckForUpdates: () -> Bool
     private var hasDraftChanges = false
     private var requiresObservationRefresh = false
     private var interactionBusy = false
@@ -109,8 +114,12 @@ final class StatusItemController: NSObject {
         onStopManaging: @escaping () -> Void,
         onRestorePreviousPolicy: @escaping () -> Void,
         onQuit: @escaping () -> Void,
-        onVerifyNativeOverflowAfterSlotCompaction: @escaping () -> Void = {}
+        onVerifyNativeOverflowAfterSlotCompaction: @escaping () -> Void = {},
+        onCheckForUpdates: @escaping () -> Void = {},
+        canCheckForUpdates: @escaping () -> Bool = { false }
     ) {
+        self.onCheckForUpdates = onCheckForUpdates
+        self.canCheckForUpdates = canCheckForUpdates
         self.onOpenDiagnostics = onOpenDiagnostics
         self.onRefresh = onRefresh
         self.onRequestAccess = onRequestAccess
@@ -190,21 +199,26 @@ final class StatusItemController: NSObject {
 
     func setAccessibilityTrusted(_ trusted: Bool) {
         accessibilityTrusted = trusted
-        permissionItem.title = trusted ? "Accessibility: Granted" : "Accessibility: Not Granted"
         updateResumeAvailability()
+        updateCheckAvailability()
     }
 
     func setRefreshing(_ refreshing: Bool) {
+        isRefreshing = refreshing
+        #if DEBUG
         refreshItem.isEnabled = !refreshing && !hasDraftChanges && !interactionBusy
         refreshItem.title = refreshing ? "Refreshing Menu Bar Items…" : "Refresh Menu Bar Items"
+        #endif
     }
 
     func setDraftHasChanges(_ hasChanges: Bool, requiresObservationRefresh: Bool = false) {
         hasDraftChanges = hasChanges
         self.requiresObservationRefresh = requiresObservationRefresh
-        refreshItem.isEnabled = !hasChanges && !interactionBusy
+        #if DEBUG
+        refreshItem.isEnabled = !isRefreshing && !hasChanges && !interactionBusy
+        #endif
         updateResumeAvailability()
-        restorePreviousPolicyItem.isEnabled = currentRecoveryAvailable && !interactionBusy && !hasChanges && !requiresObservationRefresh
+        updateCheckAvailability()
     }
 
     func setManagementState(
@@ -217,31 +231,33 @@ final class StatusItemController: NSObject {
         currentManagementEnabled = persistedManagementEnabled
         currentRecoveryAvailable = recoveryAvailable
         self.hasRevealableBundles = hasRevealableBundles
-        let presentation = ProductManagementPresentation(state: state)
-        managementStateItem.title = presentation.title
-        managementStateItem.toolTip = presentation.detail
         switch state {
         case .active:
             ordinaryRevealItem.title = "Expand Revealable Items"
+            setMenuIcon(ordinaryRevealItem, symbol: "chevron.left.2")
             ordinaryRevealItem.isEnabled = true
         case .ordinaryRevealSession:
             ordinaryRevealItem.title = "Collapse Revealable Items"
+            setMenuIcon(ordinaryRevealItem, symbol: "chevron.right.2")
             ordinaryRevealItem.isEnabled = true
         default:
             ordinaryRevealItem.title = "Expand Revealable Items"
+            setMenuIcon(ordinaryRevealItem, symbol: "chevron.left.2")
             ordinaryRevealItem.isEnabled = false
         }
         ordinaryRevealItem.isEnabled = ordinaryRevealItem.isEnabled
             && hasRevealableBundles && !interactionBusy
         updateResumeAvailability()
+        updateCheckAvailability()
         stopManagingItem.isEnabled = persistedManagementEnabled && !interactionBusy
-        restorePreviousPolicyItem.isEnabled = recoveryAvailable && !interactionBusy && !hasDraftChanges && !requiresObservationRefresh
         updateNormalButton()
     }
 
     func setInteractionBusy(_ busy: Bool) {
         interactionBusy = busy
-        refreshItem.isEnabled = !busy && !hasDraftChanges
+        #if DEBUG
+        refreshItem.isEnabled = !isRefreshing && !busy && !hasDraftChanges
+        #endif
         setManagementState(
             currentManagementState,
             persistedManagementEnabled: currentManagementEnabled,
@@ -251,6 +267,13 @@ final class StatusItemController: NSObject {
     }
 
     private func updateResumeAvailability() {
+        let visibility = StatusMenuVisibility(
+            state: currentManagementState,
+            persistedManagementEnabled: currentManagementEnabled,
+            recoveryAvailable: currentRecoveryAvailable
+        )
+        resumeManagingItem.isHidden = !visibility.showsResume
+        stopManagingItem.isHidden = !visibility.showsStop
         resumeManagingItem.isEnabled = currentManagementState.canResume
             && accessibilityTrusted && !interactionBusy && !hasDraftChanges && !requiresObservationRefresh
     }
@@ -408,7 +431,12 @@ final class StatusItemController: NSObject {
         #if DEBUG
         updateFallbackSlotDiagnosticItem()
         #endif
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+        prepareMenuForPresentation()
+        // NSStatusBarButton coordinates need not be flipped. Anchor below the
+        // button, leaving screen-edge placement to AppKit.
+        let anchor = NSPoint(x: button.bounds.minX,
+            y: button.isFlipped ? button.bounds.maxY : button.bounds.minY)
+        menu.popUp(positioning: nil, at: anchor, in: button)
         return true
     }
 
@@ -742,9 +770,10 @@ final class StatusItemController: NSObject {
     ) {
         revealPrototypeToggle = onToggle
         debugStopManagingAndRestore = onStopManagingAndRestore
+        setMenuIcon(revealPrototypeStateItem, symbol: "info.circle")
         revealPrototypeStateItem.isEnabled = false
-        menu.insertItem(revealPrototypeStateItem, at: 0)
-        menu.insertItem(.separator(), at: 1)
+        debugMenu.insertItem(revealPrototypeStateItem, at: 0)
+        debugMenu.insertItem(.separator(), at: 1)
 
         guard let button = statusItem.button else { return }
         statusItem.menu = nil
@@ -902,52 +931,51 @@ final class StatusItemController: NSObject {
     }
 
     private func configureMenu() {
-        let openItem = NSMenuItem(title: "Open Blenny", action: #selector(openDiagnostics), keyEquivalent: "o")
-        let requestItem = NSMenuItem(title: "Set Up Access…", action: #selector(requestAccess), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Blenny", action: #selector(quit), keyEquivalent: "q")
 
         for item in [
             openItem,
-            refreshItem,
-            requestItem,
             ordinaryRevealItem,
             resumeManagingItem,
             stopManagingItem,
-            restorePreviousPolicyItem,
             quitItem,
         ] {
             item.target = self
         }
-        managementStateItem.isEnabled = false
         stopManagingItem.isEnabled = false
         ordinaryRevealItem.isEnabled = false
         resumeManagingItem.isEnabled = false
-        restorePreviousPolicyItem.isEnabled = false
-        permissionItem.isEnabled = false
-        stopManagingItem.toolTip = "Release visibility restrictions. Applied order stays unchanged."
-        resumeManagingItem.toolTip = "Use your saved visibility settings."
-        restorePreviousPolicyItem.toolTip = "Restore the previous visibility settings. Order stays unchanged."
-        quitItem.toolTip = "Quit and release visibility restrictions. Applied order stays unchanged."
 
+        menu.autoenablesItems = false
         menu.addItem(openItem)
-        menu.addItem(refreshItem)
+        if let image = blennyImage?.copy() as? NSImage {
+            image.size = NSSize(width: 16, height: 16)
+            openItem.image = image
+            openItem.preferredImageVisibility = .visible
+        }
+        setMenuIcon(ordinaryRevealItem, symbol: "chevron.left.2")
+        setMenuIcon(resumeManagingItem, symbol: "play")
+        setMenuIcon(stopManagingItem, symbol: "stop")
+        setMenuIcon(quitItem, symbol: "power")
+        setMenuIcon(checkForUpdatesItem, symbol: "arrow.triangle.2.circlepath")
+        checkForUpdatesItem.target = self
         menu.addItem(.separator())
-        menu.addItem(managementStateItem)
         #if DEBUG
         fallbackSlotDiagnosticItem.target = self
         fallbackSlotDiagnosticItem.action = #selector(copyFallbackSlotDiagnostic(_:))
         fallbackSlotDiagnosticItem.isEnabled = true
-        fallbackSlotDiagnosticItem.toolTip = "Click to copy the current fallback diagnostic."
-        menu.addItem(fallbackSlotDiagnosticItem)
-        let diagnosticMenu = NSMenu(title: "Boundary Diagnostics")
-        diagnosticMenu.autoenablesItems = false
+        debugMenu.autoenablesItems = false
+        refreshItem.target = self
+        debugMenu.addItem(refreshItem)
+        debugMenu.addItem(.separator())
+        debugMenu.addItem(fallbackSlotDiagnosticItem)
         let arm = NSMenuItem(title: "Arm Next Click Check",
             action: #selector(debugArmClickCheck), keyEquivalent: "")
         let open = NSMenuItem(title: "Open Saved Snapshots",
             action: #selector(debugOpenBoundarySnapshots), keyEquivalent: "")
         for item in [arm, debugSaveBoundaryItem, open] {
             item.target = self
-            diagnosticMenu.addItem(item)
+            debugMenu.addItem(item)
         }
         #if DEBUG
         let move = NSMenuItem(title: "Position Blenny Controls…",
@@ -957,22 +985,32 @@ final class StatusItemController: NSObject {
         for item in [move, restore] {
             item.target = self
             item.isEnabled = true
-            menu.addItem(item)
+            debugMenu.addItem(item)
         }
         #endif
-        let diagnosticParent = NSMenuItem(title: "Boundary Diagnostics", action: nil, keyEquivalent: "")
-        diagnosticParent.submenu = diagnosticMenu
-        menu.addItem(diagnosticParent)
+        let diagnosticParent = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
+        diagnosticParent.submenu = debugMenu
+        setMenuIcon(diagnosticParent, symbol: "ladybug")
+        for (item, symbol) in zip(
+            [refreshItem, fallbackSlotDiagnosticItem, arm, debugSaveBoundaryItem, open, move, restore],
+            ["arrow.clockwise", "info.circle", "cursorarrow", "camera", "folder", "arrow.left.arrow.right", "arrow.uturn.backward"]
+        ) { setMenuIcon(item, symbol: symbol) }
         #endif
         menu.addItem(ordinaryRevealItem)
         menu.addItem(resumeManagingItem)
         menu.addItem(stopManagingItem)
-        menu.addItem(restorePreviousPolicyItem)
+        menu.addItem(checkForUpdatesItem)
         menu.addItem(.separator())
-        menu.addItem(permissionItem)
-        menu.addItem(requestItem)
+        menu.addItem(linkItem("GitHub Sponsors", destination: ProductSupportLinks.menuSponsor))
+        menu.addItem(linkItem("Buy Me a Coffee", destination: ProductSupportLinks.koFi))
+        menu.addItem(linkItem("Website", destination: ProductSupportLinks.projectWebsite))
+        #if DEBUG
+        menu.addItem(diagnosticParent)
+        #endif
         menu.addItem(.separator())
         menu.addItem(quitItem)
+        updateResumeAvailability()
+        updateCheckAvailability()
         statusItem.menu = nil
         statusItem.button?.target = self
         statusItem.button?.action = #selector(handleNormalStatusButton(_:))
@@ -989,11 +1027,7 @@ final class StatusItemController: NSObject {
         if NSApp.currentEvent?.type == .rightMouseUp
             || revealPrototypeEntryPoint != .blennyFallback
             || !revealPrototypeEnabled {
-            menu.popUp(
-                positioning: nil,
-                at: NSPoint(x: 0, y: statusItem.button?.bounds.height ?? 0),
-                in: statusItem.button
-            )
+            _ = openNormalMenu()
             return
         }
         revealPrototypeToggle?()
@@ -1110,13 +1144,62 @@ final class StatusItemController: NSObject {
     }
     #endif
 
+    func prepareMenuForPresentation() {
+        menu.appearance = NSApp.effectiveAppearance
+        #if DEBUG
+        debugMenu.appearance = menu.appearance
+        #endif
+        updateCheckAvailability()
+    }
+
+    private func updateCheckAvailability() {
+        let available = canCheckForUpdates()
+        checkForUpdatesItem.isEnabled = available && !hasDraftChanges && !interactionBusy
+
+    }
+
+    @objc private func checkForUpdates() {
+        updateCheckAvailability()
+        guard checkForUpdatesItem.isEnabled else { return }
+        onCheckForUpdates()
+    }
+
+    private func setMenuIcon(_ item: NSMenuItem, symbol: String, color: NSColor? = nil) {
+        var image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        if let color {
+            image = image?.withSymbolConfiguration(.init(paletteColors: [color]))
+        }
+        image?.size = NSSize(width: 16, height: 16)
+        image?.isTemplate = color == nil
+        item.image = image
+        item.preferredImageVisibility = .visible
+    }
+
+    private func linkItem(_ title: String, destination: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(openLink(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = URL(string: destination)
+        let symbol = destination == ProductSupportLinks.koFi ? "cup.and.saucer"
+            : destination == ProductSupportLinks.menuSponsor ? "heart.fill" : "globe"
+        setMenuIcon(item, symbol: symbol,
+            color: destination == ProductSupportLinks.menuSponsor ? .systemRed : nil)
+        return item
+    }
+
+    @objc private func openLink(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     @objc private func openDiagnostics() {
         onOpenDiagnostics()
     }
 
+    #if DEBUG
     @objc private func refresh() {
         onRefresh()
     }
+    #endif
 
     @objc private func requestAccess() {
         onRequestAccess()

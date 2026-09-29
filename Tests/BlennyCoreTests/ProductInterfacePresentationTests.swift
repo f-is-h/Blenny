@@ -185,6 +185,6 @@ struct ProductInterfacePresentationTests {
             ProductSupportLinks.oneTimeSponsor
                 == "https://github.com/sponsors/f-is-h?frequency=one-time&metadata_project=blenny&metadata_source=app&metadata_placement=about"
         )
-        #expect(ProductSupportLinks.koFi == "https://ko-fi.com/1atte")
+        #expect(ProductSupportLinks.koFi == "https://ko-fi.com/blenny")
     }
 }

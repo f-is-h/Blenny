@@ -11,7 +11,9 @@ public enum ProductSupportLinks {
         "https://github.com/sponsors/f-is-h?frequency=recurring&metadata_project=blenny&metadata_source=app&metadata_placement=about"
     public static let oneTimeSponsor =
         "https://github.com/sponsors/f-is-h?frequency=one-time&metadata_project=blenny&metadata_source=app&metadata_placement=about"
-    public static let koFi = "https://ko-fi.com/1atte"
+    public static let menuSponsor =
+        "https://github.com/sponsors/f-is-h?metadata_project=blenny&metadata_source=app&metadata_placement=menu"
+    public static let koFi = "https://ko-fi.com/blenny"
 }
 
 public enum BlennyFishPlacement {

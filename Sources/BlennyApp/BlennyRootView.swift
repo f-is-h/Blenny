@@ -3415,13 +3415,13 @@ private struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 12) {
                 ProductPageHeader(
                     title: "Settings",
                     subtitle: "Permissions, startup, and updates."
                 )
 
-            ProductPageSection(title: "Permission", systemImage: "hand.raised") {
+            ProductPageSection(title: "Permission", systemImage: "hand.raised", spacing: 5) {
                 SettingsGridRow {
                     Label(
                         model.accessibilityTrusted
@@ -3442,7 +3442,7 @@ private struct SettingsView: View {
                 }
             }
 
-            ProductPageSection(title: "Startup", systemImage: "power") {
+            ProductPageSection(title: "Startup", systemImage: "power", spacing: 5) {
                 SettingsGridRow {
                     Text("Open at Login")
                 } detail: {
@@ -3477,7 +3477,7 @@ private struct SettingsView: View {
                 }
             }
 
-            ProductPageSection(title: "Updates", systemImage: "arrow.triangle.2.circlepath") {
+            ProductPageSection(title: "Updates", systemImage: "arrow.triangle.2.circlepath", spacing: 5) {
                 SettingsGridRow {
                     Text("Software Updates")
                 } detail: {
@@ -3487,7 +3487,7 @@ private struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 } control: {
                     if let checkForUpdates = actions.checkForUpdates {
-                        Button("Check for Updates…", action: checkForUpdates)
+                        Button("Check for Updates", action: checkForUpdates)
                             .controlSize(.small)
                     }
                 }
@@ -3495,7 +3495,9 @@ private struct SettingsView: View {
 
             }
             .frame(maxWidth: 640, alignment: .leading)
-            .padding(28)
+            .padding(.horizontal, 28)
+            .padding(.top, 28)
+            .padding(.bottom, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -3562,7 +3564,7 @@ private struct SupportView: View {
                                 Label("Sponsor monthly", systemImage: "heart.fill")
                             }
                             Button(action: actions.openKoFi) {
-                                Label("Ko-fi", systemImage: "cup.and.saucer.fill")
+                                Label("Buy Me a Coffee", systemImage: "cup.and.saucer.fill")
                             }
                         }
                         .font(.system(size: 13, weight: .medium))
@@ -3610,20 +3612,23 @@ private struct ProductPageHeader: View {
 private struct ProductPageSection<Content: View>: View {
     let title: String
     let systemImage: String
+    let spacing: CGFloat
     let content: Content
 
     init(
         title: String,
         systemImage: String,
+        spacing: CGFloat = 10,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.systemImage = systemImage
+        self.spacing = spacing
         self.content = content()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: spacing) {
             Label(title, systemImage: systemImage)
                 .font(.system(.callout, weight: .medium))
                 .foregroundStyle(.secondary)
@@ -3664,7 +3669,7 @@ private struct SettingsGridRow<Title: View, Detail: View, Control: View>: View {
             Spacer(minLength: 18)
             control
         }
-        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
     }
 }
 

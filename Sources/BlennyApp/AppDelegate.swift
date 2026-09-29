@@ -209,6 +209,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onQuit: { NSApplication.shared.terminate(nil) },
         onVerifyNativeOverflowAfterSlotCompaction: { [weak self] in
             self?.scheduleFallbackSlotVerification()
+        },
+        onCheckForUpdates: { [weak self] in self?.checkForUpdates(nil) },
+        canCheckForUpdates: { [weak self] in
+            self?.updaterController?.updater.canCheckForUpdates == true
         }
     )
 
