@@ -205,11 +205,24 @@ enum OrderingBoardLifecycleSelfCheck {
             } == [agentNowPlaying],
             "a live MenuBarAgent item was duplicated by its recovery placeholder"
         )
+        #if BLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL
         try require(
             Set(agentModel.systemItemPolicyDestinations(
                 for: agentNowPlaying.observationIdentifier
-            )) == Set(MenuBarBundlePolicy.allCases),
-            "a live MenuBarAgent item lost three-state recovery controls"
+            )) == [.visible, .revealable, .hidden],
+            "the isolated Now Playing trial lost its expected policy controls"
+        )
+        #else
+        try require(
+            Set(agentModel.systemItemPolicyDestinations(
+                for: agentNowPlaying.observationIdentifier
+            )).isEmpty,
+            "an assessment-incompatible item retained three-state controls"
+        )
+        #endif
+        try require(
+            agentModel.sharedSystemItemTrialTarget(for: agentNowPlaying.observationIdentifier) == .nowPlaying,
+            "an assessment-incompatible item lost its existing receipt recovery control"
         )
 
         let unattributedInventory = PolicyCandidateInventory(observations: [])
@@ -891,6 +904,41 @@ enum OrderingBoardLifecycleSelfCheck {
             ),
             expectedPolicyChange: false,
             message: "first ordering drag after missing-layout recovery was rejected"
+        )
+
+        // A clean Board may be re-seeded when a committed policy changes its
+        // lane membership during Resume. This is not a failed management
+        // transition and must not surface an application-scope error.
+        let changedPolicy = try PersistentBundlePolicyDocument(
+            managementEnabled: true,
+            policies: accepted.policies.map { entry in
+                entry.policy == .revealable
+                    ? .init(bundleIdentifier: entry.bundleIdentifier, policy: .visible) : entry
+            },
+            bluetoothPolicy: accepted.bluetoothPolicy,
+            systemItemPolicies: accepted.systemItemPolicies
+        )
+        let changedEditor = try stoppedEditor.synchronizingAcceptedPolicy(
+            changedPolicy, preservingDraft: false
+        )
+        let cleanBoard = ProductInterfaceModel()
+        cleanBoard.display(
+            model: stoppedEditor,
+            observationCount: observationsCount,
+            recoveryAvailable: false
+        )
+        setRows(cleanBoard, alphaFirst: true)
+        cleanBoard.initializeOrderingLayoutFromCurrentRows(force: true)
+        cleanBoard.display(
+            model: changedEditor,
+            observationCount: observationsCount,
+            recoveryAvailable: false,
+            preservingOrderingLayout: true
+        )
+        try require(
+            cleanBoard.orderingLayoutDraft != nil
+                && !cleanBoard.orderingPresentation.isError,
+            "a clean Board reported an error instead of rebuilding after policy change"
         )
     }
 

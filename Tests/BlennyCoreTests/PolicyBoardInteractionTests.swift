@@ -80,7 +80,7 @@ struct PolicyBoardInteractionTests {
         var coordinator = PolicyDraftAssignmentCoordinator(
             candidateGeneration: generation
         )
-        for target in SharedSystemItemTrialTarget.allCases {
+        for target in SharedSystemItemTrialTarget.allCases where target != .nowPlaying {
             let identifier = target.observationIdentifier
             let drag = PolicyDragPayload(
                 bundleIdentifier: identifier,

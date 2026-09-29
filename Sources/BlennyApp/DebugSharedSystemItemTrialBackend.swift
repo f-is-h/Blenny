@@ -138,17 +138,24 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
         _ snapshot: SharedSystemItemPreferenceSnapshot
     ) async throws {
         #if DEBUG
-        // Ordinary Time Machine and Spotlight reveal use immediate exact
-        // readback. Exact cleanup and compensation retain both recovery waits.
+        // Ordinary reveal uses immediate exact readback for the admitted
+        // targets. Exact cleanup and compensation retain both recovery waits.
         try await restoreSnapshot(
             snapshot,
-            waitsForSettlement: snapshot.target != .timeMachine
-                && snapshot.target != .spotlight
+            waitsForSettlement: Self.ordinaryRevealRequiresSettlement(snapshot.target)
         )
         #else
         try await restoreExact(snapshot)
         #endif
     }
+
+    #if DEBUG
+    static func ordinaryRevealRequiresSettlement(_ target: SharedSystemItemTrialTarget) -> Bool {
+        // Now Playing ordinary reveal uses a durable explicit-visible intent.
+        // Any exact restoration retains its historical recovery timing.
+        target != .timeMachine && target != .spotlight
+    }
+    #endif
 
     private func restoreSnapshot(
         _ snapshot: SharedSystemItemPreferenceSnapshot,

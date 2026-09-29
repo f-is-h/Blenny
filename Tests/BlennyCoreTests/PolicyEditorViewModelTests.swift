@@ -288,7 +288,7 @@ struct PolicyEditorViewModelTests {
             blennyBundleIdentifier: blenny
         )
 
-        for target in SharedSystemItemTrialTarget.allCases {
+        for target in SharedSystemItemTrialTarget.allCases where target != .nowPlaying {
             let identifier = target.observationIdentifier
             #expect(model.effectiveSystemItemPolicy(for: identifier) == .visible)
             #expect(model.assignSystemItem(identifier: identifier, to: .revealable) == .changed)
@@ -315,7 +315,6 @@ struct PolicyEditorViewModelTests {
         let composites = [
             "com.apple.systemuiserver|:siri|axmenubaritem",
             "com.apple.systemuiserver|:time machine|axmenubaritem",
-            "com.apple.controlcenter|:now playing|axmenubaritem",
             "18:blenny-identity-v2|15:com.apple.campo|0:|9:spotlight|13:axmenubaritem|11:axmenuextra|1:0",
         ]
         for composite in composites {
@@ -326,6 +325,39 @@ struct PolicyEditorViewModelTests {
             )
             #expect(model.assignSystemItem(identifier: canonical, to: .revealable) == .changed)
             #expect(model.effectiveSystemItemPolicy(for: canonical) == .revealable)
+        }
+        #endif
+    }
+
+    @Test("Now Playing legacy intent survives while new policy assignments are rejected")
+    func nowPlayingIsRecoveryOnly() throws {
+        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        let id = SharedSystemItemTrialTarget.nowPlaying.observationIdentifier
+        for saved in MenuBarBundlePolicy.allCases {
+            let accepted = try PersistentBundlePolicyDocument(
+                managementEnabled: false,
+                policies: [.init(bundleIdentifier: blenny, policy: .visible)],
+                systemItemPolicies: [id: saved]
+            )
+            var model = try PolicyEditorViewModel(
+                acceptedPolicy: accepted,
+                candidateInventory: PolicyCandidateInventory(observations: []),
+                systemItems: [], blennyBundleIdentifier: blenny
+            )
+            #expect(model.effectiveSystemItemPolicy(for: id) == nil)
+            for destination in MenuBarBundlePolicy.allCases {
+                #expect(model.assignSystemItem(identifier: id, to: destination) == .unknownCandidate)
+            }
+            #expect(model.draft.systemItemPolicies[id] == saved)
+            for presentation in [RevealSessionPresentation.baseline, .revealed] {
+                let plan = try RevealAllowlistPlanner.plan(
+                    presentation: presentation,
+                    assignments: BundlePolicyAssignments(visible: [blenny], revealable: [], hidden: []),
+                    observedRunningBundleIdentifiers: [], blennyBundleIdentifier: blenny,
+                    systemItemPolicies: [id: saved]
+                )
+                #expect(plan.persistentSystemItems[id] == .restored)
+            }
         }
         #endif
     }

@@ -757,7 +757,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hasRevealable = editorModel.map { model in
             model.acceptedPolicy.policies.contains { $0.policy == .revealable }
                 || model.acceptedPolicy.bluetoothPolicy == .revealable
-                || model.acceptedPolicy.systemItemPolicies.values.contains(.revealable)
+                || model.acceptedPolicy.systemItemPolicies.contains { identifier, policy in
+                    policy == .revealable
+                        && PersistentSystemItemPolicyCatalog.supportsManagement(for: identifier)
+                }
         } ?? false
         ordinaryReveal.synchronize(state, hasRevealableBundles: hasRevealable)
         updateNativeOverflowObservation()
@@ -2215,6 +2218,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func hideSharedSystemItem(_ target: SharedSystemItemTrialTarget) {
+        guard PersistentSystemItemPolicyCatalog.supportsManagement(
+            for: target.observationIdentifier
+        ) else { return }
         guard !isReadOnlyValidation, beginManagementInteraction() else { return }
         editorWindowController.setSharedSystemItemTrial(target, presentation: .busy)
         editorWindowController.setStatus(

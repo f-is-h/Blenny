@@ -24,6 +24,15 @@ public enum PersistentSystemItemPolicyCatalog {
     public static let items: [PersistentSystemItemPolicyCatalogItem] = []
     #endif
 
+    /// Retain legacy identity decoding for recovery, even when management is unavailable.
+    public static func supportsManagement(for identifier: String) -> Bool {
+        #if DEBUG && BLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL
+        return true
+        #else
+        identifier.lowercased() != "com.apple.menuextra.now-playing"
+        #endif
+    }
+
     public static func controllableItem(
         for identifier: String
     ) -> PersistentSystemItemPolicyCatalogItem? {

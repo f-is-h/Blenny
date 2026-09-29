@@ -46,6 +46,15 @@ enum BlennyMain {
         }
         #endif
         let application = NSApplication.shared
+        #if DEBUG
+        if ProcessInfo.processInfo.environment[DebugNowPlayingValidationDelegate.modeKey] != nil {
+            let delegate = DebugNowPlayingValidationDelegate()
+            application.delegate = delegate
+            application.setActivationPolicy(.accessory)
+            withExtendedLifetime(delegate) { application.run() }
+            return
+        }
+        #endif
         #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         if ProcessInfo.processInfo.environment[
             SharedSystemItemRecoveryDelegate.modeKey

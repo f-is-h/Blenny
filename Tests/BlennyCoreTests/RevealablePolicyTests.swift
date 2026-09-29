@@ -98,12 +98,12 @@ struct RevealablePolicyTests {
         #expect(baseline.persistentSystemItems == [
             SharedSystemItemTrialTarget.siri.observationIdentifier: .restored,
             SharedSystemItemTrialTarget.timeMachine.observationIdentifier: .hidden,
-            SharedSystemItemTrialTarget.nowPlaying.observationIdentifier: .hidden,
+            SharedSystemItemTrialTarget.nowPlaying.observationIdentifier: .restored,
         ])
         #expect(revealed.persistentSystemItems == [
             SharedSystemItemTrialTarget.siri.observationIdentifier: .restored,
             SharedSystemItemTrialTarget.timeMachine.observationIdentifier: .revealed,
-            SharedSystemItemTrialTarget.nowPlaying.observationIdentifier: .hidden,
+            SharedSystemItemTrialTarget.nowPlaying.observationIdentifier: .restored,
         ])
         #endif
     }

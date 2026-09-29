@@ -26,7 +26,7 @@ struct SystemOrderingCoreTests {
     @Test("Deferred sorting retains exact identities for historical recovery")
     func deferredProductAvailability() throws {
         #expect(ExactSystemOrderingItem.allCases.filter(\.isOrderingOffered)
-            == [.bluetooth, .wifi, .sound, .nowPlaying, .spotlight])
+            == [.bluetooth, .wifi, .sound, .spotlight])
         for item in [ExactSystemOrderingItem.siri, .timeMachine, .controlCenter] {
             #expect(!item.isOrderingOffered)
             #expect(ExactSystemOrderingItem(configurationKey: item.configurationKey) == item)

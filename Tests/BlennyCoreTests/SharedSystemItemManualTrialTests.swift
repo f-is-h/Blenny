@@ -82,6 +82,23 @@ struct SharedSystemItemManualTrialTests {
         #expect(try spotlight.acceptsAppliedHide(hiddenSpotlight))
     }
 
+    @Test("Suspended Now Playing accepts external hiding without writing or taking ownership")
+    func suspendedNowPlayingLeavesExternalStateUntouched() async throws {
+        let baseline = try makeNowPlayingSnapshot().hidingProposal()
+        let backend = FakeSharedSystemItemTrialBackend(states: [.nowPlaying: baseline])
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = SharedSystemItemManualTrialWriter(backend: backend, receiptDirectory: directory)
+        let plan: [String: PersistentSystemItemPresentation] = [
+            SharedSystemItemTrialTarget.nowPlaying.observationIdentifier: .restored
+        ]
+        try await writer.applyManagedPlan(plan)
+        #expect(try await writer.verifyManagedPlan(plan))
+        #expect(backend.states[.nowPlaying] == baseline)
+        #expect(backend.restoreCounts.isEmpty)
+        #expect(!(await writer.hasRecoveryReceipt(for: .nowPlaying)))
+    }
+
     @Test("Now Playing absent baseline restores as absence")
     func nowPlayingAbsenceRoundTripsExactly() throws {
         let baseline = try SharedSystemItemPreferenceSnapshot(
@@ -570,6 +587,127 @@ struct SharedSystemItemManualTrialTests {
         #expect(backend.states[.spotlight] == baseline)
     }
 
+    @Test("Now Playing default baselines keep an explicit reveal and survive process recovery")
+    func nowPlayingDefaultRevealAndCrashRecovery() async throws {
+        for value: UInt64? in [nil, 0, 16, 18] {
+            let directory = temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let baseline = try SharedSystemItemPreferenceSnapshot(target: .nowPlaying,
+                values: ["NowPlaying": ExactPreferenceValue(value.map { NSNumber(value: $0) })],
+                effectiveVisible: true)
+            let backend = FakeSharedSystemItemTrialBackend(states: [.nowPlaying: baseline])
+            let writer = SharedSystemItemManualTrialWriter(backend: backend, receiptDirectory: directory)
+            let identifier = SharedSystemItemTrialTarget.nowPlaying.observationIdentifier
+            try await writer.applyManagedPlan([identifier: .hidden])
+            let receiptURL = directory.appendingPathComponent("nowPlaying.json")
+            backend.beforeVisibilityMutation = { target, visible in
+                guard target == .nowPlaying, visible else { return }
+                let receipt = try? JSONDecoder().decode(SharedSystemItemTrialReceipt.self,
+                    from: Data(contentsOf: receiptURL))
+                #expect(receipt?.schemaVersion == 3)
+                #expect(receipt?.revealIntent != nil)
+            }
+            try await writer.applyManagedPlan([identifier: .revealed])
+            let shown = try #require(backend.states[.nowPlaying])
+            #expect(try shown.values["NowPlaying"]?.unsignedFlags() == ((value ?? 0) & ~UInt64(0xA)) | 2)
+            let receipt = try JSONDecoder().decode(SharedSystemItemTrialReceipt.self,
+                from: Data(contentsOf: receiptURL))
+            #expect(try receipt.acceptsOwnedRevealedCurrent(shown))
+            let drift = try SharedSystemItemPreferenceSnapshot(target: .nowPlaying,
+                values: ["NowPlaying": ExactPreferenceValue(NSNumber(value: 0x102))], effectiveVisible: true)
+            #expect(try !receipt.acceptsRestoreCurrent(drift))
+            let relaunched = SharedSystemItemManualTrialWriter(backend: backend, receiptDirectory: directory)
+            let recoveryPlan: [String: PersistentSystemItemPresentation] = [identifier: .restored]
+            try await relaunched.applyManagedPlan(recoveryPlan)
+            #expect(try await relaunched.verifyManagedPlan(recoveryPlan))
+            await relaunched.finalizeCommittedPlan(recoveryPlan)
+            #expect(await relaunched.restoreAllManagedItems())
+            #expect(backend.states[.nowPlaying] == baseline)
+            #expect(!(await relaunched.hasRecoveryReceipt(for: .nowPlaying)))
+        }
+    }
+
+    #if DEBUG && BLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL
+    @Test("Legacy Now Playing reveal restores the absent baseline and keeps the recovery receipt")
+    func nowPlayingLegacyReveal() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try SharedSystemItemPreferenceSnapshot(
+            target: .nowPlaying,
+            values: ["NowPlaying": ExactPreferenceValue(nil)],
+            effectiveVisible: true
+        )
+        let backend = FakeSharedSystemItemTrialBackend(states: [.nowPlaying: baseline])
+        let writer = SharedSystemItemManualTrialWriter(backend: backend, receiptDirectory: directory)
+        let identifier = SharedSystemItemTrialTarget.nowPlaying.observationIdentifier
+        try await writer.applyManagedPlan([identifier: .hidden])
+        try await writer.applyManagedPlan([identifier: .revealed])
+        #expect(backend.states[.nowPlaying] == baseline)
+        #expect(backend.restoreCounts[.nowPlaying] == 1)
+        #expect(await writer.hasRecoveryReceipt(for: .nowPlaying))
+        #expect(try await writer.verifyManagedPlan([identifier: .revealed]))
+        try await writer.applyManagedPlan([identifier: .hidden])
+        #expect(await writer.restoreAllManagedItems())
+        #expect(backend.states[.nowPlaying] == baseline)
+        #expect(!(await writer.hasRecoveryReceipt(for: .nowPlaying)))
+    }
+    #endif
+
+    @Test("Now Playing reveal retains explicit visibility until exact cleanup")
+    func nowPlayingOrdinaryRevealRoute() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeNowPlayingSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(
+            states: [.nowPlaying: baseline]
+        )
+        let writer = SharedSystemItemManualTrialWriter(backend: backend, receiptDirectory: directory)
+        let identifier = SharedSystemItemTrialTarget.nowPlaying.observationIdentifier
+        try await writer.applyManagedPlan([identifier: .hidden])
+        try await writer.applyManagedPlan([identifier: .revealed])
+        #expect(backend.ordinaryRevealCounts[.nowPlaying, default: 0] == 0)
+        #if DEBUG && BLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL
+        #expect(backend.restoreCounts[.nowPlaying, default: 0] == 1)
+        #else
+        #expect(backend.restoreCounts[.nowPlaying, default: 0] == 0)
+        #endif
+        #expect(try await writer.verifyManagedPlan([identifier: .revealed]))
+        try await writer.applyManagedPlan([identifier: .hidden])
+        #expect(await writer.restoreAllManagedItems())
+        #if DEBUG && BLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL
+        #expect(backend.restoreCounts[.nowPlaying] == 2)
+        #else
+        #expect(backend.restoreCounts[.nowPlaying] == 1)
+        #endif
+        #expect(backend.states[.nowPlaying] == baseline)
+    }
+
+    @Test("A failed NowPlaying reveal restores its hidden checkpoint and receipt")
+    func nowPlayingOrdinaryRevealFailure() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let baseline = try makeNowPlayingSnapshot()
+        let backend = FakeSharedSystemItemTrialBackend(
+            states: [.nowPlaying: baseline]
+        )
+        let writer = SharedSystemItemManualTrialWriter(backend: backend, receiptDirectory: directory)
+        let identifier = SharedSystemItemTrialTarget.nowPlaying.observationIdentifier
+        try await writer.applyManagedPlan([identifier: .hidden])
+        let hidden = backend.states[.nowPlaying]
+        let receiptURL = directory.appendingPathComponent("nowPlaying.json")
+        let receipt = try Data(contentsOf: receiptURL)
+        backend.failOrdinaryRevealVerification = true
+        await #expect(throws: SharedSystemItemTrialError.verificationFailed) {
+            try await writer.applyManagedPlan([identifier: .revealed])
+        }
+        #expect(backend.ordinaryRevealCounts[.nowPlaying, default: 0] == 0)
+        #expect(backend.restoreCounts[.nowPlaying] == 1)
+        #expect(backend.states[.nowPlaying] == hidden)
+        #expect(try Data(contentsOf: receiptURL) == receipt)
+        #expect(await writer.restoreAllManagedItems())
+        #expect(backend.states[.nowPlaying] == baseline)
+    }
+
     @Test("Managed persistent items implement all three policy states")
     func managedThreeStateLifecycle() async throws {
         let directory = temporaryDirectory()
@@ -897,10 +1035,15 @@ private final class FakeSharedSystemItemTrialBackend: SharedSystemItemTrialBacke
             throw SharedSystemItemTrialError.unsafeBaseline
         }
         if visible {
-            guard target == .siri else {
+            guard target == .siri || target == .nowPlaying else {
                 throw SharedSystemItemTrialError.unsafeBaseline
             }
-            states[target] = try state.siriRevealingProposal()
+            states[target] = try target == .nowPlaying
+                ? state.nowPlayingRevealingProposal() : state.siriRevealingProposal()
+            if target == .nowPlaying, failOrdinaryRevealVerification {
+                failOrdinaryRevealVerification = false
+                states[target] = state
+            }
         } else if target == .timeMachine, normalizeTimeMachineAfterFirstAppliedCapture {
             states[target] = try SharedSystemItemPreferenceSnapshot(
                 target: .timeMachine, values: state.values, effectiveVisible: false

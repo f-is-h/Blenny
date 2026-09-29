@@ -204,6 +204,10 @@ public enum RevealAllowlistPlanner {
                 throw RevealAllowlistPlannerError.invalidSystemItemPolicy(identifier)
             }
             if PersistentSystemItemPolicyCatalog.controllableItem(for: identifier) != nil {
+                guard PersistentSystemItemPolicyCatalog.supportsManagement(for: identifier) else {
+                    persistentSystemItems[identifier] = .restored
+                    continue
+                }
                 switch (presentation, policy) {
                 case (_, .visible):
                     persistentSystemItems[identifier] = .restored

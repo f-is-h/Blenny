@@ -277,6 +277,19 @@ public struct SharedSystemItemPreferenceSnapshot: Codable, Equatable, Sendable {
         return try Self(target: target, values: proposed, effectiveVisible: false)
     }
 
+    /// An ordinary Now Playing reveal must keep an explicit visible override.
+    /// Restoring an absent/default baseline here does not request native display.
+    public func nowPlayingRevealingProposal() throws -> Self {
+        try validate()
+        guard target == .nowPlaying, !effectiveVisible else {
+            throw SharedSystemItemTrialError.unsafeBaseline
+        }
+        let flags = try values["NowPlaying"]?.unsignedFlags() ?? 0
+        return try Self(target: .nowPlaying, values: [
+            "NowPlaying": ExactPreferenceValue(NSNumber(value: (flags & ~UInt64(0xA)) | 0x2))
+        ], effectiveVisible: true)
+    }
+
     /// The inspected Siri setter removes the stash key before changing the
     /// visible flag. This exact target-local result is narrow enough to record
     /// before an ordinary reveal setter runs. No equivalent Time Machine
@@ -342,6 +355,21 @@ public struct SharedSystemItemTrialReceipt: Codable, Equatable, Sendable {
         try validate()
     }
 
+    /// Schema 3 binds the temporary visible flags before their write. Older
+    /// readers reject this schema instead of guessing ownership during recovery.
+    public mutating func recordNowPlayingRevealIntent(
+        from current: SharedSystemItemPreferenceSnapshot
+    ) throws {
+        try validate()
+        guard baseline.target == .nowPlaying,
+              try baseline.acceptsAppliedHide(current) else {
+            throw SharedSystemItemTrialError.staleState
+        }
+        schemaVersion = 3
+        revealIntent = try current.nowPlayingRevealingProposal()
+        try validate()
+    }
+
     public func validate() throws {
         try baseline.validate()
         try proposed.validate()
@@ -355,11 +383,14 @@ public struct SharedSystemItemTrialReceipt: Codable, Equatable, Sendable {
         if let revealIntent, baseline.target == .siri {
             let expected = try proposed.siriRevealingProposal()
             revealIntentIsValid = revealIntent == expected
+        } else if let revealIntent, baseline.target == .nowPlaying, schemaVersion == 3 {
+            revealIntentIsValid = revealIntent == (try proposed.nowPlayingRevealingProposal())
         } else {
             revealIntentIsValid = revealIntent == nil
         }
-        guard [1, 2].contains(schemaVersion),
-              (schemaVersion == 2 || revealIntent == nil),
+        guard [1, 2, 3].contains(schemaVersion),
+              (schemaVersion >= 2 || revealIntent == nil),
+              (schemaVersion != 3 || baseline.target == .nowPlaying),
               runtime == .current(),
               baseline.target == proposed.target,
               baseline.effectiveVisible,
@@ -580,7 +611,9 @@ public actor SharedSystemItemManualTrialWriter {
                             await operationGate.release()
                             return false
                         }
-                    } else if !current.effectiveVisible {
+                    } else if PersistentSystemItemPolicyCatalog.supportsManagement(
+                        for: target.observationIdentifier
+                    ), !current.effectiveVisible {
                         await operationGate.release()
                         return false
                     }
@@ -702,14 +735,30 @@ public actor SharedSystemItemManualTrialWriter {
                 throw SharedSystemItemTrialError.staleState
             }
             if try receipt.acceptsOwnedRevealedCurrent(current) { return }
-            guard target == .siri else {
+            #if DEBUG && BLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL
+            if target == .nowPlaying {
+                // Reproduce the 0.8.0 ordinary reveal: the backend requests
+                // visible, waits for settlement, then restores the exact
+                // pre-hide value. The existing receipt owns both transitions.
+                try await backend.restoreExact(receipt.baseline)
+                guard try await backend.capture(target) == receipt.baseline else {
+                    throw SharedSystemItemTrialError.restorationFailed
+                }
+                return
+            }
+            #endif
+            guard target == .siri || target == .nowPlaying else {
                 try await backend.restoreForOrdinaryReveal(receipt.baseline)
                 guard try await backend.capture(target) == receipt.baseline else {
                     throw SharedSystemItemTrialError.restorationFailed
                 }
                 return
             }
-            try receipt.recordSiriRevealIntent(from: current)
+            if target == .nowPlaying {
+                try receipt.recordNowPlayingRevealIntent(from: current)
+            } else {
+                try receipt.recordSiriRevealIntent(from: current)
+            }
             // This receipt write is the crash boundary: it records the sole
             // non-baseline visible state cleanup may later take ownership of.
             try writeReceipt(receipt, for: target, withoutOverwriting: false)

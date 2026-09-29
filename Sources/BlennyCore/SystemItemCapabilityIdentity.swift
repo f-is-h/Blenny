@@ -7,6 +7,19 @@ public enum SystemItemCapabilityIdentity {
         for observation: SystemMenuBarItemObservation,
         retainedWhileAbsent: Bool = false
     ) -> String? {
+        guard let identifier = recoveryIdentifier(
+            for: observation, retainedWhileAbsent: retainedWhileAbsent
+        ), PersistentSystemItemPolicyCatalog.supportsManagement(for: identifier) else {
+            return nil
+        }
+        return identifier
+    }
+
+    /// Recovery recognition is independent from current product capability.
+    public static func recoveryIdentifier(
+        for observation: SystemMenuBarItemObservation,
+        retainedWhileAbsent: Bool = false
+    ) -> String? {
         guard observation.observationCount == 1
                 || (observation.observationCount == 0 && retainedWhileAbsent) else {
             return nil

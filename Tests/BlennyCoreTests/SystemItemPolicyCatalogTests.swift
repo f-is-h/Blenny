@@ -155,10 +155,12 @@ struct SystemItemPolicyCatalogTests {
             ownerBundleIdentifier: "com.apple.MenuBarAgent",
             displayName: "Now Playing", observationCount: 1
         )
-        #expect(SystemItemCapabilityIdentity.policyIdentifier(for: agentNowPlaying)
+        #expect(SystemItemCapabilityIdentity.recoveryIdentifier(for: agentNowPlaying)
             == agentNowPlaying.observationIdentifier)
+        #expect(SystemItemCapabilityIdentity.policyIdentifier(for: agentNowPlaying)
+            == nil)
         #expect(SystemItemCapabilityIdentity.orderingItem(for: agentNowPlaying)
-            == .nowPlaying)
+            == nil)
 
         for observation in [
             SystemMenuBarItemObservation(

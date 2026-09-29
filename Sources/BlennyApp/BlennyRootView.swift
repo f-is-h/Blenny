@@ -2902,6 +2902,9 @@ private struct SystemBoardItem: View {
             if observation.observationIdentifier == SystemMenuBarItemObservation.clockIdentifier {
                 return "Read only; Clock is fixed by macOS"
             }
+            if observation.observationIdentifier == "com.apple.menuextra.now-playing" {
+                return "Read only; macOS hides Now Playing while management is on, including when expanded"
+            }
             return "Read only; no verified policy interface"
         }
         #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL

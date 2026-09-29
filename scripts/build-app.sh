@@ -16,6 +16,7 @@ esac
 
 ordering_trial=${BLENNY_ORDERING_TRIAL:-NO}
 shared_system_item_trial=${BLENNY_SHARED_SYSTEM_ITEM_TRIAL:-NO}
+now_playing_legacy_trial=${BLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL:-NO}
 code_sign_identity=${BLENNY_CODE_SIGN_IDENTITY:--}
 update_feed_url=${BLENNY_UPDATE_FEED_URL:-}
 build_number_override=${BLENNY_BUILD_NUMBER:-}
@@ -45,6 +46,11 @@ if [[ "$ordering_trial" == "YES" ]]; then
   fi
 fi
 
+if [[ "$now_playing_legacy_trial" == "YES" && "$configuration" != "debug" ]]; then
+  print -u2 "BLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL=YES requires Debug"
+  exit 64
+fi
+
 if [[ "$ordering_trial" == "YES" && -z "${BLENNY_BUILD_ROOT:-}" ]]; then
   build_root="$repository_root/build/ordering-trial"
 else
@@ -53,6 +59,13 @@ fi
 
 scratch_directory="$build_root/swift"
 swift_build_options=()
+
+if [[ "$now_playing_legacy_trial" == "YES" ]]; then
+  swift_build_options+=(
+    -Xswiftc -DBLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL
+    -Xcc -DBLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL=1
+  )
+fi
 
 if [[ "$shared_system_item_trial" == "YES" ]]; then
   swift_build_options+=(

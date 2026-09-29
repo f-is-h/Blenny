@@ -283,8 +283,8 @@ public enum ExactSystemOrderingItem: String, Codable, CaseIterable, Hashable, Se
     /// These identities remain decodable so existing receipts can be restored.
     public var isOrderingOffered: Bool {
         switch self {
-        case .siri, .timeMachine, .controlCenter: false
-        case .bluetooth, .wifi, .sound, .nowPlaying: true
+        case .nowPlaying, .siri, .timeMachine, .controlCenter: false
+        case .bluetooth, .wifi, .sound: true
         case .spotlight:
             #if DEBUG
             true

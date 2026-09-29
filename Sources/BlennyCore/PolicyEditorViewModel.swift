@@ -414,6 +414,9 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
         if let item = PersistentSystemItemPolicyCatalog.controllableItem(
             for: observationIdentifier
         ) {
+            guard PersistentSystemItemPolicyCatalog.supportsManagement(for: item.identifier) else {
+                return nil
+            }
             return draft.systemItemPolicies[item.identifier] ?? .visible
         }
         guard let itemIdentifier = SystemItemPolicyCatalog.controllableItem(
@@ -448,7 +451,10 @@ public struct PolicyEditorViewModel: Equatable, Sendable {
         )?.identifier
         let itemIdentifier = persistentIdentifier
             ?? SystemItemPolicyCatalog.controllableItem(for: identifier)?.identifier
-        guard let itemIdentifier else { return .unknownCandidate }
+        guard let itemIdentifier,
+              PersistentSystemItemPolicyCatalog.supportsManagement(for: itemIdentifier) else {
+            return .unknownCandidate
+        }
         if persistentIdentifier == nil,
            !systemItems.contains(where: {
                $0.observationIdentifier.lowercased() == itemIdentifier.lowercased()

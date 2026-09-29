@@ -322,7 +322,7 @@ final class ProductInterfaceModel: ObservableObject {
             let presentation = sharedSystemItemTrialPresentation(for: target)
             guard presentation == .recoveryRequired,
                   !items.contains(where: {
-                      SystemItemCapabilityIdentity.policyIdentifier(
+                      SystemItemCapabilityIdentity.recoveryIdentifier(
                           for: $0, retainedWhileAbsent: $0.observationCount == 0
                       ) == target.observationIdentifier
                   }) else {
@@ -427,6 +427,16 @@ final class ProductInterfaceModel: ObservableObject {
         guard let observation = systemItem(
             observationIdentifier: observationIdentifier
         ) else { return "Refresh to check this system item." }
+        #if DEBUG && BLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL
+        if observation.observationIdentifier == "com.apple.menuextra.now-playing" {
+            return "Experimental 0.8.0 reveal timing trial. Verify physical display after Resume and expand; Stop restores the original setting."
+        }
+        #endif
+        if let item = PersistentSystemItemPolicyCatalog.controllableItem(
+            forObservationIdentifier: observationIdentifier
+        ), !PersistentSystemItemPolicyCatalog.supportsManagement(for: item.identifier) {
+            return "macOS hides Now Playing while management is on, even when expanded. Stop management to show it. Existing settings can still be restored."
+        }
         if observation.observationIdentifier == SystemMenuBarItemObservation.clockIdentifier {
             return "Clock is fixed on this macOS build."
         }
@@ -510,13 +520,17 @@ final class ProductInterfaceModel: ObservableObject {
     ) -> SharedSystemItemTrialTarget? {
         guard let observation = systemItem(
             observationIdentifier: observationIdentifier
-        ), let identifier = SystemItemCapabilityIdentity.policyIdentifier(
+        ), let identifier = SystemItemCapabilityIdentity.recoveryIdentifier(
             for: observation,
             retainedWhileAbsent: observation.observationCount == 0
         ) else { return nil }
         guard let target = SharedSystemItemTrialTarget.allCases.first(where: {
             $0.observationIdentifier == identifier
         }), observation.observationCount == 1
+                || sharedSystemItemTrialPresentation(for: target) == .recoveryRequired else {
+            return nil
+        }
+        guard PersistentSystemItemPolicyCatalog.supportsManagement(for: identifier)
                 || sharedSystemItemTrialPresentation(for: target) == .recoveryRequired else {
             return nil
         }
@@ -616,9 +630,23 @@ final class ProductInterfaceModel: ObservableObject {
         if preservingOrderingLayout {
             if let previousOrderingLayout {
                 if !restoreOrderingLayoutDraft(previousOrderingLayout) {
-                    setOrderingStatus(
-                        "The application scope changed during the management transition. Refresh the Board before arranging again."
-                    )
+                    if !previousOrderingLayout.hasChanges {
+                        // A clean layout is only a presentation baseline. Policy
+                        // or capability changes may invalidate it after a commit.
+                        initializeOrderingLayoutFromCurrentRows(force: true)
+                        if orderingLayoutDraft == nil {
+                            setOrderingStatus(
+                                "Management changed successfully, but the Board could not rebuild its ordering layout. Refresh before arranging."
+                            )
+                        } else {
+                            orderingPresentation.isError = false
+                            orderingPresentation.message = ""
+                        }
+                    } else {
+                        setOrderingStatus(
+                            "Management changed successfully, but the ordering draft could not be rebound to the current Board. Refresh before arranging again."
+                        )
+                    }
                 }
             } else if orderingPresentation.hasObservation {
                 // A preceding build or interrupted transition may already have
