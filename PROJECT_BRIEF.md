@@ -1,13 +1,31 @@
 # Blenny
 
+Version **0.13.0 completed as a local experimental milestone on 2026-09-29**,
+including the right-click menu, owner-selected v13 application artwork,
+face-silhouette menu bar icon, and Settings layout correction.
+Now Playing is recovery-only after the full managed reveal
+failed: macOS assessment filters its Control Center item without a system
+identifier. Excluding it from writes does not make it visible during management. See the
+[0.13.0 technical spike](docs/TECH_SPIKE_0.13.0.md) and
+[release record](docs/RELEASE_0.13.0.md). The next version is 1.0.0, with final
+checks planned in a separate session. No push or publication is authorized.
+
+The Resume investigation on macOS 27 build `26A428` also establishes that an
+application's valid process Bundle ID may become a nil menu-item host identity
+when MenuBarAgent cannot read its executable directory. Betta's Applications
+versus desktop contrast has matching sandbox evidence; the owner's Full Disk
+Access grant to Blenny did not change MenuBarAgent's access results.
+See the [identity and permission investigation](docs/RESUME_VISIBILITY_INVESTIGATION_0.13.0.md).
+This is an inspected-host limitation, not a universal Applications-only rule.
+
 > A minimal, native menu bar organizer for macOS 27 and later.
 
-> Version 0.12.0 completed as a local experimental milestone on 2026-09-27.
-> Public release remains a later milestone after the planned 0.13.0 iteration.
+> Version 0.13.0 is a completed local milestone, not a public release candidate.
+> The planned 1.0.0 must satisfy the remaining public and stable-release gates.
 
 ## Current status
 
-Current phase: `0.12.0` complete as a local experimental milestone on 2026-09-27.
+Current phase: `0.13.0` complete as a local experimental milestone; `1.0.0` is next.
 The 0.11.0 owner-accepted milestone was completed on 2026-09-25.
 
 The 0.12.0 scope includes self-signed signing continuity, local Sparkle
@@ -46,9 +64,11 @@ For the 0.12.0 system-icon follow-up, Board editing is assessed per observed
 item and operation. Exact owner identity and a ready item-specific visibility
 target can expose three-state policy; an eligible exact position row separately
 controls sorting. Artwork and a recognized name alone confer neither ability.
-The installed Debug Build 41 exposes an observed Now Playing item through its
+The historical Debug Build 41 exposed an observed Now Playing item through its
 existing target after the Apple-agent exact-ID check; Focus remains read-only.
 No new physical Now Playing or Focus mutation was performed in that build.
+The 0.13.0 investigation supersedes those Now Playing controls: the item is
+recovery-only and cannot remain visible under the inspected assessment filter.
 Weather and Input Menu retain their exact-owner ordering route. The native
 overflow arrow has no established writable ordering identity, so fish/arrow
 adjacency is not a product guarantee. Accepted explicit Blenny control placement
@@ -66,12 +86,14 @@ The future public release retains all outstanding gates: final onboarding and
 accessibility review, stable signing and permission continuity, Release ordering
 promotion, install/update/uninstall and interrupted-recovery validation, broader
 compatibility, license selection, notarization and publication audit. This local
-milestone does not satisfy those gates or authorize a push. Version 0.13.0 is
-planned for right-click menu productization, Debug feature cleanup, and menu-bar
-and application icon replacement. See [the roadmap](docs/ROADMAP.md) and
-[the 0.12.0 technical spike](docs/TECH_SPIKE_0.12.0.md).
+milestone does not satisfy those gates or authorize a push. The completed
+0.13.0 includes the menu and icon work, Settings correction, recovery-only Now
+Playing capability, and host-identity investigation. Wider Debug cleanup was
+deferred. Version 1.0.0 is the next planned version; final review belongs to a
+separate session. See [the roadmap](docs/ROADMAP.md) and
+[the 0.13.0 release record](docs/RELEASE_0.13.0.md).
 
-Local packages identify candidates as `0.12.0 (Build N)`. Build numbers advance
+Local packages identify candidates as `0.13.0 (Build N)`. Build numbers advance
 from ignored local state and do not themselves complete a milestone.
 
 ## Current product contract

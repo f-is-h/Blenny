@@ -1020,12 +1020,37 @@ verified full replacement. Neither Gaming nor Wine preservation is marked fixed.
 
 ## 0.13.0 — Product presentation and controls
 
-Status: **Planned.** Productize the right-click menu, organize Debug-only
-controls, and replace the menu-bar and application icons. Scope and exit tests
-will be defined before implementation. This is not designated as the final
-version before publication.
+Status: **Complete local experimental milestone**, 2026-09-29. The scope includes right-click menu cleanup
+and the owner's subsequently selected v13 application artwork and face-silhouette
+A menu bar icon. Wider Debug cleanup remains deferred.
+The owner also requested correcting Settings overflow after the Updates section
+was added. Keep the established 420-point window and fit all three settings
+sections at both normal and minimum widths without page scrolling.
+Keep state-aware daily controls, existing recovery and draft protection, and
+compile development menu entries only under `DEBUG`. Validate Debug and ordinary
+Release builds and deterministic behavior; distinguish these from attended
+menu interaction and live restoration. See [the technical spike](TECH_SPIKE_0.13.0.md).
+The owner subsequently authorized investigation of ordinary-reveal delay and
+Now Playing failure. The owner subsequently requested investigation and repair
+before exclusion, superseding the Build 66 quarantine. Build 67 tested an explicit
+visible override with durable exact recovery, but owner testing still failed
+under assessment. The current follow-up isolates the native Control Center
+identifier filter and makes Now Playing recovery-only. Excluding writes cannot
+preserve its physical visibility while assessment remains active.
+Xcode 27 Debug passed 645 tests and ordinary Release passed 338; signed Debug
+Build 81 and ordinary Release Build 82, the packaged Board lifecycle check,
+Release exclusion checks, and the repository audit passed. Real Now Playing
+trial restoration and owned-probe cleanup are verified; accepted policy and Undo
+remain intact. Physical menu/Settings acceptance, accessibility, update delivery,
+and broader compatibility remain separate checks. See the
+[release record](RELEASE_0.13.0.md). No push or public distribution is authorized.
 
-## Future public release — Version to be assigned
+## 1.0.0 — First public and stable release
+
+Status: **Planned next version.** The owner chose 1.0.0 directly after 0.13.0
+and will perform the final checks in a separate session. This supersedes the
+unassigned public-release version and earlier 0.12.x candidate plan; it does
+not waive any gate below or start 1.0.0 implementation in this milestone.
 
 Publish the repository and signed prerelease together only when:
 
@@ -1058,7 +1083,7 @@ Publish the repository and signed prerelease together only when:
   build until a replacement backend passes the full interaction, three-state,
   failure and recovery matrix. Do not add automatic Stop/Resume around clicks.
 
-## 1.0.0 — Stable release
+### Stable-release acceptance
 
 Release when:
 

@@ -1,8 +1,16 @@
 # Blenny
 
-> Version 0.12.0 completed as a local macOS 27 experimental milestone on
-> 2026-09-27. It is not a public release candidate. See the
-> [release record](docs/RELEASE_0.12.0.md) and [roadmap](docs/ROADMAP.md).
+Version **0.13.0 completed as a local experimental milestone on 2026-09-29**,
+including the right-click menu, owner-selected v13 application artwork,
+face-silhouette menu bar icon, and Settings layout correction.
+Now Playing is recovery-only after the full managed reveal
+failed: macOS assessment filters its Control Center item without a system
+identifier. Excluding it from writes does not make it visible during management. See the
+[0.13.0 technical spike](docs/TECH_SPIKE_0.13.0.md).
+
+> The next version is 1.0.0, with final checks planned in a separate session.
+> This local milestone does not pass the public distribution gates. See the
+> [release record](docs/RELEASE_0.13.0.md) and [roadmap](docs/ROADMAP.md).
 
 
 Blenny is a minimal, native menu bar organizer for macOS 27 and later. It uses
@@ -13,7 +21,7 @@ three explicit intent areas:
   a bounded reveal session.
 - **Hidden** items stay out of ordinary reveal sessions.
 
-Policy is owned at the application bundle level. The current experimental 0.12.0
+Policy is owned at the application bundle level. The current experimental 0.13.0
 configuration also retains reviewed preferred-position changes for attributable
 third-party owners. Every configured key associated with one owner moves as a
 block, and the same serial coordinator, durable receipt and bounded verification
@@ -21,11 +29,13 @@ contract protect policy and ordering writes.
 
 ## Current status
 
-Version `0.12.0` completed as a local experimental milestone. Its tested
-scope includes self-signed build continuity, opt-in Sparkle packaging, startup
-Resume, Dock presentation, system-item Board capabilities, and the accepted
-Build 59 Resume behavior. The unbundled Gaming and Wine visibility limitation
-remains open; see [Known limitations](docs/KNOWN_LIMITATIONS.md).
+Version `0.13.0` completed as a local experimental milestone. Its tested scope
+includes state-aware daily menu controls, Debug-only menu entries, native menu
+presentation, updated support links and icons, fixed-height Settings layout,
+and a clean Board rebuild after management transitions. Existing self-signed
+continuity, startup Resume, recovery and draft protection are retained.
+Now Playing, Gaming and Wine visibility limitations remain open; see
+[Known limitations](docs/KNOWN_LIMITATIONS.md).
 
 On macOS 27.0 build `26A428`, the owner confirms Build 15 native dragging and
 Apply work normally after the shared application/system drag-source correction.
@@ -49,14 +59,13 @@ ordinary ordering Undo. Once enabled, placement follows successful Organize Appl
 and ordering Undo; Undo Control Placement turns this adjustment off. Expansion and collapse do
 not reposition it, and a fixed screen coordinate is not promised.
 
-The planned 0.13.0 iteration owns right-click menu productization, Debug
-feature cleanup, and replacement menu-bar and app icons. Public release remains
-a later milestone, with onboarding/accessibility acceptance, Release ordering
-review, licensing, signing, installation/update and publication gates still
-open. One canonical repository remains the publication model;
+Version 1.0.0 is the next planned version. Final review must cover
+onboarding/accessibility, ordinary Release ordering, licensing, signing,
+installation/update, compatibility and publication gates. Wider Debug feature
+cleanup was deferred from 0.13.0. One canonical repository remains the publication model;
 changing visibility or publishing any ref is a separate action. See
-[the 0.11.0 technical spike](docs/TECH_SPIKE_0.11.0.md) for the final fixes and
-superseded investigation steps, and [the roadmap](docs/ROADMAP.md) for open gates.
+[the 0.13.0 release record](docs/RELEASE_0.13.0.md) for verified scope and
+remaining limits, and [the roadmap](docs/ROADMAP.md) for open gates.
 Earlier results remain in [the 0.9.0 spike](docs/TECH_SPIKE_0.9.0.md) and
 [the historical notes](docs/HISTORICAL_DEVELOPMENT_NOTES.md).
 
