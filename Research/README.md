@@ -16,6 +16,9 @@ product behavior is defined by [the project brief](../PROJECT_BRIEF.md),
   broad no-go; the original results remain useful historical evidence.
 - [`0.8.0/`](0.8.0/README.md) records system-item identity, ABI and inverse-model
   research. The probes remain separate from product targets.
+- [`0.13.0/`](0.13.0/README.md) contains original read-only host-identity and
+  sandbox-path probes, plus bounded owned-file comparisons with exact cleanup.
+  It creates no status items and cannot establish physical Resume visibility.
 - [`OrderingAdoptionProbe/`](OrderingAdoptionProbe/README.md) is the archived
   build-specific ordering experiment. It can perform real preference mutation;
   its own snapshot, authorization and exact-inverse requirements apply to every

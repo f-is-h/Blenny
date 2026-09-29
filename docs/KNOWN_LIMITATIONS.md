@@ -109,6 +109,32 @@ revocation remain unverified, as does the full Stop/Quit/relaunch/reboot matrix
 for a replacement backend. See the
 [investigation and handoff](UNBUNDLED_MENU_EXTRA_COMPATIBILITY_0.12.0.md).
 
+## Application location can prevent status-item bundle identity
+
+On macOS 27 build `26A428`, the external-process identity route used by AppKit
+checks whether MenuBarAgent can read the client's executable directory before
+reading its bundle information. A denied check produces a nil status-item host
+Bundle ID, which active assessment rejects even when the running application has
+a valid Bundle ID and is present in Blenny's allow-list.
+
+The owner-observed Betta Applications/desktop contrast now has matching read-only
+sandbox evidence: global Applications is permitted; its desktop and development
+`dist` paths are denied. Identical owned probe packages identify themselves
+correctly in all tested locations, but MenuBarAgent's read check denies user
+Applications, LocalData and temporary copies. This is a current-host access
+restriction, not a universal hard-coded Applications requirement. Native admission
+and Launch Services registration do not override the subsequent nil-ID filter.
+Moving an app should be followed by quitting it and launching the installed copy,
+because the host identity is stored when the status-item host is constructed.
+See the [completed investigation](RESUME_VISIBILITY_INVESTIGATION_0.13.0.md) for
+the identity chain, owned-copy checks and remaining physical-test limits.
+
+The owner also enabled Full Disk Access for Blenny. The on toggle and a changed
+Blenny process were independently observed, but MenuBarAgent's three Betta path queries
+remained unchanged. This Blenny permission is not a remedy for the separate
+MenuBarAgent reader restriction. Full Disk Access for MenuBarAgent itself was
+not tested and must not be advertised as a verified repair.
+
 ## 0.10.0 local milestone
 
 See [the release record](RELEASE_0.10.0.md) for accepted scope and remaining 0.11.0
@@ -117,3 +143,16 @@ position verification. A stale accepted control-placement record needs explicit
 review; it is not automatically overwritten. Unified Undo restores the latest
 Apply but fails closed when policy or runtime identity has changed and does not
 automatically resume management. Old order-only receipts retain their old scope.
+
+
+## Now Playing is hidden by active management on macOS 27 build 26A428
+
+The owner confirmed that Now Playing still fails to appear when expanded in
+0.13.0 Build 67, despite a verified explicit-visible preference. The native
+Control Center item has no assessment system identifier and is filtered while
+assessment is active. This is separate from the missing application Bundle ID
+case for Gaming/Wine. Blenny now offers recovery only for Now Playing, retaining
+old receipts and saved intent without new visibility or ordering writes.
+Exclusion from Blenny writes does not exempt it from macOS assessment filtering.
+Stop management to release that restriction. See the
+[0.13.0 investigation](TECH_SPIKE_0.13.0.md) for evidence and verification limits.
