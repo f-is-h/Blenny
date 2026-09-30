@@ -1,0 +1,46 @@
+name: Prepare release documents
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Marketing version X.Y.Z
+        required: true
+        type: string
+      date:
+        description: Reviewed release date YYYY-MM-DD
+        required: true
+        type: string
+      previous_public_tag:
+        description: Previous public vX.Y.Z tag (empty for first public release)
+        required: false
+        type: string
+permissions: {}
+concurrency:
+  group: release-preparation
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.repository == 'f-is-h/Blenny' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PREPARE_VERSION: ${{ inputs.version }}
+      PREPARE_DATE: ${{ inputs.date }}
+      PREVIOUS_PUBLIC_TAG: ${{ inputs.previous_public_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Generate reviewable preparation PR
+        shell: bash
+        run: |
+          args=(--version "$PREPARE_VERSION" --date "$PREPARE_DATE")
+          if [[ -n "$PREVIOUS_PUBLIC_TAG" ]]; then
+            args+=(--previous-public-tag "$PREVIOUS_PUBLIC_TAG")
+          fi
+          python3 scripts/ci-prepare-release.py "${args[@]}"

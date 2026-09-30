@@ -1,4 +1,3 @@
-#if DEBUG
 import Combine
 import Foundation
 
@@ -16,6 +15,7 @@ enum DebugDragStartDiagnostics {
         case systemPayloadOnly = "system-payload-only"
     }
 
+    #if DEBUG
     static let mode = ProcessInfo.processInfo.environment["BLENNY_DRAG_DIAGNOSTIC"]
         .flatMap(Mode.init(rawValue:))
     static let typedSource = ProcessInfo.processInfo.environment["BLENNY_DRAG_SOURCE"] != "provider"
@@ -54,5 +54,14 @@ enum DebugDragStartDiagnostics {
             record("published.\(name)", stack: true)
         }.store(in: &cancellables)
     }
+    #else
+    static let mode: Mode? = nil
+    static let typedSource = true
+    static let publishUnchangedOverflow = false
+    static func beginAttempt() {}
+    static func record(_ event: @autoclosure () -> String, stack: Bool = false) {}
+    static func watch<P: Publisher>(
+        _ publisher: P, name: String, in cancellables: inout Set<AnyCancellable>
+    ) where P.Failure == Never {}
+    #endif
 }
-#endif

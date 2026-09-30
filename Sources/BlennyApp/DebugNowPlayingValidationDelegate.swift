@@ -17,7 +17,7 @@ final class DebugNowPlayingValidationDelegate: NSObject, NSApplicationDelegate {
     private func run() async {
         let directory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Blenny")
-        let backend = DebugSharedSystemItemTrialBackend()
+        let backend = MacOS27SystemItemPreferenceBackend()
         let writer = SharedSystemItemManualTrialWriter(backend: backend,
             receiptDirectory: directory.appendingPathComponent("DebugSharedSystemItemTrials"))
         var touched = false
@@ -88,7 +88,7 @@ final class DebugNowPlayingValidationDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func observe(_ stage: String, backend: DebugSharedSystemItemTrialBackend) async {
+    private func observe(_ stage: String, backend: MacOS27SystemItemPreferenceBackend) async {
         do {
             let snapshot = try backend.capture(.nowPlaying)
             let value = try snapshot.values["NowPlaying"]?.propertyListValue()

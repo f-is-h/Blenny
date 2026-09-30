@@ -1,4 +1,4 @@
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 import Foundation
 
 /// A configured scalar gap for an attended trial, not a physical-layout promise.

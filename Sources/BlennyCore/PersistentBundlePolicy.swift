@@ -115,6 +115,17 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
         )
     }
 
+    /// First Apply's Undo can restore the exact initial document while keeping
+    /// management enabled and correctly restoring an absent previous backup.
+    /// This shape has no owner or system-item policy mutations to recover.
+    public func isInitialVisiblePolicy(forBlennyBundleIdentifier identifier: String) -> Bool {
+        guard let ownKey = BundlePolicyIdentity.canonicalKey(for: identifier),
+              policies.count == 1, let entry = policies.first else { return false }
+        return entry.policy == .visible
+            && BundlePolicyIdentity.canonicalKey(for: entry.bundleIdentifier) == ownKey
+            && bluetoothPolicy == .visible && systemItemPolicies.isEmpty
+    }
+
     public func replacingBundleIdentifier(
         from oldIdentifier: String,
         with newIdentifier: String
@@ -224,7 +235,7 @@ public struct PersistentBundlePolicyDocument: Codable, Equatable, Sendable {
         guard !policies.keys.contains("com.apple.menuextra.bluetooth") else {
             throw PersistentBundlePolicyDocumentError.bluetoothMustUseDedicatedPolicy
         }
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         for identifier in policies.keys {
             guard SystemItemPolicyCatalog.controllableItem(for: identifier) != nil
                     || PersistentSystemItemPolicyCatalog.controllableItem(for: identifier) != nil else {
@@ -473,7 +484,7 @@ public actor PersistentBundlePolicyStore {
         return disabled
     }
 
-    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
     /// Disables only the isolated manual system-item trial document without
     /// rotating its reviewed recovery backup.
     @discardableResult
@@ -501,21 +512,12 @@ public actor PersistentBundlePolicyStore {
     }
 
     private func write(_ data: Data, to url: URL) throws {
-        let directory = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-        try data.write(to: url, options: .atomic)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600],
-            ofItemAtPath: url.path
-        )
+        try DurablePrivateFile.write(data, to: url)
     }
 
     private func removeTransactionMarker() throws {
         guard FileManager.default.fileExists(atPath: transactionURL.path) else { return }
-        try FileManager.default.removeItem(at: transactionURL)
+        try DurablePrivateFile.remove(transactionURL)
     }
 
     private static func recoverInterruptedCommit(
@@ -549,28 +551,19 @@ public actor PersistentBundlePolicyStore {
         default:
             throw PersistentBundlePolicyStoreError.interruptedTransactionStateMismatch
         }
-        try FileManager.default.removeItem(at: transactionURL)
+        try DurablePrivateFile.remove(transactionURL)
     }
 
     private static func restorePreviousBackup(_ data: Data?, at url: URL) throws {
         if let data {
             try writeRecovered(data, to: url)
         } else if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
+            try DurablePrivateFile.remove(url)
         }
     }
 
     private static func writeRecovered(_ data: Data, to url: URL) throws {
-        let directory = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-        try data.write(to: url, options: .atomic)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600],
-            ofItemAtPath: url.path
-        )
+        try DurablePrivateFile.write(data, to: url)
     }
 
     static func hash(_ data: Data) -> String {

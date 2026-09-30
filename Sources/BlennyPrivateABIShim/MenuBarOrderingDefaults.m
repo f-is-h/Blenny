@@ -1,4 +1,4 @@
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 #import "BlennyPrivateABIShim.h"
 
 #import <Foundation/Foundation.h>

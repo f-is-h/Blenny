@@ -491,7 +491,7 @@ struct PolicyEditingCoreTests {
             blennyBundleIdentifier: blenny
         )
 
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         #expect(result.prepared != nil)
         #expect(result.report.issues.isEmpty)
         #expect(result.report.newBaselinePlan?.allowedBundleIdentifiers == [blenny])

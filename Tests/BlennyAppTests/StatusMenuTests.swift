@@ -5,15 +5,13 @@ import BlennyCore
 
 @MainActor
 struct StatusMenuTests {
-    #if DEBUG
     @Test func ordinaryRevealTimingPreservesExactRecovery() {
         for target: SharedSystemItemTrialTarget in [.spotlight, .timeMachine] {
-            #expect(!DebugSharedSystemItemTrialBackend.ordinaryRevealRequiresSettlement(target))
+            #expect(!MacOS27SystemItemPreferenceBackend.ordinaryRevealRequiresSettlement(target))
         }
-        #expect(DebugSharedSystemItemTrialBackend.ordinaryRevealRequiresSettlement(.siri))
-        #expect(DebugSharedSystemItemTrialBackend.ordinaryRevealRequiresSettlement(.nowPlaying))
+        #expect(MacOS27SystemItemPreferenceBackend.ordinaryRevealRequiresSettlement(.siri))
+        #expect(MacOS27SystemItemPreferenceBackend.ordinaryRevealRequiresSettlement(.nowPlaying))
     }
-    #endif
 
     @Test func stateAndDraftGatesSurviveAppKitValidation() throws {
         _ = NSApplication.shared
@@ -54,10 +52,12 @@ struct StatusMenuTests {
         #if DEBUG
         let debug = try #require(menu.items.first { $0.title == "Debug" }?.submenu)
         #expect(!debug.autoenablesItems)
-        #expect(debug.items.contains { $0.title == "Position Blenny Controls…" })
+
         #else
         #expect(menu.items.allSatisfy { $0.title != "Debug" })
         #endif
+        #expect(try item("Position Blenny Controls…").action != nil)
+        #expect(try item("Undo Control Placement").action != nil)
         controller.setAccessibilityTrusted(true)
         controller.setManagementState(.stopped, persistedManagementEnabled: false, recoveryAvailable: true)
         let open = try item("Open Blenny")
@@ -73,7 +73,12 @@ struct StatusMenuTests {
         #expect(menu.index(of: sponsor) + 1 == menu.index(of: koFi))
         #expect(menu.index(of: koFi) + 1 == menu.index(of: website))
         #expect((sponsor.representedObject as? URL)?.host == "github.com")
-        #expect((sponsor.representedObject as? URL)?.query?.contains("frequency=") == false)
+        let sponsorURL = try #require(sponsor.representedObject as? URL)
+        let sponsorQuery = try #require(URLComponents(url: sponsorURL, resolvingAgainstBaseURL: false)?.queryItems)
+        #expect(sponsorQuery.first { $0.name == "frequency" }?.value == "one-time")
+        #expect(sponsorQuery.first { $0.name == "metadata_project" }?.value == "blenny")
+        #expect(sponsorQuery.first { $0.name == "metadata_source" }?.value == "app")
+        #expect(sponsorQuery.first { $0.name == "metadata_placement" }?.value == "menu")
         #expect((koFi.representedObject as? URL)?.absoluteString == ProductSupportLinks.koFi)
         let resume = try item("Resume Managing")
         let stop = try item("Stop Managing")

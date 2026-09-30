@@ -1,4 +1,4 @@
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 import Foundation
 
 /// A separate experiment journal; never replaces the user's ordinary Undo ledger.

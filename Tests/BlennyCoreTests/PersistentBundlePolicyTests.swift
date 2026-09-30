@@ -81,7 +81,7 @@ struct PersistentBundlePolicyTests {
 
     @Test("Persistent system-item three-state intent round-trips canonically")
     func persistentSystemItemRoundTrip() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let policies = Dictionary(uniqueKeysWithValues:
             zip(
                 SharedSystemItemTrialTarget.allCases.map(\.observationIdentifier),
@@ -236,7 +236,7 @@ struct PersistentBundlePolicyTests {
         )
     }
 
-    #if DEBUG
+    #if BLENNY_PRODUCT || DEBUG
     @Test("Manual system-item trial disable preserves its recovery backup exactly")
     func manualTrialDisablePreservesBackup() async throws {
         let directory = FileManager.default.temporaryDirectory

@@ -15,6 +15,16 @@ struct UpdateFeedConfigurationTests {
         ))
     }
 
+    @Test("Loopback is confined to explicitly enabled fixtures")
+    func loopbackFixture() {
+        let feed = "http://127.0.0.1:8765/appcast.xml"
+        #expect(!UpdateFeedConfiguration.isUsable(feedURL: feed, publicEDKey: publicKey))
+        #expect(UpdateFeedConfiguration.isUsable(feedURL: feed, publicEDKey: publicKey, allowsLoopback: true))
+        for invalid in ["http://localhost:8765/appcast.xml", "http://example.org/appcast.xml", "http://127.0.0.2/appcast.xml"] {
+            #expect(!UpdateFeedConfiguration.isUsable(feedURL: invalid, publicEDKey: publicKey, allowsLoopback: true))
+        }
+    }
+
     @Test("Absent, insecure or malformed feeds leave the updater dormant")
     func incompleteConfiguration() {
         for feed in [

@@ -27,6 +27,7 @@ xcuserdata/
 Config/Local.xcconfig
 
 # Local credentials and environment overrides
+.claude/settings.local.json
 .env
 .env.*
 !.env.example
@@ -45,3 +46,7 @@ LocalNotes/
 # Python research caches
 __pycache__/
 *.py[cod]
+
+# Cloudflare Wrangler local state for the website
+Website/.wrangler/
+Website/node_modules/

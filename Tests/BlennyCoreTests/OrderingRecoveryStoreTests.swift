@@ -1,4 +1,4 @@
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 import Darwin
 import Foundation
 import Testing

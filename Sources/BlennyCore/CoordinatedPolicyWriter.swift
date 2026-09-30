@@ -1,6 +1,6 @@
 import Foundation
 
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 extension CoordinatedPolicyWriter {
     /// Follow an explicit successful Apply/Undo only after the owner has enabled
     /// persistent placement. This is not a timer or a reveal reconciliation loop.
@@ -193,7 +193,7 @@ public actor CoordinatedPolicyWriter: PolicyAssertionWriting {
     private var restorationPending = false
     private var operationInProgress = false
     private var operationWaiters: [CheckedContinuation<Void, Never>] = []
-    #if DEBUG
+    #if BLENNY_PRODUCT || DEBUG
     private var orderingBackend: (any MenuBarOrderingBackend)?
     private var orderingRecovery: (any OrderingRecoveryStoring)?
     private var orderingPolicyStore: (any PersistentBundlePolicyStoring)?
@@ -210,7 +210,7 @@ public actor CoordinatedPolicyWriter: PolicyAssertionWriting {
         self.persistentWriter = persistentWriter
     }
 
-    #if DEBUG
+    #if BLENNY_PRODUCT || DEBUG
     public init(
         assertionWriter: any PolicyAssertionWriting,
         persistentWriter: any PersistentSystemItemPlanWriting,
@@ -302,7 +302,7 @@ public actor CoordinatedPolicyWriter: PolicyAssertionWriting {
     private func cleanupLocked(connectionLost: Bool) async {
         guard !cleanupAttempted else { return }
         cleanupAttempted = true
-        #if DEBUG
+        #if BLENNY_PRODUCT || DEBUG
         if let fallbackRecovery {
             do {
                 if try await fallbackRecovery.load()?.isPendingRestoration == true {
@@ -319,7 +319,7 @@ public actor CoordinatedPolicyWriter: PolicyAssertionWriting {
         let persistentRestored = await persistentWriter.restoreAllManagedItems()
         restorationPending = !persistentRestored
         if persistentRestored { activePlan = nil }
-        #if DEBUG
+        #if BLENNY_PRODUCT || DEBUG
         if orderingRecovery != nil {
             do {
                 if let receipt = try await orderingRecovery?.load(), receipt.isPendingRestoration {
@@ -335,7 +335,7 @@ public actor CoordinatedPolicyWriter: PolicyAssertionWriting {
     public func activePlanSnapshot() -> RevealAllowlistPlan? { activePlan }
 
     public func hasPendingRestoration() async -> Bool {
-        #if DEBUG
+        #if BLENNY_PRODUCT || DEBUG
         if let fallbackRecovery {
             do { if try await fallbackRecovery.load()?.isPendingRestoration == true { return true } }
             catch { return true }
@@ -392,7 +392,7 @@ public actor CoordinatedPolicyWriter: PolicyAssertionWriting {
     }
 }
 
-#if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+#if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
 extension CoordinatedPolicyWriter {
     public func hideManualSystemItem(
         _ target: SharedSystemItemTrialTarget
@@ -403,7 +403,7 @@ extension CoordinatedPolicyWriter {
         guard let manualWriter = persistentWriter as? any ManualSystemItemTrialWriting else {
             throw SharedSystemItemTrialError.unsupportedRuntime
         }
-        #if DEBUG
+        #if BLENNY_PRODUCT || DEBUG
         if orderingRecovery != nil {
             let recovery = try await restoreOrderingLocked()
             guard recovery.preferencesRestored, recovery.relativeOrderVerified else {
@@ -432,7 +432,7 @@ extension CoordinatedPolicyWriter {
 }
 #endif
 
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 extension CoordinatedPolicyWriter {
     public func orderingReceipt() async throws -> OrderingRecoveryReceipt? {
         guard let orderingRecovery else { throw OrderingTransactionError.unavailable }

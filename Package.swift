@@ -2,6 +2,8 @@
 
 import PackageDescription
 
+let productSwiftSettings: [SwiftSetting] = [.define("BLENNY_PRODUCT"), .unsafeFlags(["-Xcc", "-DBLENNY_PRODUCT=1"])]
+
 let package = Package(
     name: "Blenny",
     platforms: [
@@ -18,6 +20,7 @@ let package = Package(
         .target(
             name: "BlennyCore",
             dependencies: ["BlennyPrivateABIShim"],
+            swiftSettings: productSwiftSettings,
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("ApplicationServices")
@@ -29,6 +32,7 @@ let package = Package(
                 "BlennyCore", "BlennyPrivateABIShim",
                 .product(name: "Sparkle", package: "Sparkle")
             ],
+            swiftSettings: productSwiftSettings,
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"
@@ -37,16 +41,19 @@ let package = Package(
         ),
         .target(
             name: "BlennyPrivateABIShim",
-            publicHeadersPath: "include"
+            publicHeadersPath: "include",
+            cSettings: [.define("BLENNY_PRODUCT", to: "1")]
         ),
         .executableTarget(
             name: "BlennyLayoutProbe",
-            dependencies: ["BlennyCore"]
+            dependencies: ["BlennyCore"],
+            swiftSettings: productSwiftSettings
         ),
-        .testTarget(name: "BlennyAppTests", dependencies: ["BlennyApp"]),
+        .testTarget(name: "BlennyAppTests", dependencies: ["BlennyApp"], swiftSettings: productSwiftSettings),
         .testTarget(
             name: "BlennyCoreTests",
-            dependencies: ["BlennyCore"]
+            dependencies: ["BlennyCore"],
+            swiftSettings: productSwiftSettings
         )
     ]
 )

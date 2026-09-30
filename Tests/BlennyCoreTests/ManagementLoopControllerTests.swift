@@ -443,6 +443,50 @@ struct ManagementLoopControllerTests {
         #expect(await loop.activePlanSnapshot() == nil)
     }
 
+    @Test("All macOS 27 localized labels retain native takeover and collapse", arguments: NativeOverflowLocaleFixture.all)
+    func localizedNativeTakeover(labels: NativeOverflowLocaleFixture.Labels) async throws {
+        let identifier = UUID()
+        func snapshot(_ label: String) -> NativeOverflowObservationSnapshot {
+            let classification = NativeOverflowClassifier.classify(
+                ownerBundleIdentifier: "com.apple.MenuBarAgent", role: "AXButton",
+                title: nil, itemDescription: label, accessibilityIdentifier: nil
+            )
+            #expect(classification.classification == .nativeOverflowPresentationControl)
+            let state = NativeOverflowPresentationStateClassifier.classify(
+                title: nil, itemDescription: label, accessibilityIdentifier: nil
+            )
+            #expect(state != .unknown)
+            return .observed(states: [state], controlIdentifier: identifier)
+        }
+        let writer = ManagementTestWriter()
+        let loop = ManagementLoopController(writerProvider: { writer })
+        var controls = OrdinaryRevealCoordinator()
+        controls.synchronize(
+            await loop.recover(acceptedPolicy: try policy(enabled: true), baseline: baseline),
+            hasRevealableBundles: true
+        )
+        controls.requestBlennyToggle()
+        #expect(controls.takePendingTransition()?.owner == .blennyFallback)
+        try await loop.beginOrdinaryReveal(revealed)
+        controls.synchronize(await loop.state, hasRevealableBundles: true)
+        controls.observe(snapshot(labels.collapsed), source: .layout)
+        controls.observe(snapshot(labels.expanded), source: .valueChange)
+        #expect(controls.takePendingTransition() == nil)
+        #expect(!ManagementStatusPresentation(
+            state: await loop.state, hasRevealableBundles: true, isBusy: false,
+            nativeOverflow: controls.observation
+        ).showsInlineArrow)
+        controls.observe(snapshot(labels.collapsed), source: .valueChange)
+        #expect(controls.takePendingTransition() == .init(
+            presentation: .baseline, owner: .nativeOverflow
+        ))
+        try await loop.endOrdinaryReveal(baseline)
+        controls.synchronize(await loop.state, hasRevealableBundles: true)
+        #expect(await writer.appliedPlans == [baseline, revealed, baseline])
+        #expect(await writer.appliedPlans.allSatisfy { !$0.allowedBundleIdentifiers.contains(hidden) })
+        await loop.terminate()
+    }
+
     @Test("Late successful verification cannot resurrect management after connection loss")
     func lateVerificationAfterDisconnect() async throws {
         let barrier = VerificationBarrier()

@@ -185,6 +185,17 @@ struct ProductInterfacePresentationTests {
             ProductSupportLinks.oneTimeSponsor
                 == "https://github.com/sponsors/f-is-h?frequency=one-time&metadata_project=blenny&metadata_source=app&metadata_placement=about"
         )
+        for link in [ProductSupportLinks.monthlySponsor, ProductSupportLinks.oneTimeSponsor, ProductSupportLinks.menuSponsor] {
+            let components = URLComponents(string: link)
+            let query = components?.queryItems ?? []
+            #expect(components?.scheme == "https")
+            #expect(components?.host == "github.com")
+            #expect(components?.path == "/sponsors/f-is-h")
+            #expect(query.filter { $0.name == "metadata_project" }.map(\.value) == ["blenny"])
+            #expect(query.filter { $0.name == "metadata_source" }.map(\.value) == ["app"])
+            #expect(query.filter { $0.name == "metadata_placement" }.map(\.value)
+                == [link == ProductSupportLinks.menuSponsor ? "menu" : "about"])
+        }
         #expect(ProductSupportLinks.koFi == "https://ko-fi.com/blenny")
     }
 }

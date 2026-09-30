@@ -1,11 +1,11 @@
-#if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+#if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
 import BlennyCore
 import BlennyPrivateABIShim
 import Darwin
 import Foundation
 
 @MainActor
-final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
+final class MacOS27SystemItemPreferenceBackend: SharedSystemItemTrialBackend,
     @unchecked Sendable
 {
     private static let frameworkPath =
@@ -137,7 +137,7 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
     func restoreForOrdinaryReveal(
         _ snapshot: SharedSystemItemPreferenceSnapshot
     ) async throws {
-        #if DEBUG
+        #if BLENNY_PRODUCT || DEBUG
         // Ordinary reveal uses immediate exact readback for the admitted
         // targets. Exact cleanup and compensation retain both recovery waits.
         try await restoreSnapshot(
@@ -149,7 +149,7 @@ final class DebugSharedSystemItemTrialBackend: SharedSystemItemTrialBackend,
         #endif
     }
 
-    #if DEBUG
+    #if BLENNY_PRODUCT || DEBUG
     static func ordinaryRevealRequiresSettlement(_ target: SharedSystemItemTrialTarget) -> Bool {
         // Now Playing ordinary reveal uses a durable explicit-visible intent.
         // Any exact restoration retains its historical recovery timing.

@@ -13,7 +13,7 @@ public struct PersistentSystemItemPolicyCatalogItem: Hashable, Sendable {
 /// Exact system-item identities whose visibility is controlled by a durable,
 /// item-scoped preference transaction rather than the assessment allowlist.
 public enum PersistentSystemItemPolicyCatalog {
-    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
     public static let items: [PersistentSystemItemPolicyCatalogItem] = [
         .init(identifier: "com.apple.menuextra.now-playing", displayName: "Now Playing"),
         .init(identifier: "com.apple.menuextra.siri", displayName: "Siri"),

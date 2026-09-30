@@ -33,7 +33,7 @@ final class SharedSystemItemRecoveryDelegate: NSObject, NSApplicationDelegate {
                 .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("Blenny/DebugSharedSystemItemTrials")
             let writer = SharedSystemItemManualTrialWriter(
-                backend: DebugSharedSystemItemTrialBackend(),
+                backend: MacOS27SystemItemPreferenceBackend(),
                 receiptDirectory: receiptDirectory
             )
             var targets: [SharedSystemItemTrialTarget] = []

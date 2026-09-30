@@ -254,7 +254,7 @@ public actor MacOS27PreferredPositionReader {
     }
 }
 
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 /// Unsupported macOS 27 experiment. This is the only type allowed to write preferred-position state.
 /// Never call it without a validated backup, a fresh preview, and explicit user confirmation.
 public actor ExperimentalMacOS27PreferredPositionWriter {
@@ -421,7 +421,7 @@ private func decodeValue(
     )
 }
 
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 private extension PreferredPositionValue {
     func makeCFPropertyListValue() throws -> CFPropertyList {
         switch self {

@@ -13,7 +13,7 @@ public struct SystemItemPolicyCatalogItem: Hashable, Sendable {
 }
 
 public enum SystemItemPolicyCatalog {
-    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
     public static let items: [SystemItemPolicyCatalogItem] = [
         .init(identifier: "com.apple.menuextra.battery", rawValue: 0, displayName: "Battery"),
         .init(identifier: "com.apple.menuextra.bluetooth", rawValue: 1, displayName: "Bluetooth"),

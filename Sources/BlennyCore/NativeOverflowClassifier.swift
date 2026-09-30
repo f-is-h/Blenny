@@ -29,8 +29,11 @@ public enum NativeOverflowClassifier {
         "more menu bar items",
         "show more menu bar items",
         "additional menu bar items",
+        "hide menu bar items",
         "オーバーフロー",
         "メニューバーの項目をさらに表示",
+        "非表示のメニューバー項目を表示",
+        "メニューバー項目を非表示",
         "更多菜单栏项目",
         "显示隐藏菜单栏项目",
         "隐藏菜单栏项目",
@@ -54,7 +57,11 @@ public enum NativeOverflowClassifier {
 
         if bundleIdentifier == menuBarAgentBundleIdentifier {
             if normalizedRole == "axbutton",
-               overflowMarkers.contains(where: searchableText.contains) {
+               (overflowMarkers.contains(where: searchableText.contains)
+                    || [accessibilityIdentifier, title, itemDescription]
+                        .compactMap(MenuBarItemIdentityResolver.normalize)
+                        .contains { MacOS27NativeOverflowLabels.collapsed.contains($0)
+                            || MacOS27NativeOverflowLabels.expanded.contains($0) }) {
                 return MenuBarElementClassificationResult(
                     classification: .nativeOverflowPresentationControl,
                     reason: "MenuBarAgent-owned element matched a native overflow accessibility marker."

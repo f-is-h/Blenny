@@ -55,4 +55,15 @@ enum OrderingPreferenceDiagnostics {
         }
     }
 }
+#else
+import Foundation
+/// Production calls are inert; no diagnostic environment or data is inspected.
+enum OrderingPreferenceDiagnostics {
+    static let enabled = false
+    static func record(
+        _ stage: @autoclosure () -> String,
+        groups: @autoclosure () -> [String: [String: OrderingValue]] = [:],
+        detail: @autoclosure () -> String? = nil
+    ) {}
+}
 #endif

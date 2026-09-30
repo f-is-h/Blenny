@@ -74,7 +74,7 @@ struct PolicyBoardInteractionTests {
 
     @Test("Persistent system items use the ordinary three-state drag path")
     func persistentSystemItemDragPath() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let generation = UUID()
         var editor = try makeEditor()
         var coordinator = PolicyDraftAssignmentCoordinator(
@@ -103,7 +103,7 @@ struct PolicyBoardInteractionTests {
 
     @Test("A catalog system item uses the same drag path without label matching")
     func genericSystemItemDragPath() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let generation = UUID()
         let wifi = "com.apple.menuextra.wifi"
         var editor = try makeEditor(systemItems: [

@@ -137,7 +137,7 @@ struct PolicyEditorViewModelTests {
             item(bundleIdentifier: unrelatedApple, pid: 43),
         ]))
 
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         #expect(snapshot.observations.compactMap(\.bundleIdentifier) == [
             inputMenu, weather,
         ])
@@ -238,7 +238,7 @@ struct PolicyEditorViewModelTests {
 
     @Test("A Debug catalog identity moves by exact AX identifier and retains a missing recovery row")
     func systemItemDraftAndRecoveryRetention() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let wifi = "com.apple.menuextra.wifi"
         let observedWiFi = SystemMenuBarItemObservation(
             observationIdentifier: wifi,
@@ -278,7 +278,7 @@ struct PolicyEditorViewModelTests {
 
     @Test("Persistent system items expose all three policies without a live AX row")
     func persistentSystemItemsAreThreeStateCandidates() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         var model = try PolicyEditorViewModel(
             acceptedPolicy: try policy(),
             candidateInventory: PolicyCandidateInventory(observations: [
@@ -303,7 +303,7 @@ struct PolicyEditorViewModelTests {
 
     @Test("Composite persistent observations resolve to three-state policy identifiers")
     func compositePersistentObservationsUseThreeStatePolicy() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         var model = try PolicyEditorViewModel(
             acceptedPolicy: try policy(),
             candidateInventory: PolicyCandidateInventory(observations: [
@@ -331,7 +331,7 @@ struct PolicyEditorViewModelTests {
 
     @Test("Now Playing legacy intent survives while new policy assignments are rejected")
     func nowPlayingIsRecoveryOnly() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let id = SharedSystemItemTrialTarget.nowPlaying.observationIdentifier
         for saved in MenuBarBundlePolicy.allCases {
             let accepted = try PersistentBundlePolicyDocument(

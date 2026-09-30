@@ -3,7 +3,7 @@ import Foundation
 /// Exact owning bundles admitted only by the owner-operated Debug trial.
 /// These are application-level assertion identities, not system-item numbers.
 public enum ExperimentalAppleBundlePolicyCatalog {
-    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
     private static let displayNames: [String: String] = [
         "com.apple.textinputmenuagent": "Input Menu",
         "com.apple.weather.menu": "Weather",
@@ -26,7 +26,7 @@ public enum ExperimentalAppleBundlePolicyCatalog {
               let canonical = BundlePolicyIdentity.canonicalKey(for: bundleIdentifier) else {
             return nil
         }
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         return displayNames[canonical]
         #else
         return nil

@@ -1,4 +1,4 @@
-#if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+#if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
 .text
 .align 2
 .globl _blenny_swift_call_shared

@@ -1,0 +1,55 @@
+{
+  "version": "1.0.0",
+  "productDigest": "d315632ee8eefc103062a0c1adb43067bc556f61d9eec50d59fa7eaf5fdaeb52",
+  "reviewedReleaseNotesSHA256": "9f8b2c01045a4a2ec7e2c02635a274946d7b9d9502ed12af6f206078010ece4c",
+  "vmRegressionCandidate": {
+    "build": "114",
+    "systemVersion": "27.0.1",
+    "systemBuild": "26A434",
+    "language": "en-US",
+    "archiveSHA256": "34da366d5df89b8fe0fdd68f0d6d2ac57c6b3f1557f0aee2ab0d21cc41b868a0",
+    "productDigest": "7009ce6d19b4ae8099f9ca190a61ed48adc960f7778c7d5528d808643472affc"
+  },
+  "checks": {
+    "realMenuBar": {
+      "status": "passed",
+      "evidence": "Owner reported completing ordinary Release Build 107 real-menu-bar acceptance on 2026-09-30. Later first-Undo/startup and development packaging checks are tracked separately; no broader target trace is claimed."
+    },
+    "nativeOverflowTakeover": {
+      "status": "passed",
+      "evidence": "On 2026-09-30 the owner confirmed that the replacement package resolved the reported duplicate-chevron and native-collapse problems in the English macOS 27.0.1 guest. No Japanese physical run is claimed."
+    },
+    "policyLaneScrollIndicators": {
+      "status": "passed",
+      "evidence": "On 2026-09-30 the owner confirmed that the replacement package resolved the reported persistent scrollbars in the three policy lanes."
+    },
+    "freshInstallAndPermissions": {
+      "status": "passed",
+      "evidence": "On 2026-09-30 the owner explicitly confirmed completing all development acceptance checks except multiple displays, including fresh installation and access grant/revoke/regrant. This is owner-observed evidence from the development test run; no agent action trace or new Build 116 physical run is inferred."
+    },
+    "firstApplyUndoRelaunch": {
+      "status": "passed",
+      "evidence": "On 2026-09-30 the owner explicitly confirmed completing all development acceptance checks except multiple displays, including first Apply, Undo and relaunch. This is owner-observed evidence from the development test run; no agent action trace or new Build 116 physical run is inferred."
+    },
+    "loginLifecycle": {
+      "status": "passed",
+      "evidence": "On 2026-09-30 the owner explicitly confirmed completing all development acceptance checks except multiple displays, including login/startup lifecycle. This is owner-observed evidence from the development test run; no agent action trace or new Build 116 physical run is inferred."
+    },
+    "uninstallAndRestoration": {
+      "status": "passed",
+      "evidence": "On 2026-09-30 the owner explicitly confirmed completing all development acceptance checks except multiple displays, including uninstall and restoration. This is owner-observed evidence from the development test run; no agent action trace or new Build 116 physical run is inferred."
+    },
+    "sleep": {
+      "status": "passed",
+      "evidence": "On 2026-09-30 the owner explicitly confirmed completing all development acceptance checks except multiple displays, including sleep/wake. This is owner-observed evidence from the development test run; no agent action trace or new Build 116 physical run is inferred."
+    },
+    "display": {
+      "status": "limited",
+      "evidence": "On 2026-09-30 the owner explicitly excluded multiple displays from completed testing. Multi-display behavior is unverified for 1.0.0; record this accepted coverage limit, not a passing hardware test."
+    }
+  },
+  "ownerAcceptanceConfirmation": {
+    "date": "2026-09-30",
+    "scope": "The owner confirmed all requested development acceptance checks except multiple displays and instructed source closure of 1.0.0. Earlier Build 107 and English VM Build 114 evidence retain their exact scope. Build 116 extends resource-label coverage through deterministic tests; no physical acceptance of every language is claimed."
+  }
+}

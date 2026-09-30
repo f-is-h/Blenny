@@ -493,7 +493,7 @@ public actor PolicyEditingCore {
             managementEnabled: accepted.managementEnabled,
             candidates: candidates,
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-            scope: scope,
+            scope: restorationScope(for: targetPolicy),
             blennyBundleIdentifier: blennyBundleIdentifier,
             candidateGeneration: candidateGeneration,
             runtimeContractFingerprint: runtimeContractFingerprint,
@@ -560,7 +560,7 @@ public actor PolicyEditingCore {
             managementEnabled: backup.previousPolicy.managementEnabled,
             candidates: candidates,
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-            scope: scope,
+            scope: restorationScope(for: backup.previousPolicy),
             blennyBundleIdentifier: blennyBundleIdentifier,
             persistenceMode: .restorePreviousPolicy,
             candidateGeneration: candidateGeneration,
@@ -590,7 +590,8 @@ public actor PolicyEditingCore {
             managementEnabled: prepared.newPolicy.managementEnabled,
             candidates: candidates,
             observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-            scope: scope,
+            scope: prepared.persistenceMode == .restorePreviousPolicy
+                ? restorationScope(for: prepared.newPolicy) : scope,
             blennyBundleIdentifier: blennyBundleIdentifier,
             persistenceMode: prepared.persistenceMode,
             candidateGeneration: candidateGeneration,
@@ -628,9 +629,25 @@ public actor PolicyEditingCore {
         try await store.loadBackup()?.backupFingerprint
     }
 
+    private func restorationScope(for target: PersistentBundlePolicyDocument) -> PolicyValidationScope {
+        // A prior sparse policy can omit owners first assigned by this Apply.
+        // Restoring that exact document returns omitted owners to implicit
+        // Visible intent. Keep only its already-approved entries; this never
+        // grants an owner outside the current validation scope.
+        let targetOwners = Set(target.policies.compactMap {
+            BundlePolicyIdentity.canonicalKey(for: $0.bundleIdentifier)
+        })
+        return PolicyValidationScope(approvedBundleIdentifiers: scope.approvedBundleIdentifiers.filter {
+            BundlePolicyIdentity.canonicalKey(for: $0).map(targetOwners.contains) == true
+        })
+    }
+
     private func resumeBackupFingerprint(accepted: PersistentBundlePolicyDocument) async throws -> String? {
         guard accepted.managementEnabled else { return try await backupFingerprint() }
         guard let backup = try await store.loadBackup() else {
+            if accepted.isInitialVisiblePolicy(forBlennyBundleIdentifier: blennyBundleIdentifier) {
+                return nil
+            }
             throw PolicyEditingCoreError.previousPolicyBackupMissing
         }
         guard (try? backup.previousPolicy.validated(forBlennyBundleIdentifier: blennyBundleIdentifier)) != nil,

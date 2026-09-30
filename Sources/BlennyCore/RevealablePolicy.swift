@@ -197,7 +197,7 @@ public enum RevealAllowlistPlanner {
         }
 
         var persistentSystemItems: [String: PersistentSystemItemPresentation] = [:]
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         for identifier in systemItemPolicies.keys.sorted() {
             guard identifier != "com.apple.menuextra.bluetooth",
                   let policy = systemItemPolicies[identifier] else {

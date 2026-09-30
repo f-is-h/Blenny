@@ -1,5 +1,14 @@
 # Blenny roadmap
 
+Current version: **1.0.0 source finalized for local closure**. Local checks passed;
+the owner confirmed all development acceptance except multiple displays on
+2026-09-30. GitHub-built publication remains pending. Ordinary
+Release now includes accepted daily ordering. The selected self-signed route,
+Apache-2.0 and current-host acceptance replace the earlier distribution proposals.
+See [the current release record](RELEASE_1.0.0.md) and the 1.0.0 section below.
+
+## Historical 0.11.0–0.12.0 context
+
 Version 0.11.0 completed the owner-accepted local permissions and interaction
 stability milestone on 2026-09-25, on macOS 27.0 build `26A428`. Build 15 native
 dragging and Apply are owner-accepted; repeated mixed Apply/Undo runs verify the
@@ -25,8 +34,12 @@ Blenny advances by verified exit criteria, not by elapsed time or commit count. 
 - `0.0.x` versions are private engineering-foundation milestones. They may add bounded experimental capability, may be Debug-only, and are not public releases.
 - `0.y.0` versions beginning with `0.1.0` introduce a coherent pre-release product capability built on the validated engineering foundation.
 - `0.y.z` patch versions after a `0.y.0` milestone contain fixes and compatibility updates without expanding that milestone's scope.
-- The first public, open-source release candidate is not yet assigned a version.
-  Its source and signed binaries must ship together.
+- The first public, open-source release is assigned version `1.0.0`.
+  Its source and signed binaries must ship together after acceptance and approval.
+- From 1.0.0, every new public binary increments the marketing version. Public UI
+  omits Build; CI retains monotonically increasing integer CFBundleVersion for
+  Sparkle. Only GitHub-built binaries enter the public channel. All human acceptance
+  precedes the authorized annotated-tag trigger; publication then runs unattended.
 - `1.0.0` begins the stable product contract and published macOS compatibility policy.
 - A version advances only when every required exit criterion is verified and restoration is complete.
 - An explicitly scoped safety-feasibility investigation may close with an evidenced no-go; that does not mean the proposed feature or its implementation gate passed.
@@ -1045,52 +1058,44 @@ remain intact. Physical menu/Settings acceptance, accessibility, update delivery
 and broader compatibility remain separate checks. See the
 [release record](RELEASE_0.13.0.md). No push or public distribution is authorized.
 
-## 1.0.0 — First public and stable release
+## 1.0.0 — First public release
 
-Status: **Planned next version.** The owner chose 1.0.0 directly after 0.13.0
-and will perform the final checks in a separate session. This supersedes the
-unassigned public-release version and earlier 0.12.x candidate plan; it does
-not waive any gate below or start 1.0.0 implementation in this milestone.
+Fresh-VM follow-up: ordinary Release Build 114 repairs persistent policy-lane
+indicators and the actual English/Japanese native-overflow labels. Deterministic
+takeover/collapse tests pass with one writer and Hidden excluded. On 2026-09-30
+the owner confirmed the reported problems were resolved in the English guest.
+Broader permission/lifecycle acceptance remains separate. The subsequent label
+catalog covers all 40 macOS 27.0.1 resource locale entries in deterministic tests;
+physical coverage is not inferred for other languages. See TECH_SPIKE_1.0.0.md.
 
-Publish the repository and signed prerelease together only when:
+The approved [automation plan](RELEASE_AUTOMATION_PLAN_1.0.0.md) governs release
+closure: all owner acceptance and source/notes review precede the annotated-tag
+trigger. GitHub builds every public binary and publishes automatically afterward,
+without a second human checkpoint. Marketing-only display, structured release
+fragments, normal CI, preparation PRs and the sealed-asset publication workflow
+are implemented locally. Hosted runner/signing setup and VM observations remain
+separate pending evidence. See [distribution](DISTRIBUTION.md).
 
-- Explicitly review ordering promotion into ordinary Release, including all
-  required access, failure, recovery and lifecycle behavior. Debug acceptance
-  alone does not promote a private implementation.
-- Keep the established `xyz.fi5h.blenny` identifier stable through signing,
-  installation and updates. Validate Developer ID identity, Device Control and
-  exact-file grant continuity, including revocation and regrant. See the
-  [0.12.0 signing and permission continuity investigation](SIGNING_PERMISSION_CONTINUITY_0.12.0.md).
-- Complete onboarding, final UI, keyboard and VoiceOver acceptance for the
-  intentionally minimal bundle-level Visible, Revealable and Hidden experience.
-- Validate installation, LaunchServices registration, update delivery, restart,
-  interrupted recovery, uninstall and complete restoration. Preserve accepted
-  policy and Blenny control identity; no known issue may leave the bar unrecoverable.
-- Validate supported hardware, display and macOS configurations, effectively idle
-  unchanged-state performance, responsive reveal/conceal and unsupported-item copy.
-- Finalize supported-build policy and an emergency private-backend disable
-  mechanism. The current major-version/ABI checks are not a completed public
-  compatibility matrix.
-- Complete Developer ID signing and notarization without storing signing material
-  in Git, and reproduce every distributed binary from the published source.
-- Complete security/privacy review, opt-in scoped diagnostics, recovery/uninstall
-  instructions and user documentation.
-- Select and adopt the license, copyright attribution, LICENSE and NOTICE files
-  and app-resource packaging before distribution.
-- Audit every reachable branch, tag, commit and research artifact against the
-  repository publication gate; publish source and the first binary together.
-- Disclose the Clock/Notification Center limitation for every affected supported
-  build until a replacement backend passes the full interaction, three-state,
-  failure and recovery matrix. Do not add automatic Stop/Resume around clicks.
+Status: **Local source closure authorized; local checks and owner development acceptance complete, with multiple displays explicitly unverified. GitHub publication pending.** Follow the owner-approved
+[implementation and acceptance plan](IMPLEMENTATION_PLAN_1.0.0.md).
 
-### Stable-release acceptance
+- Synchronize accepted everyday capabilities in Debug and ordinary Release,
+  retaining diagnostic/experimental entry points only in Debug.
+- Preserve bundle identity, self-signed certificate, Sparkle key, old state and
+  recovery compatibility; validate permission grant/regrant and lifecycle.
+- Refactor application orchestration, views, models and persistence in small steps.
+- Complete self-signed packaging, signed Sparkle archives and feasible local
+  update installation tests. Developer ID and notarization are not gates.
+- Verify current-host behavior and retain fail-closed ABI/runtime guards, explicit
+  Stop and recovery. No future-OS guarantee or remote disable service is required.
+- Complete README, license/notices, recovery/uninstall and user-facing release notes.
+- Disclose Clock/Notification Center, Now Playing and unattributed-extra limitations.
+- Audit reachable history and exact release artifacts before publication approval.
+- Coordinate website links with the separate website conversation.
 
-Release when:
-
-- “Set it once. It stays set.” is supported by the compatibility and lifecycle evidence.
-- The supported hardware/display matrix passes without cursor movement or continuous rewriting.
-- Restore, uninstall, and private-backend disable paths are dependable.
-- Public distribution, signing, notarization, update, support, and license processes are operational.
+Completion requires passing tests/builds, verified local restoration, accurate
+remaining manual/public-delivery limits and authorized clean Git closure.
+Publish exact refs, source and the first binary only after owner confirmation.
 
 ## Explicitly deferred beyond 1.0
 

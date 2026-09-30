@@ -1,5 +1,41 @@
 # Blenny
 
+Current phase: `1.0.0` source finalized for local commit/tag closure. Local checks
+passed; on 2026-09-30 the owner confirmed all development acceptance except
+multiple displays. GitHub-built publication remains pending. The owner-approved
+[implementation plan](docs/IMPLEMENTATION_PLAN_1.0.0.md) supersedes the historical
+public-release gates below: accepted Release/Debug capability parity, existing
+self-signed signing and Sparkle updates, current-host validation, scoped
+refactoring and user documentation. Developer ID/notarization are not required.
+Website implementation is separate and excluded from the application commit.
+The owner authorized local 1.0.0 closure, will change visibility manually, and
+requested GitHub Actions publication afterward. Do not change visibility or push
+the production tag before public setup and exact-ref authorization are complete.
+
+The owner-approved [automation plan](docs/RELEASE_AUTOMATION_PLAN_1.0.0.md)
+places every human acceptance check in development. From the first public 1.0.0,
+GitHub builds each public binary and completes signing, verification, asset/feed
+publication and delivery checks after one authorized annotated-tag trigger,
+without another human checkpoint. UI displays only the marketing version;
+internal build identity remains diagnostic. Prepared notes are generated from
+structured fragments. Actual publication is recorded in docs/public-release.json
+by the workflow, not inferred from local source closure.
+
+The fresh English macOS 27.0.1 VM revealed lane-indicator and native-chevron
+label regressions in Build 113. Build 114 repairs both, with failing-then-passing
+label-to-writer coverage. On 2026-09-30 the owner confirmed that the replacement
+package resolved the reported VM problems. This closes those regressions; broader
+installation/permission and lifecycle acceptance remains separate. See
+[the technical follow-up](docs/TECH_SPIKE_1.0.0.md#fresh-vm-overflow-and-scroll-indicator-regression-2026-09-30).
+
+The system-label follow-up covers all 40 locale entries observed in macOS 27.0.1
+with deterministic takeover/collapse tests; this is not physical acceptance of
+every language or a future-macOS compatibility promise. Public requirements say
+Apple silicon and macOS 27 only. Exact host/guest evidence is retained in the
+acceptance matrix.
+
+## Historical 0.13.0 baseline
+
 Version **0.13.0 completed as a local experimental milestone on 2026-09-29**,
 including the right-click menu, owner-selected v13 application artwork,
 face-silhouette menu bar icon, and Settings layout correction.
@@ -18,14 +54,14 @@ Access grant to Blenny did not change MenuBarAgent's access results.
 See the [identity and permission investigation](docs/RESUME_VISIBILITY_INVESTIGATION_0.13.0.md).
 This is an inspected-host limitation, not a universal Applications-only rule.
 
-> A minimal, native menu bar organizer for macOS 27 and later.
+> A minimal, native menu bar organizer for macOS 27.
 
 > Version 0.13.0 is a completed local milestone, not a public release candidate.
 > The planned 1.0.0 must satisfy the remaining public and stable-release gates.
 
-## Current status
+## Historical 0.13.0 status
 
-Current phase: `0.13.0` complete as a local experimental milestone; `1.0.0` is next.
+Historical phase: `0.13.0` complete as a local experimental milestone; `1.0.0` is next.
 The 0.11.0 owner-accepted milestone was completed on 2026-09-25.
 
 The 0.12.0 scope includes self-signed signing continuity, local Sparkle
@@ -95,6 +131,23 @@ separate session. See [the roadmap](docs/ROADMAP.md) and
 
 Local packages identify candidates as `0.13.0 (Build N)`. Build numbers advance
 from ignored local state and do not themselves complete a milestone.
+
+## Current 1.0.0 implementation
+
+Debug and ordinary Release now share accepted ordering, policy, access and
+recovery capabilities. Diagnostics, research and the failed Now Playing legacy
+trial remain excluded from production. App/window/model/view responsibilities
+and update/login services have been separated without changing receipt schemas
+or the existing DebugOrdering data path. Policy replacement is synchronized
+and uses private directory/file permissions.
+
+The owner selected Apache-2.0. Legal resources are packaged. The fixed
+self-signed certificate and separate Sparkle EdDSA key are retained. The local
+Sparkle fixture has exercised installation and relaunch as well as cancellation,
+no-update and rejection paths. README is the user-facing contract; the
+[1.0.0 release record](docs/RELEASE_1.0.0.md) distinguishes local evidence,
+attended acceptance and publication. Historical gates below do not reintroduce
+paid signing, notarization, future-system guarantees or website implementation.
 
 ## Current product contract
 
@@ -168,7 +221,7 @@ of native drag-session refresh remains pending;
 native-arrow placement is unresolved. The earlier Siri reveal improvement is
 owner-confirmed. No version closure or publication is authorized.
 
-> A minimal, native menu bar organizer designed exclusively for macOS 27 and later.
+> A minimal, native menu bar organizer designed exclusively for macOS 27.
 
 ## Detailed chronological status (historical)
 
@@ -350,7 +403,7 @@ Brand work is deliberately postponed until the technical feasibility spike succe
 
 ## 4. Strategic decisions already made
 
-### 4.1 macOS 27 and later only
+### 4.1 macOS 27 only
 
 Blenny will not support macOS 26 or earlier.
 
@@ -364,22 +417,15 @@ The codebase should not contain:
 - Migration from Ice or Thaw layouts.
 - Old status-item hiding techniques kept only for historical systems.
 
-### 4.2 Clean implementation rather than an Ice fork
+### 4.2 Native Swift/AppKit implementation
 
-Blenny does not require Ice's source code or binary at runtime.
+Build Blenny as a native Swift/AppKit application around the macOS 27 menu bar
+architecture, with a narrow and replaceable unsupported backend.
 
-Ice is a normal Swift/AppKit application. It is not a driver, system extension, privileged helper, or required framework. A fork would compile Ice's source into a new application; users would not need Ice installed.
-
-However, most of Ice's difficult core logic targets the old menu bar architecture and is therefore not the right foundation for a macOS-27-only product.
-
-Blenny may use Ice and Thaw as:
-
-- Research material.
-- Examples of private macOS behavior.
-- Sources of known failure cases.
-- Inputs for a regression-test matrix.
-
-Blenny should not copy or port their non-trivial implementation code during the clean implementation.
+External research may inform API investigation, known failure cases and
+regression tests. Keep the implementation independently maintained. Do not copy
+or port non-trivial third-party implementation code or link external product
+binaries. See AGENTS.md and docs/REPOSITORY_POLICY.md for contribution rules.
 
 ### 4.3 Native behavior first
 
@@ -903,7 +949,7 @@ from the trackpad's right edge; automatic Stop/Resume around Clock clicks is
 rejected. This decision supersedes the earlier mandatory-fix gate for that one
 issue and does not waive any other version or publication gate.
 
-## 18. Current next action
+## 18. Historical next action for 0.9.0
 
 Complete the checks tracked in
 [the 0.9.0 release record](docs/RELEASE_0.9.0.md): finish every required build and
@@ -911,3 +957,18 @@ test configuration, verify the current system is restored without undoing the
 owner's accepted order, reconcile version documents and create the authorized
 local annotated tag. Distribution, publication, repository visibility changes
 and pushes remain outside this milestone.
+
+## 19. Current next action for 1.0.0
+
+Complete the attended checks in docs/ACCEPTANCE_1.0.0.md using the prepared
+candidate and an explicitly reviewed target/restoration scope. Local test,
+packaging, loopback update and installed-path access results are recorded in
+docs/RELEASE_1.0.0.md. Do not treat deterministic or read-only evidence as physical
+acceptance. Retain all recovery data and the owner's installed baseline.
+
+After acceptance, obtain authorization for the intended source commit boundary,
+rerun the clean blenny-release audit, prepare a fresh final artifact and fix the
+exact annotated tag/refs before publication approval. Website/ and .claude/ work
+belongs to its separate task. Paid signing, notarization and future-system
+coverage are not newly introduced gates. No commit/tag/push or private-to-public
+change is authorized by implementation alone.

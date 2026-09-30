@@ -1,0 +1,8 @@
+{
+  "id": "initial-native-interface",
+  "version": "1.0.0",
+  "category": "added",
+  "technical": "Ship the native Organization Board, explicit per-operation capability presentation, menu bar artwork, settings and packaged legal resources.",
+  "user": "Use a native Organization Board, menu bar controls and Settings. Capabilities are shown for the actual observed items, including applications with several icons.",
+  "commits": []
+}

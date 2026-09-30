@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Blenny updates</title>
+    <link>https://github.com/f-is-h/Blenny</link>
+    <description>Signed Blenny updates</description>
+  </channel>
+</rss>

@@ -3,14 +3,14 @@ import BlennyCore
 import Darwin
 import ServiceManagement
 import Sparkle
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 import CryptoKit
 #endif
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private static let legacyBlennyBundleIdentifier = "com.example.BlennyProbe"
-    private static let readOnlySystemMenuBarOwners = Set([
+    static let legacyBlennyBundleIdentifier = "com.example.BlennyProbe"
+    static let readOnlySystemMenuBarOwners = Set([
         "com.apple.controlcenter",
         "com.apple.menubaragent",
         "com.apple.systemuiserver",
@@ -18,51 +18,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         "com.apple.weather.menu",
     ])
 
-    private let inventory = AccessibilityInventory(
+    let inventory = AccessibilityInventory(
         maximumDurationMilliseconds: 10_000,
         messagingTimeoutSeconds: 0.1
     )
-    private var isRefreshing = false
-    private var updaterController: SPUStandardUpdaterController?
-    private var hasUpdateFeed: Bool {
-        UpdateFeedConfiguration.isUsable(
-            feedURL: Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
-            publicEDKey: Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String
-        )
-    }
-    private var lastKnownAccessibilityTrust: Bool?
-    private var accessibilityOnboarding = AccessibilityOnboardingState()
-    private var accessibilityGrantRefresh = AccessibilityGrantRefreshState()
-    private var persistentStore: PersistentBundlePolicyStore?
-    private var interfaceStore: PolicyInterfaceStore?
-    private var editorModel: PolicyEditorViewModel?
-    private var ownershipSnapshot: MenuBarOwnershipSnapshot?
-    private var observedRunningBundleIdentifiers = Set<String>()
+    var isRefreshing = false
+    let applicationUpdater = ApplicationUpdater()
+    var hasUpdateFeed: Bool { applicationUpdater.isConfigured }
+    var lastKnownAccessibilityTrust: Bool?
+    var accessibilityOnboarding = AccessibilityOnboardingState()
+    var accessibilityGrantRefresh = AccessibilityGrantRefreshState()
+    var persistentStore: PersistentBundlePolicyStore?
+    var interfaceStore: PolicyInterfaceStore?
+    var editorModel: PolicyEditorViewModel?
+    var ownershipSnapshot: MenuBarOwnershipSnapshot?
+    var observedRunningBundleIdentifiers = Set<String>()
     // Session-only pass-through memory, never a persisted policy assignment.
-    private var admittedPassThroughBundleIdentifiers = Set<String>()
-    private var recoveryAvailable = false
-    private var developmentMutationAvailable = false
-    private var terminationRestoreInProgress = false
-    private var terminateImmediatelyToReleaseConnection = false
-    private var activeBaselinePlan: RevealAllowlistPlan?
-    private var activeRevealPlan: RevealAllowlistPlan?
-    private var ordinaryRevealTimeoutTask: Task<Void, Never>?
-    private var interactionGate = ManagementInteractionGate()
-    private var actionAudit = PolicyActionAuditTrail()
-    private var managementInteractionTask: Task<Void, Never>?
-    private let nativeOverflowObserver = NativeOverflowObserver(reconnectOnAgentChange: false)
-    private var nativeObservationStarted = false
-    private var ordinaryReveal = OrdinaryRevealCoordinator()
-    private var attemptedStartupRecovery = false
-    private var connectionInvalidationTask: Task<Void, Never>?
-    private var lifecycleGeneration: UInt64 = 0
-    private var lifecycleObservers: [(NotificationCenter, NSObjectProtocol)] = []
-    private var lifecycleRestartRequired = false
-    private var displayConfiguration = DisplayConfigurationSignature(displays: [])
-    private var pendingApplicationLaunchAssessments: [String: RunningApplicationDescriptor] = [:]
-    private var applicationLaunchAssessmentTask: Task<Void, Never>?
-    private var fallbackSlotVerificationTask: Task<Void, Never>?
-    private lazy var managementLoop: ManagementLoopController = {
+    var admittedPassThroughBundleIdentifiers = Set<String>()
+    var recoveryAvailable = false
+    var managementBackendAvailable = false
+    var terminationRestoreInProgress = false
+    var terminateImmediatelyToReleaseConnection = false
+    var activeBaselinePlan: RevealAllowlistPlan?
+    var activeRevealPlan: RevealAllowlistPlan?
+    var ordinaryRevealTimeoutTask: Task<Void, Never>?
+    var interactionGate = ManagementInteractionGate()
+    var actionAudit = PolicyActionAuditTrail()
+    var managementInteractionTask: Task<Void, Never>?
+    let nativeOverflowObserver = NativeOverflowObserver(reconnectOnAgentChange: false)
+    var nativeObservationStarted = false
+    var ordinaryReveal = OrdinaryRevealCoordinator()
+    var attemptedStartupRecovery = false
+    var connectionInvalidationTask: Task<Void, Never>?
+    var lifecycleGeneration: UInt64 = 0
+    var lifecycleObservers: [(NotificationCenter, NSObjectProtocol)] = []
+    var lifecycleRestartRequired = false
+    var displayConfiguration = DisplayConfigurationSignature(displays: [])
+    var pendingApplicationLaunchAssessments: [String: RunningApplicationDescriptor] = [:]
+    var applicationLaunchAssessmentTask: Task<Void, Never>?
+    var fallbackSlotVerificationTask: Task<Void, Never>?
+    lazy var managementLoop: ManagementLoopController = {
         let readOnly = isReadOnlyValidation
         return ManagementLoopController(writerProvider: { [unowned self] in
             guard !readOnly else { throw PolicyInterfaceWriteError.installedDryRunRequired }
@@ -80,12 +75,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             #else
             assertionWriter = RevealAssertionWriter(factory: factory)
             #endif
-            #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+            #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
             let persistentWriter = await self.sharedSystemItemTrialWriter
-            #if DEBUG
+            #if BLENNY_PRODUCT || DEBUG
             let backend = await self.orderingBackend
             let recovery = await self.orderingRecoveryStore
-            let orderingPolicyStore = await self.persistentStore
+            let orderingPolicyStore = await self.interfaceStore
             return CoordinatedPolicyWriter(
                 assertionWriter: assertionWriter, persistentWriter: persistentWriter,
                 orderingBackend: backend, orderingRecovery: recovery,
@@ -102,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             #endif
         })
     }()
-    private var isReadOnlyValidation: Bool {
+    var isReadOnlyValidation: Bool {
         #if DEBUG
         ProcessInfo.processInfo.environment["BLENNY_0_6_0_DRY_RUN"] == "YES"
             || ProcessInfo.processInfo.environment["BLENNY_0_5_0_DRY_RUN"] == "YES"
@@ -111,70 +106,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
         #endif
     }
+    #if BLENNY_PRODUCT || DEBUG
     #if DEBUG
-    private var policyCoexistenceController: DebugPolicyCoexistenceController?
-    private var validationDeadlineTask: Task<Void, Never>?
-    private var preparedOrderingPlan: OrderingPlan?
-    private var preparedBoardPolicy: PreparedPolicyEdit?
-    private var preparedBoardRequest: DebugOrderingConfigurationRequest?
-    private var preparedBoardFingerprint: String?
-    private var preparedUnsortedNames: [String] = []
-    private var preparedUndoRebaseToken: String?
-    private var lastOrderingSnapshot: OrderingSnapshot?
-    private var boundaryCaptureInProgress = false
-    private var boundaryCaptureTask: Task<Void, Never>?
-    private var boundaryEvidenceDirectory: URL {
+    var policyCoexistenceController: DebugPolicyCoexistenceController?
+    var validationDeadlineTask: Task<Void, Never>?
+    #endif
+    var preparedOrderingPlan: OrderingPlan?
+    var preparedBoardPolicy: PreparedPolicyEdit?
+    var preparedBoardRequest: OrderingConfigurationRequest?
+    var preparedBoardFingerprint: String?
+    var preparedUnsortedNames: [String] = []
+    var preparedUndoRebaseToken: String?
+    var lastOrderingSnapshot: OrderingSnapshot?
+    var boundaryCaptureInProgress = false
+    var boundaryCaptureTask: Task<Void, Never>?
+    var boundaryEvidenceDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Blenny/LocalData/BoundaryDiagnostics")
     }
-    private var activeOrderingPlan: OrderingPlan?
-    private var orderingRecoveryKnown = false
-    private lazy var fallbackRecoveryStore = FallbackPositionRecoveryStore(
+    var activeOrderingPlan: OrderingPlan?
+    var orderingRecoveryKnown = false
+    lazy var fallbackRecoveryStore = FallbackPositionRecoveryStore(
         directory: FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Blenny/LocalData/FallbackPositionExperiment")
     )
-    private var fallbackTrialRecovery: (any FallbackPositionRecoveryStoring)? {
-        #if DEBUG
+    var fallbackTrialRecovery: (any FallbackPositionRecoveryStoring)? {
         fallbackRecoveryStore
-        #else
-        nil
-        #endif
     }
-    private lazy var orderingRecoveryStore = OrderingRecoveryStore(
+    lazy var orderingRecoveryStore = OrderingRecoveryStore(
         directory: FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Blenny/DebugOrdering")
     )
-    private lazy var menuBarLayoutAccess = MenuBarLayoutAccessSession(
+    lazy var menuBarLayoutAccess = MenuBarLayoutAccessSession(
         store: MenuBarLayoutBookmarkStore(
             directory: FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support/Blenny/DebugOrdering")
         )
     )
-    private lazy var orderingBackend = MacOS27MenuBarOrderingBackend(
+    lazy var orderingBackend = MacOS27MenuBarOrderingBackend(
         contextProvider: { [weak self] in
             self?.orderingRuntimeContext() ?? MacOS27MenuBarOrderingContext(
                 policyFingerprint: "unavailable", orderingAllowedBundleIdentifiers: [], lifecycleGeneration: 0
             )
         },
         fallbackIdentityProvider: { [weak self] in
-            #if DEBUG
-            self?.statusItemController.debugFallbackNativeIdentity
-            #else
-            nil
-            #endif
+            self?.statusItemController.fallbackNativeIdentity
         }
     )
     #endif
-    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
-    private lazy var sharedSystemItemTrialWriter = SharedSystemItemManualTrialWriter(
-        backend: DebugSharedSystemItemTrialBackend(),
+    #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    lazy var sharedSystemItemTrialWriter = SharedSystemItemManualTrialWriter(
+        backend: MacOS27SystemItemPreferenceBackend(),
         receiptDirectory: FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Blenny")
             .appendingPathComponent("DebugSharedSystemItemTrials")
     )
     #endif
 
-    private lazy var editorWindowController = PolicyEditorWindowController(
+    lazy var editorWindowController: PolicyEditorWindowController = PolicyEditorWindowController(
         onRefresh: { [weak self] in self?.refresh() },
         onRequestAccess: { [weak self] in self?.requestAccessibilityAccess() },
         onResumeManaging: { [weak self] in self?.resumeManaging() },
@@ -195,10 +184,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         },
         onRestoreSharedSystemItem: { [weak self] target in
             self?.restoreSharedSystemItem(target)
+        },
+        onSetAutomaticUpdateChecks: { [weak self] enabled in
+            self?.applicationUpdater.setAutomaticChecks(enabled)
+            self?.editorWindowController.interfaceModel.automaticUpdateChecks = enabled
         }
     )
 
-    private lazy var statusItemController = StatusItemController(
+    lazy var statusItemController = StatusItemController(
         onOpenDiagnostics: { [weak self] in self?.showEditor() },
         onRefresh: { [weak self] in self?.refresh() },
         onRequestAccess: { [weak self] in self?.requestAccessibilityAccess() },
@@ -212,7 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         },
         onCheckForUpdates: { [weak self] in self?.checkForUpdates(nil) },
         canCheckForUpdates: { [weak self] in
-            self?.updaterController?.updater.canCheckForUpdates == true
+            self?.applicationUpdater.canCheck == true
         }
     )
 
@@ -230,23 +223,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: editorWindowController.window
         )
         configureMainMenu()
-        if hasUpdateFeed {
-            updaterController = SPUStandardUpdaterController(
-                startingUpdater: true,
-                updaterDelegate: nil,
-                userDriverDelegate: nil
+        applicationUpdater.permitsInteraction = { [weak self] in
+            guard let self else { return false }
+            return UpdateInteractionPolicy.allowsCheck(
+                hasDraft: self.editorWindowController.hasDraftChanges,
+                isBusy: self.interactionGate.isBusy || self.isRefreshing || self.interactionGate.isTerminating,
+                recoveryPending: self.editorWindowController.interfaceModel.orderingPresentation.hasPendingRecovery
             )
         }
-        #if DEBUG
+        applicationUpdater.start()
+        editorWindowController.interfaceModel.automaticUpdateChecks = applicationUpdater.automaticallyChecks
+        #if BLENNY_PRODUCT || DEBUG
         configureOrderingInterface()
         restoreSavedMenuBarLayoutAccess()
+        #if DEBUG
         statusItemController.debugConfigureBoundaryCapture(directory: boundaryEvidenceDirectory) { [weak self] in
             self?.captureBoundaryEvidence()
         }
-        #if DEBUG
-        statusItemController.debugMoveFallback = { [weak self] in self?.positionRevealArrow(restoring: false) }
-        statusItemController.debugRestoreFallback = { [weak self] in self?.positionRevealArrow(restoring: true) }
         #endif
+        statusItemController.onPositionControls = { [weak self] in self?.positionRevealArrow(restoring: false) }
+        statusItemController.onUndoControlPlacement = { [weak self] in self?.positionRevealArrow(restoring: true) }
         #endif
         _ = statusItemController
         updatePermissionPresentation()
@@ -299,7 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         #endif
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         refreshSharedSystemItemTrialPresentation()
         #endif
         refresh()
@@ -364,7 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
-    @objc private func permissionWindowDidBecomeKey(_ notification: Notification) {
+    @objc func permissionWindowDidBecomeKey(_ notification: Notification) {
         applicationDidBecomeActive(notification)
     }
 
@@ -414,16 +410,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    @objc private func editorWindowWillClose(_ notification: Notification) {
+    @objc func editorWindowWillClose(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
     }
 
-    private func showEditor() {
+    func showEditor() {
         NSApplication.shared.setActivationPolicy(.regular)
         editorWindowController.showEditor()
     }
 
-    private func configureMainMenu() {
+    func configureMainMenu() {
         let mainMenu = NSMenu()
 
         let applicationItem = NSMenuItem()
@@ -461,7 +457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.windowsMenu = windowMenu
     }
 
-    @objc private func checkForUpdates(_ sender: Any?) {
+    @objc func checkForUpdates(_ sender: Any?) {
         if editorWindowController.hasDraftChanges {
             showEditor()
             editorWindowController.setStatus(
@@ -470,10 +466,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             return
         }
-        updaterController?.checkForUpdates(sender)
+        applicationUpdater.check(sender)
     }
 
-    private func refresh() {
+    func refresh() {
         guard !isRefreshing, !interactionGate.isBusy, !interactionGate.isTerminating,
               !editorWindowController.hasDraftChanges, connectionInvalidationTask == nil else { return }
         updatePermissionPresentation()
@@ -516,7 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func completeRefresh(
+    func completeRefresh(
         report: DiagnosticReport,
         runningBundleIdentifiers: Set<String>
     ) async {
@@ -629,7 +625,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
             #endif
-            developmentMutationAvailable = developmentCompatibilityAvailable(
+            managementBackendAvailable = backendCompatibilityAvailable(
                 bundleIdentifier: blennyBundleIdentifier
             )
             let managementState = await recoverManagement(
@@ -649,7 +645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 default: showEditor()
                 }
             }
-            #if DEBUG
+            #if BLENNY_PRODUCT || DEBUG
             // The board reads physical order with its ordinary bounded refresh.
             // This stays inside the existing interaction gate and never creates
             // an ordering writer, even when startup has a recovery receipt.
@@ -657,7 +653,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 presentBoardGeometry(report: report, candidates: candidateInventory.candidates)
                 await readOrderingForBoard()
             }
+            #if DEBUG
             await runInstalledDryRunIfRequested(model: model)
+            #endif
             #endif
         } catch {
             editorWindowController.setStatus(
@@ -673,7 +671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func recoverManagement(
+    func recoverManagement(
         accepted: PersistentBundlePolicyDocument,
         backup: PersistentBundlePolicyBackup?,
         model: PolicyEditorViewModel,
@@ -693,19 +691,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 baseline: nil
             )
         }
-        guard developmentMutationAvailable else {
+        guard managementBackendAvailable else {
             await managementLoop.failClosed(
-                "Grant Accessibility and choose Resume in the supported installed Debug app."
+                "Grant Accessibility and choose Resume in the supported installed app."
             )
             return await managementLoop.state
         }
-        guard let backup,
-              (try? backup.previousPolicy.validated(
+        let backupCompatible = backup.map { backup in
+            (try? backup.previousPolicy.validated(
                 forBlennyBundleIdentifier: model.blennyBundleIdentifier
-              )) != nil,
-              !backup.previousPolicy.policies.contains(where: {
+            )) != nil && !backup.previousPolicy.policies.contains(where: {
                 $0.bundleIdentifier.lowercased().hasPrefix("com.apple.")
-              }) else {
+            })
+        } ?? accepted.isInitialVisiblePolicy(forBlennyBundleIdentifier: model.blennyBundleIdentifier)
+        guard backupCompatible else {
             await managementLoop.failClosed(
                 "the scoped recovery backup is missing or incompatible"
             )
@@ -723,7 +722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 blennyBundleIdentifier: model.blennyBundleIdentifier,
                 candidateGeneration: candidateGeneration,
                 runtimeContractFingerprint: runtimeContractFingerprint,
-                recoveryBackupFingerprint: backup.backupFingerprint
+                recoveryBackupFingerprint: backup?.backupFingerprint
             )
             guard let baseline = prepared.report.newBaselinePlan,
                   let reveal = prepared.report.newRevealPlan,
@@ -745,7 +744,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func presentManagementState(
+    func presentManagementState(
         _ state: ManagementLoopState,
         persistedManagementEnabled: Bool
     ) {
@@ -779,7 +778,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         editorWindowController.setManagementRuntimeState(
             state,
-            developmentMutationAvailable: developmentMutationAvailable
+            managementBackendAvailable: managementBackendAvailable
         )
         guard !interactionGate.isTerminating else { return }
         if let notice = state.statusNotice(persistedManagementEnabled: persistedManagementEnabled) {
@@ -796,279 +795,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    #if DEBUG
-    private func runInstalledDryRunIfRequested(
-        model: PolicyEditorViewModel
-    ) async {
-        guard isReadOnlyValidation
-        else { return }
-        if ProcessInfo.processInfo.environment["BLENNY_0_9_0_ORDERING_DRY_RUN"] == "YES" {
-            // Let the ordinary refresh finish its UI interaction before the
-            // separately bounded, read-only ordering inspection starts.
-            Task { @MainActor [weak self] in await self?.runInstalledOrderingDryRun() }
-            return
-        }
-        do {
-            guard statusItemController.debugValidateNativeFallbackPresentation() else {
-                throw NSError(domain: "Blenny.InstalledDryRun", code: 1, userInfo: [
-                    NSLocalizedDescriptionKey: "Local AppKit fallback-presentation fixtures failed."
-                ])
-            }
-            Self.writeDryRunOutput(
-                "APPKIT PRESENTATION FIXTURES passed=true"
-                    + " nativeEventEvidence=false writerCreated=false"
-            )
-            let core = try await makeCore(scope: model.acceptedPolicyScope)
-            let preview = try await core.previewResumeManaging(
-                candidates: model.candidateInventory,
-                observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-                candidateGeneration: editorWindowController.candidateGeneration,
-                runtimeContractFingerprint: runtimeContractFingerprint
-            )
-            guard let baseline = preview.0.newBaselinePlan,
-                  let reveal = preview.0.newRevealPlan,
-                  let expansion = try PassThroughExpansion.prepare(
-                    baseline: baseline, reveal: reveal,
-                    acceptedBundleIdentifiers: Set(model.acceptedPolicyScope.approvedBundleIdentifiers),
-                    launchedBundleIdentifiers: ["xyz.fi5h.blenny.validation.passthrough"]
-                  ) else {
-                throw PolicyInterfaceWriteError.applyPreflightUnavailable("Pass-through dry-run plan is unavailable")
-            }
-            try PassThroughExpansion.validateReplacement(
-                from: baseline, to: expansion.baseline,
-                addedBundleIdentifiers: Set(expansion.addedBundleIdentifiers)
-            )
-            try PassThroughExpansion.validateReplacement(
-                from: reveal, to: expansion.reveal,
-                addedBundleIdentifiers: Set(expansion.addedBundleIdentifiers)
-            )
-            Self.writeDryRunOutput(
-                "PASS-THROUGH PREVIEW additions=\(expansion.addedBundleIdentifiers.count)"
-                    + " systemItemsUnchanged=true policyUnchanged=true"
-                    + " writerCreated=false assertionCreated=false persistenceChanged=false"
-            )
-            var manualPlansVerified = 0
-            for item in SystemItemPolicyCatalog.items {
-                for policy in MenuBarBundlePolicy.allCases {
-                    let originalDraft = BundlePolicyDraft(acceptedPolicy: model.acceptedPolicy)
-                    let trialDraft = item.rawValue == RevealAllowlistPlanner.bluetoothSystemItem
-                        ? originalDraft.assigningBluetooth(to: policy)
-                        : originalDraft.assigningSystemItem(identifier: item.identifier, to: policy)
-                    let trial = try PolicyDryRunner.prepare(
-                        oldPolicy: model.acceptedPolicy, draft: trialDraft,
-                        managementEnabled: true, candidates: model.candidateInventory,
-                        observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-                        scope: model.acceptedPolicyScope,
-                        blennyBundleIdentifier: model.blennyBundleIdentifier,
-                        candidateGeneration: editorWindowController.candidateGeneration,
-                        runtimeContractFingerprint: runtimeContractFingerprint
-                    )
-                    guard trial.prepared != nil,
-                          let baseline = trial.report.newBaselinePlan,
-                          let reveal = trial.report.newRevealPlan,
-                          baseline.allowedSystemItems.contains(2),
-                          reveal.allowedSystemItems.contains(2),
-                          baseline.allowedSystemItems.contains(item.rawValue) == (policy == .visible),
-                          reveal.allowedSystemItems.contains(item.rawValue) == (policy != .hidden) else {
-                        throw PolicyInterfaceWriteError.applyPreflightUnavailable(
-                            "Manual system-item policy fixture failed for \(item.displayName)"
-                        )
-                    }
-                    manualPlansVerified += 1
-                }
-            }
-            Self.writeDryRunOutput(
-                "MANUAL SYSTEM-ITEM PREVIEW controls=\(SystemItemPolicyCatalog.items.count)"
-                    + " policyPlans=\(manualPlansVerified) clockAlwaysAllowed=true"
-                    + " startsStopped=\(!model.acceptedPolicy.managementEnabled)"
-                    + " isolatedPolicyStore=true writerCreated=false assertionCreated=false"
-                    + " persistenceChanged=false"
-            )
-            var appleOwnerPlansVerified = 0
-            for catalogIdentifier in ExperimentalAppleBundlePolicyCatalog.bundleIdentifiers.sorted() {
-                guard let currentOwner = model.candidateInventory.candidates.first(where: {
-                    $0.bundleIdentifier.lowercased() == catalogIdentifier
-                }) else {
-                    throw PolicyInterfaceWriteError.applyPreflightUnavailable(
-                        "Experimental Apple owner is not an exact current menu-bar candidate: \(catalogIdentifier)"
-                    )
-                }
-                let bundleIdentifier = currentOwner.bundleIdentifier
-                for policy in MenuBarBundlePolicy.allCases {
-                    let trialDraft = BundlePolicyDraft(acceptedPolicy: model.acceptedPolicy)
-                        .assigning(bundleIdentifier, to: policy)
-                    let trialScope = PolicyValidationScope(
-                        approvedBundleIdentifiers:
-                            trialDraft.visible + trialDraft.revealable + trialDraft.hidden
-                    )
-                    let trial = try PolicyDryRunner.prepare(
-                        oldPolicy: model.acceptedPolicy, draft: trialDraft,
-                        managementEnabled: true, candidates: model.candidateInventory,
-                        observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-                        scope: trialScope,
-                        blennyBundleIdentifier: model.blennyBundleIdentifier,
-                        candidateGeneration: editorWindowController.candidateGeneration,
-                        runtimeContractFingerprint: runtimeContractFingerprint
-                    )
-                    guard trial.prepared != nil,
-                          let baseline = trial.report.newBaselinePlan,
-                          let reveal = trial.report.newRevealPlan,
-                          baseline.allowedBundleIdentifiers.contains(bundleIdentifier)
-                            == (policy == .visible),
-                          reveal.allowedBundleIdentifiers.contains(bundleIdentifier)
-                            == (policy != .hidden) else {
-                        throw PolicyInterfaceWriteError.applyPreflightUnavailable(
-                            "Experimental Apple owner fixture failed for \(bundleIdentifier)"
-                        )
-                    }
-                    appleOwnerPlansVerified += 1
-                }
-            }
-            Self.writeDryRunOutput(
-                "EXPERIMENTAL APPLE-OWNER PREVIEW controls="
-                    + "\(ExperimentalAppleBundlePolicyCatalog.bundleIdentifiers.count)"
-                    + " policyPlans=\(appleOwnerPlansVerified) exactCurrentOwners=true"
-                    + " writerCreated=false assertionCreated=false persistenceChanged=false"
-            )
-            // The ordinary app already started this observer, independently of
-            // management. Do not create a second, dry-run-only observation path.
-            let native = ordinaryReveal.observation
-            let nativeFailure = nativeOverflowObserver.unavailabilityReason ?? "none"
-            let nativeDetails = nativeOverflowObserver.debugObservationDetails.joined(separator: "\n- ")
-            Self.writeDryRunOutput(
-                preview.0.text
-                    + "\nNATIVE OBSERVATION (READ ONLY)"
-                    + "\n- present=\(native.isPresent) observable=\(native.observationAvailable) state=\(native.presentationState.rawValue) failure=\(nativeFailure)"
-                    + "\n- controls=\(native.controlCount) usable=\(native.isUsable)"
-                    + "\n- \(nativeDetails)"
-                    + "\nDRY-RUN GUARANTEES"
-                    + "\n- installedBundle=\(Bundle.main.bundleURL.path)"
-                    + "\n- writerCreated=false"
-                    + "\n- assertionCreated=false"
-                    + "\n- persistenceChanged=false"
-                    + "\n- managementEnabledChanged=false"
-                    + "\n- readOnlyStore=true"
-                    + "\n- planPrepared=\(preview.1 != nil)"
-            )
-            if let raw = ProcessInfo.processInfo.environment["BLENNY_0_6_0_OBSERVE_SECONDS"],
-               let seconds = Int(raw), (1...300).contains(seconds) {
-                Self.writeDryRunOutput("READ-ONLY OBSERVATION WINDOW seconds=\(seconds); no writer is available")
-                try await Task.sleep(for: .seconds(seconds))
-            }
-            nativeOverflowObserver.stop()
-            statusItemController.setNativeOverflow(.unavailable)
-            editorWindowController.setNativeOverflowPlacement(.unavailable)
-        } catch {
-            nativeOverflowObserver.stop()
-            statusItemController.setNativeOverflow(.unavailable)
-            editorWindowController.setNativeOverflowPlacement(.unavailable)
-            Self.writeDryRunOutput("DRY-RUN FAILED: \(error)")
-        }
-        NSApplication.shared.terminate(nil)
-    }
-
-    private static func writeDryRunOutput(_ text: String) {
-        guard let data = "\(text)\n".data(using: .utf8) else { return }
-        FileHandle.standardOutput.write(data)
-    }
-
-    /// Exercises the installed product reader and planner with the ordinary
-    /// read-only policy store. The writer provider rejects this entire launch.
-    private func runInstalledOrderingDryRun() async {
-        do {
-            let snapshot = try await orderingBackend.capture()
-            let candidates = try OrderingIdentityResolver.resolve(snapshot: snapshot)
-            presentOrderingCandidates(snapshot)
-            await updateOrderingRecoveryPresentation()
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            if let receipt = try await orderingRecoveryStore.load(),
-               let review = try receipt.undoLedgerRebaseReview(in: snapshot) {
-                Self.writeDryRunOutput("ORDERING READ-ONLY UNDO REBASE REVIEW: " + review.userDescription)
-            }
-            Self.writeDryRunOutput("ORDERING READ-ONLY SNAPSHOT")
-            FileHandle.standardOutput.write(try encoder.encode(snapshot))
-            Self.writeDryRunOutput("\nORDERING CANDIDATES")
-            for candidate in candidates where candidate.key != nil
-                || snapshot.observationsByPID.values.contains(where: {
-                    $0.process.bundleIdentifier == candidate.bundleIdentifier
-                }) {
-                Self.writeDryRunOutput(
-                    "\(candidate.bundleIdentifier): eligible=\(candidate.eligible) "
-                        + candidate.reasons.map(\.userDescription).joined(separator: "; ")
-                )
-            }
-            let insertion = ProcessInfo.processInfo.environment["BLENNY_ORDERING_REORDER_BUNDLES"]
-            let previewPlan: OrderingPlan?
-            if let selection = ProcessInfo.processInfo.environment["BLENNY_ORDERING_PREVIEW_SUBJECTS"] {
-                let identifiers = selection.split(separator: ",").map(String.init)
-                let subjects = identifiers.compactMap { OrderingSubjectID(boardID: $0) }
-                guard !subjects.isEmpty, subjects.count == identifiers.count else {
-                    throw OrderingError.invalidSelection
-                }
-                previewPlan = try OrderingPlan.makeConfigurationOrdering(
-                    snapshot: snapshot, orderedSubjects: subjects
-                )
-            } else if let selection = insertion
-                ?? ProcessInfo.processInfo.environment["BLENNY_ORDERING_PREVIEW_BUNDLES"] {
-                let bundles = selection.split(separator: ",").map(String.init)
-                previewPlan = try insertion == nil
-                    ? OrderingPlan.make(snapshot: snapshot, bundleIdentifiers: bundles)
-                    : OrderingPlan.makeReordering(snapshot: snapshot, orderedBundleIdentifiers: bundles)
-            } else {
-                previewPlan = nil
-            }
-            if let plan = previewPlan {
-                Self.writeDryRunOutput("ORDERING READ-ONLY PREVIEW")
-                FileHandle.standardOutput.write(try encoder.encode(plan))
-                if ProcessInfo.processInfo.environment["BLENNY_ORDERING_VERIFY_PREFLIGHT"] == "YES" {
-                    // One additional read diagnoses freshness without creating a
-                    // writer, sleeping, retrying or changing the reviewed plan.
-                    let current = try await orderingBackend.capture()
-                    Self.writeDryRunOutput("\nORDERING READ-ONLY PREFLIGHT SNAPSHOT")
-                    FileHandle.standardOutput.write(try encoder.encode(current))
-                    do {
-                        try plan.validateFresh(equivalentTo: current)
-                        Self.writeDryRunOutput("\nORDERING READ-ONLY PREFLIGHT equivalent=true")
-                    } catch {
-                        Self.writeDryRunOutput("\nORDERING READ-ONLY PREFLIGHT rejected: \(error.localizedDescription)")
-                    }
-                }
-            }
-            Self.writeDryRunOutput(
-                "\nORDERING DRY-RUN PASSED writerCreated=false orderingWrite=false"
-                    + " receiptWritten=false policyStoreReadOnly=true"
-            )
-            if let raw = ProcessInfo.processInfo.environment["BLENNY_0_9_0_OBSERVE_SECONDS"],
-               let seconds = Int(raw), (1...60).contains(seconds) {
-                showEditor()
-                Self.writeDryRunOutput("ORDERING READ-ONLY UI WINDOW seconds=\(seconds)")
-                DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(seconds)) {
-                    Self.writeDryRunOutput("ORDERING READ-ONLY UI WINDOW finished")
-                    NSApplication.shared.terminate(nil)
-                }
-                return
-            }
-        } catch {
-            Self.writeDryRunOutput("ORDERING DRY-RUN FAILED: \(error)")
-        }
-        // Exit from an AppKit run-loop turn, outside this Swift task's job.
-        RunLoop.main.perform(inModes: [.common]) {
-            MainActor.assumeIsolated { NSApplication.shared.terminate(nil) }
-        }
-    }
+    #if !BLENNY_PRODUCT && !DEBUG && !BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    func hideSharedSystemItem(_ target: SharedSystemItemTrialTarget) {}
+    func restoreSharedSystemItem(_ target: SharedSystemItemTrialTarget) {}
     #endif
 
-    #if !DEBUG && !BLENNY_SHARED_SYSTEM_ITEM_TRIAL
-    private func hideSharedSystemItem(_ target: SharedSystemItemTrialTarget) {}
-    private func restoreSharedSystemItem(_ target: SharedSystemItemTrialTarget) {}
-    #endif
-
-    private var runtimeContractFingerprint: String {
+    var runtimeContractFingerprint: String {
         ExperimentalMacOS27AssessmentFactory.compatibilityFingerprint
     }
 
-    private func developmentCompatibilityAvailable(
+    func backendCompatibilityAvailable(
         bundleIdentifier: String
     ) -> Bool {
         guard !isReadOnlyValidation,
@@ -1090,9 +826,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func resumeManaging() { performPolicyAction(.resume) }
-    private func applyDraftChanges() {
-        #if DEBUG
+    func resumeManaging() { performPolicyAction(.resume) }
+    func applyDraftChanges() {
+        #if BLENNY_PRODUCT || DEBUG
         if let request = editorWindowController.currentOrderingConfigurationRequest {
             previewBoardConfiguration(request, applyWhenReady: true)
             return
@@ -1100,13 +836,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         performPolicyAction(.apply)
     }
-    private func stopManaging() { performPolicyAction(.stop) }
-    private func restorePreviousPolicy() { performPolicyAction(.restore) }
+    func stopManaging() { performPolicyAction(.stop) }
+    func restorePreviousPolicy() { performPolicyAction(.restore) }
 
-    private func draftDidChange(_ model: PolicyEditorViewModel) {
+    func draftDidChange(_ model: PolicyEditorViewModel) {
         guard !interactionGate.isBusy, !interactionGate.isTerminating else { return }
         editorModel = model
-        #if DEBUG
+        #if BLENNY_PRODUCT || DEBUG
         discardOrderingPreview()
         #endif
         statusItemController.setDraftHasChanges(
@@ -1115,14 +851,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func beginManagementInteraction() -> Bool {
+    func beginManagementInteraction() -> Bool {
         guard !isRefreshing, connectionInvalidationTask == nil, interactionGate.begin() else { return false }
         editorWindowController.setApplying(true)
         statusItemController.setInteractionBusy(true)
         return true
     }
 
-    private func finishManagementInteraction(refreshNativeObservation: Bool = false) {
+    func finishManagementInteraction(refreshNativeObservation: Bool = false) {
         // Read once while the transition still owns the gate. This discovers
         // an arrow created by the just-completed reflow without a polling loop.
         if !interactionGate.isTerminating {
@@ -1138,7 +874,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             requiresObservationRefresh: editorWindowController.requiresObservationRefresh
         )
         statusItemController.setInteractionBusy(interactionGate.isTerminating)
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         refreshSharedSystemItemTrialPresentation()
         #endif
         #if DEBUG
@@ -1157,7 +893,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     }
 
-    private func performPolicyAction(_ action: PolicyActionAuditTrail.Action) {
+    func performPolicyAction(_ action: PolicyActionAuditTrail.Action) {
         guard !isReadOnlyValidation, let model = editorModel,
               action == .stop || !editorWindowController.requiresObservationRefresh,
               action != .apply || model.hasDraftChanges,
@@ -1175,7 +911,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer { finishManagementInteraction() }
             var preparedForAudit: PreparedPolicyEdit?
             do {
-                #if DEBUG
+                #if BLENNY_PRODUCT || DEBUG
                 discardOrderingPreview()
                 if orderingRecoveryKnown && action != .stop {
                     let writer = try await orderingCoordinator()
@@ -1282,7 +1018,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         action == .apply ? "Changes applied" : "Done", isError: false
                     )
                 }
-                #if DEBUG
+                #if BLENNY_PRODUCT || DEBUG
                 if action == .apply, let failure = await updateAcceptedControlBoundary() {
                     editorWindowController.setStatus("Changes applied. \(failure)", isError: true)
                 }
@@ -1302,17 +1038,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func apply(
+    func apply(
         _ prepared: PreparedPolicyEdit,
         using core: PolicyEditingCore,
         previousModel model: PolicyEditorViewModel,
         action: PolicyActionAuditTrail.Action
     ) async throws -> PolicyEditingCommitOutcome {
         let generation = lifecycleGeneration
-        developmentMutationAvailable = developmentCompatibilityAvailable(
+        managementBackendAvailable = backendCompatibilityAvailable(
             bundleIdentifier: model.blennyBundleIdentifier
         )
-        guard !prepared.newPolicy.managementEnabled || developmentMutationAvailable else {
+        guard !prepared.newPolicy.managementEnabled || managementBackendAvailable else {
             throw PolicyInterfaceWriteError.installedDryRunRequired
         }
         do {
@@ -1388,7 +1124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func captureApplyPreflight() async throws -> (
+    func captureApplyPreflight() async throws -> (
         candidates: PolicyCandidateInventory,
         runningBundleIdentifiers: Set<String>,
         unattributedItems: [UnattributedMenuBarItemObservation]
@@ -1426,7 +1162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func synchronizeInterfaceAfterCommit(
+    func synchronizeInterfaceAfterCommit(
         _ accepted: PersistentBundlePolicyDocument,
         previousModel: PolicyEditorViewModel,
         preservingDraft: Bool = false,
@@ -1455,7 +1191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func reconcileManagementAfterFailure(
+    func reconcileManagementAfterFailure(
         _ prepared: PreparedPolicyEdit
     ) async {
         if prepared.oldPolicy.managementEnabled,
@@ -1477,7 +1213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func toggleOrdinaryReveal() {
+    func toggleOrdinaryReveal() {
         #if DEBUG
         let id = statusItemController.debugDispatchClickCheckID
         statusItemController.debugRecordClickStage("toggle entry", id: id)
@@ -1499,7 +1235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
-    private func drainOrdinaryRevealRequest(diagnosticID: UUID? = nil) {
+    func drainOrdinaryRevealRequest(diagnosticID: UUID? = nil) {
         guard AccessibilityAuthorization.isTrusted else {
             #if DEBUG
             statusItemController.debugRecordClickStage("rejected: accessibility unavailable",
@@ -1593,7 +1329,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func updateNativeOverflowObservation() {
+    func updateNativeOverflowObservation() {
         #if DEBUG
         guard policyCoexistenceController == nil else { return }
         #endif
@@ -1649,11 +1385,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
-    private func nativeAgentConnectionLost() {
+    func nativeAgentConnectionLost() {
         handleLifecycleEvent(.menuBarAgentChanged)
     }
 
-    private func scheduleFallbackSlotVerification() {
+    func scheduleFallbackSlotVerification() {
         guard fallbackSlotVerificationTask == nil else { return }
         sessionDiagnostic("fallback-slot compaction=started verification=scheduled-once")
         fallbackSlotVerificationTask = Task { @MainActor [weak self] in
@@ -1665,7 +1401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func installLifecycleObservers() {
+    func installLifecycleObservers() {
         displayConfiguration = currentDisplayConfiguration()
         let workspace = NSWorkspace.shared.notificationCenter
         let events: [(Notification.Name, ManagementLifecycleEvent)] = [
@@ -1716,7 +1452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleDisplayConfigurationNotification() {
+    func handleDisplayConfigurationNotification() {
         let current = currentDisplayConfiguration()
         guard DisplayConfigurationPolicy.invalidates(
             previous: displayConfiguration,
@@ -1729,7 +1465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         handleLifecycleEvent(.displayChanged)
     }
 
-    private func currentDisplayConfiguration() -> DisplayConfigurationSignature {
+    func currentDisplayConfiguration() -> DisplayConfigurationSignature {
         DisplayConfigurationSignature(displays: NSScreen.screens.map { screen in
             let identifier = (screen.deviceDescription[
                 NSDeviceDescriptionKey("NSScreenNumber")
@@ -1745,11 +1481,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         })
     }
 
-    private func handleWorkspaceApplicationLaunch(
+    func handleWorkspaceApplicationLaunch(
         _ application: NSRunningApplication
     ) {
         let identifier = application.bundleIdentifier
-        #if DEBUG
+        #if BLENNY_PRODUCT || DEBUG
         if activeOrderingPlan != nil {
             handleLifecycleEvent(.applicationLaunched(identifier))
             return
@@ -1780,7 +1516,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleApplicationLaunchAssessment()
     }
 
-    private func scheduleApplicationLaunchAssessment() {
+    func scheduleApplicationLaunchAssessment() {
         guard applicationLaunchAssessmentTask == nil,
               !interactionGate.isBusy, !interactionGate.isTerminating, !isRefreshing,
               connectionInvalidationTask == nil, activeBaselinePlan != nil,
@@ -1793,7 +1529,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func assessPendingApplicationLaunches(
+    func assessPendingApplicationLaunches(
         generation: UInt64
     ) async {
         applicationLaunchAssessmentTask = nil
@@ -1906,7 +1642,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func verifyUnidentifiedLaunchesHaveNoExtras(
+    func verifyUnidentifiedLaunchesHaveNoExtras(
         _ running: [RunningApplicationDescriptor]
     ) async throws {
         let report = await inventory.capture(
@@ -1944,7 +1680,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleLifecycleEvent(_ event: ManagementLifecycleEvent) {
+    func handleLifecycleEvent(_ event: ManagementLifecycleEvent) {
         guard !interactionGate.isTerminating else { return }
         let managed = Set(editorModel?.acceptedPolicyScope.approvedBundleIdentifiers ?? [])
         let allowed = activeBaselinePlan.map { Set($0.allowedBundleIdentifiers) }
@@ -1953,7 +1689,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             event, managedBundleIdentifiers: managed, allowedBundleIdentifiers: allowed,
             blennyBundleIdentifier: Bundle.main.bundleIdentifier ?? "xyz.fi5h.blenny"
         )
-        #if DEBUG
+        #if BLENNY_PRODUCT || DEBUG
         discardOrderingPreview()
         let orderingInvalidated = activeOrderingPlan != nil
         #else
@@ -1983,7 +1719,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         connectionInvalidationTask = Task { @MainActor [weak self] in
             guard let self else { return }
             if lifecycleRestartRequired {
-                developmentMutationAvailable = false
+                managementBackendAvailable = false
                 await managementLoop.connectionInvalidated()
             } else {
                 await managementLoop.failClosed(event.reason)
@@ -2002,7 +1738,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 persistedManagementEnabled: editorModel?.acceptedPolicy.managementEnabled == true
             )
             statusItemController.setInteractionBusy(interactionGate.isBusy || interactionGate.isTerminating)
-            #if DEBUG
+            #if BLENNY_PRODUCT || DEBUG
             activeOrderingPlan = nil
             await updateOrderingRecoveryPresentation()
             #endif
@@ -2012,14 +1748,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Explicit local validation only; no normal disk logger or inventory dump.
-    private func sessionDiagnostic(_ message: @autoclosure () -> String) {
+    func sessionDiagnostic(_ message: @autoclosure () -> String) {
         #if DEBUG
         guard DebugSessionTrace.shared.enabled else { return }
         DebugSessionTrace.shared.write(message())
         #endif
     }
 
-    private func endOrdinaryReveal(
+    func endOrdinaryReveal(
         baseline: RevealAllowlistPlan,
         persistedManagementEnabled: Bool
     ) async {
@@ -2036,7 +1772,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func makeCore(
+    func makeCore(
         scope: PolicyValidationScope,
         permitsReviewedActivation: Bool = false
     ) async throws -> PolicyEditingCore {
@@ -2062,12 +1798,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func permitsWriterUse(generation: UInt64) -> Bool {
+    func permitsWriterUse(generation: UInt64) -> Bool {
         generation == lifecycleGeneration && !interactionGate.isTerminating
             && connectionInvalidationTask == nil && !isReadOnlyValidation
     }
 
-    private func requestAccessibilityAccess() {
+    func requestAccessibilityAccess() {
         guard !isReadOnlyValidation else { return }
         let action = accessibilityOnboarding.nextAction(
             isTrusted: AccessibilityAuthorization.isTrusted
@@ -2096,35 +1832,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @discardableResult
-    private func openAccessibilitySettings() -> Bool {
+    func openAccessibilitySettings() -> Bool {
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         ) else { return false }
         return NSWorkspace.shared.open(url)
     }
 
-    private func openProjectWebsite() {
+    func openProjectWebsite() {
         openExternalURL(ProductSupportLinks.projectWebsite)
     }
 
-    private func openMonthlySponsor() {
+    func openMonthlySponsor() {
         openExternalURL(ProductSupportLinks.monthlySponsor)
     }
 
-    private func openOneTimeSponsor() {
+    func openOneTimeSponsor() {
         openExternalURL(ProductSupportLinks.oneTimeSponsor)
     }
 
-    private func openKoFi() {
+    func openKoFi() {
         openExternalURL(ProductSupportLinks.koFi)
     }
 
-    private func openExternalURL(_ rawValue: String) {
+    func openExternalURL(_ rawValue: String) {
         guard let url = URL(string: rawValue) else { return }
         NSWorkspace.shared.open(url)
     }
 
-    private func updatePermissionPresentation() {
+    func updatePermissionPresentation() {
         let trusted = AccessibilityAuthorization.isTrusted
         if lastKnownAccessibilityTrust == true && !trusted {
             handleLifecycleEvent(.permissionLost)
@@ -2138,30 +1874,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController.setAccessibilityTrusted(trusted)
     }
 
-    private func setLaunchAtLogin(_ enabled: Bool) {
+    func setLaunchAtLogin(_ enabled: Bool) {
         guard !isReadOnlyValidation else { return }
-        let service = SMAppService.mainApp
         do {
-            if enabled {
-                if service.status == .requiresApproval {
-                    SMAppService.openSystemSettingsLoginItems()
-                } else if service.status != .enabled {
-                    try service.register()
-                }
-            } else if service.status == .enabled || service.status == .requiresApproval {
-                try service.unregister()
-            }
+            try ApplicationLoginService.setEnabled(enabled)
             updateLaunchAtLoginPresentation()
         } catch {
             updateLaunchAtLoginPresentation(failureMessage: error.localizedDescription)
         }
     }
 
-    private func openLoginItemsSettings() {
+    func openLoginItemsSettings() {
         SMAppService.openSystemSettingsLoginItems()
     }
 
-    private func showFishPlacementGuide() {
+    func showFishPlacementGuide() {
         let snapshot = ordinaryReveal.observation
         guard BlennyFishPlacement.guideAvailable(for: snapshot) else {
             editorWindowController.setStatus(
@@ -2179,8 +1906,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
-    #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
-    private func developmentCoordinator(forRecovery: Bool = false) async throws -> CoordinatedPolicyWriter {
+    #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+    func policyCoordinator(forRecovery: Bool = false) async throws -> CoordinatedPolicyWriter {
         guard !isReadOnlyValidation else { throw PolicyInterfaceWriteError.installedDryRunRequired }
         if forRecovery, let writer = await managementLoop.existingWriterForRecovery() {
             guard let coordinated = writer as? CoordinatedPolicyWriter else {
@@ -2196,7 +1923,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return coordinated
     }
 
-    private func refreshSharedSystemItemTrialPresentation() {
+    func refreshSharedSystemItemTrialPresentation() {
         Task { @MainActor [weak self] in
             guard let self else { return }
             for target in SharedSystemItemTrialTarget.allCases {
@@ -2221,21 +1948,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func hideSharedSystemItem(_ target: SharedSystemItemTrialTarget) {
+    func hideSharedSystemItem(_ target: SharedSystemItemTrialTarget) {
         guard PersistentSystemItemPolicyCatalog.supportsManagement(
             for: target.observationIdentifier
         ) else { return }
         guard !isReadOnlyValidation, beginManagementInteraction() else { return }
         editorWindowController.setSharedSystemItemTrial(target, presentation: .busy)
         editorWindowController.setStatus(
-            "Applying one Debug-only \(target.displayName) visibility change…",
+            "Applying the selected \(target.displayName) visibility change…",
             isError: false
         )
         managementInteractionTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { finishManagementInteraction() }
             do {
-                let writer = try await developmentCoordinator()
+                let writer = try await policyCoordinator()
                 let receipt = try await writer.hideManualSystemItem(target)
                 editorWindowController.setSharedSystemItemTrial(target, presentation: .recoveryRequired)
                 editorWindowController.setStatus(
@@ -2267,7 +1994,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func restoreSharedSystemItem(_ target: SharedSystemItemTrialTarget) {
+    func restoreSharedSystemItem(_ target: SharedSystemItemTrialTarget) {
         guard !isReadOnlyValidation, beginManagementInteraction() else { return }
         editorWindowController.setSharedSystemItemTrial(target, presentation: .busy)
         editorWindowController.setStatus(
@@ -2278,7 +2005,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             defer { finishManagementInteraction() }
             do {
-                let writer = try await developmentCoordinator(forRecovery: true)
+                let writer = try await policyCoordinator(forRecovery: true)
                 try await writer.restoreManualSystemItem(target)
                 editorWindowController.setSharedSystemItemTrial(target, presentation: .ready)
                 editorWindowController.setStatus(
@@ -2303,29 +2030,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     #endif
 
-    private func updateLaunchAtLoginPresentation(failureMessage: String? = nil) {
-        let availability: LaunchAtLoginAvailability
-        switch SMAppService.mainApp.status {
-        case .notRegistered:
-            availability = .disabled
-        case .enabled:
-            availability = .enabled
-        case .requiresApproval:
-            availability = .requiresApproval
-        case .notFound:
-            availability = .notFound
-        @unknown default:
-            availability = .notFound
-        }
+    func updateLaunchAtLoginPresentation(failureMessage: String? = nil) {
         editorWindowController.setLaunchAtLoginState(
-            LaunchAtLoginPresentationState(
-                availability: availability,
-                failureMessage: failureMessage
-            )
+            ApplicationLoginService.presentation(failureMessage: failureMessage)
         )
     }
 
-    private func makePersistentStore() throws -> PersistentBundlePolicyStore {
+    func makePersistentStore() throws -> PersistentBundlePolicyStore {
         if let persistentStore { return persistentStore }
         let applicationSupport = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -2333,7 +2044,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appropriateFor: nil,
             create: !isReadOnlyValidation
         )
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let policyDirectoryName = "ManualSystemItemTrial"
         #else
         let policyDirectoryName = "PersistentPolicyPrototype"
@@ -2350,10 +2061,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func initialPolicy(
+    func initialPolicy(
         blennyBundleIdentifier: String
     ) throws -> PersistentBundlePolicyDocument {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         // Import intent read-only; no test action can write the production
         // policy or its recovery backup. The trial begins without an assertion.
         let applicationSupport = try FileManager.default.url(
@@ -2378,7 +2089,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func currentBundleIdentifier() throws -> String {
+    func currentBundleIdentifier() throws -> String {
         guard let identifier = Bundle.main.bundleIdentifier else {
             throw PersistentBundlePolicyDocumentError.invalidBundleIdentifier(
                 "Blenny bundle identifier is unavailable"
@@ -2387,7 +2098,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return identifier
     }
 
-    private func runningApplicationDescriptors() -> [RunningApplicationDescriptor] {
+    func runningApplicationDescriptors() -> [RunningApplicationDescriptor] {
         var applications = NSWorkspace.shared.runningApplications
         applications.append(
             contentsOf: NSRunningApplication.runningApplications(
@@ -2416,7 +2127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func requiresApplicationLaunchAssessment(_ application: NSRunningApplication) -> Bool {
+    func requiresApplicationLaunchAssessment(_ application: NSRunningApplication) -> Bool {
         ManagementLifecyclePolicy.requiresLaunchAssessment(
             bundleIdentifier: application.bundleIdentifier,
             acceptedBundleIdentifiers: Set(editorModel?.acceptedPolicyScope.approvedBundleIdentifiers ?? []),
@@ -2425,7 +2136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func scanPriority(for application: NSRunningApplication) -> Int {
+    func scanPriority(for application: NSRunningApplication) -> Int {
         if application.bundleIdentifier?.lowercased() == "com.apple.menubaragent" {
             return 0
         }
@@ -2435,965 +2146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return 3
     }
 
-    private func isReadOnlySystemMenuBarOwner(_ bundleIdentifier: String?) -> Bool {
+    func isReadOnlySystemMenuBarOwner(_ bundleIdentifier: String?) -> Bool {
         guard let bundleIdentifier else { return false }
         return Self.readOnlySystemMenuBarOwners.contains(bundleIdentifier.lowercased())
     }
 }
-
-#if DEBUG
-extension AppDelegate {
-    private func orderingRuntimeContext() -> MacOS27MenuBarOrderingContext {
-        let policy = editorModel?.acceptedPolicy
-        let allowed = Set(NSWorkspace.shared.runningApplications.compactMap { app -> String? in
-            guard let bundle = app.bundleIdentifier, let policy else { return nil }
-            let assigned = policy.policies.first {
-                BundlePolicyIdentity.canonicalKey(for: $0.bundleIdentifier)
-                    == BundlePolicyIdentity.canonicalKey(for: bundle)
-            }?.policy ?? .visible
-            return OrderingPolicyScope.allows(intent: assigned, managementEnabled: policy.managementEnabled)
-                ? bundle : nil
-        })
-        return MacOS27MenuBarOrderingContext(
-            policyFingerprint: policy?.policyFingerprint ?? "policy-unavailable",
-            orderingAllowedBundleIdentifiers: allowed,
-            lifecycleGeneration: Int(truncatingIfNeeded: lifecycleGeneration)
-        )
-    }
-
-    private func configureOrderingInterface() {
-        let presentation = editorWindowController.orderingPresentation
-        presentation.onRefresh = { [weak self] in self?.refresh() }
-        presentation.onPreview = { [weak self] bundles in self?.previewOrdering(bundles) }
-        presentation.onReorder = { [weak self] bundles in self?.previewBoardOrdering(bundles) }
-        presentation.onDraftChanged = { [weak self] model in self?.draftDidChange(model) }
-        presentation.onPreviewConfiguration = { [weak self] request in
-            self?.previewBoardConfiguration(request)
-        }
-        presentation.onChooseLayoutFile = { [weak self] in
-            self?.requestMenuBarLayoutAccess()
-        }
-        presentation.onApply = { [weak self] fingerprint in self?.applyOrdering(fingerprint) }
-        presentation.onRestore = { [weak self] in self?.restoreOrdering() }
-        presentation.onDiscard = { [weak self] in
-            guard let self else { return }
-            if preparedBoardRequest != nil || editorWindowController.hasOrderingLayoutChanges,
-               let discarded = editorWindowController.discardConfigurationDraft() {
-                draftDidChange(discarded)
-            }
-            discardOrderingPreview()
-        }
-        presentation.message = "Reading the current menu-bar order with the application inventory…"
-        Task { [weak self] in await self?.updateOrderingRecoveryPresentation() }
-    }
-
-    private func discardOrderingPreview() {
-        preparedOrderingPlan = nil
-        preparedBoardPolicy = nil
-        preparedBoardRequest = nil
-        preparedBoardFingerprint = nil
-        preparedUnsortedNames = []
-        preparedUndoRebaseToken = nil
-        let presentation = editorWindowController.orderingPresentation
-        presentation.preview = nil
-        presentation.requiresUndoReplacement = false
-        presentation.canApply = false
-    }
-
-    private func restoreSavedMenuBarLayoutAccess() {
-        do {
-            if try menuBarLayoutAccess.restoreSavedAccess() {
-                sessionDiagnostic("layout-access restored exact-file bookmark")
-            }
-        } catch {
-            sessionDiagnostic("layout-access restore-failure \(error.localizedDescription)")
-        }
-    }
-
-    private func requestMenuBarLayoutAccess() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose the Menu Bar Layout File"
-        panel.message = "Select the menu bar layout file so Blenny can apply and undo the order you choose."
-        panel.prompt = "Grant Access"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = false
-        panel.resolvesAliases = true
-        panel.directoryURL = menuBarLayoutAccess.expectedFileURL.deletingLastPathComponent()
-        panel.nameFieldStringValue = menuBarLayoutAccess.expectedFileURL.lastPathComponent
-        panel.begin { [weak self] response in
-            guard let self, response == .OK, let selectedURL = panel.url else { return }
-            do {
-                try menuBarLayoutAccess.grant(selectedURL: selectedURL)
-                let presentation = editorWindowController.orderingPresentation
-                presentation.needsDataAccess = false
-                presentation.isError = false
-                presentation.technicalDetail = nil
-                presentation.message = "Access granted. Reading the current menu bar order…"
-                Task { [weak self] in await self?.readOrderingForBoard() }
-            } catch {
-                let presentation = editorWindowController.orderingPresentation
-                presentation.needsDataAccess = true
-                presentation.isError = true
-                presentation.message = "Choose the menu bar layout file to enable sorting and Undo."
-                presentation.technicalDetail = error.localizedDescription
-            }
-        }
-    }
-
-    private func orderingCoordinator(forRecovery: Bool = false) async throws -> CoordinatedPolicyWriter {
-        try await developmentCoordinator(forRecovery: forRecovery)
-    }
-
-    private func beginOrderingInteraction(message: String) -> Bool {
-        guard editorModel != nil,
-              beginManagementInteraction() else {
-            editorWindowController.orderingPresentation.message =
-                "Finish the current operation before reviewing the layout."
-            return false
-        }
-        ordinaryReveal.suspend()
-        let presentation = editorWindowController.orderingPresentation
-        presentation.isBusy = true
-        presentation.canRefresh = false
-        presentation.canApply = false
-        presentation.isError = false
-        presentation.technicalDetail = nil
-        presentation.message = message
-        editorWindowController.setStatus(message, isError: false)
-        return true
-    }
-
-    private func finishOrderingInteraction() {
-        let presentation = editorWindowController.orderingPresentation
-        presentation.isBusy = false
-        presentation.canRefresh = !interactionGate.isTerminating
-        presentation.canApply = (preparedOrderingPlan != nil || preparedBoardPolicy != nil) && !orderingRecoveryKnown
-            && !isReadOnlyValidation && !interactionGate.isTerminating
-        finishManagementInteraction()
-    }
-
-    private func refreshOrdering() {
-        guard beginOrderingInteraction(message: "Reading current ordering identities…") else { return }
-        discardOrderingPreview()
-        managementInteractionTask = Task { [weak self] in
-            guard let self else { return }
-            defer { finishOrderingInteraction() }
-            await readOrderingForBoard()
-        }
-    }
-
-    private func captureBoundaryEvidence() {
-        guard !boundaryCaptureInProgress, !isReadOnlyValidation,
-              !interactionGate.isBusy, !interactionGate.isTerminating, !isRefreshing,
-              connectionInvalidationTask == nil, let model = editorModel,
-              AccessibilityAuthorization.isTrusted else {
-            editorWindowController.setStatus("Snapshot unavailable. Finish the current operation and check Accessibility.", isError: true)
-            return
-        }
-        boundaryCaptureInProgress = true
-        statusItemController.debugSetBoundaryCaptureBusy(true)
-        let policy = model.acceptedPolicy
-        let generation = lifecycleGeneration
-        let ownBefore = statusItemController.debugOwnControls
-        let startedAt = Date()
-        let descriptors = runningApplicationDescriptors()
-        boundaryCaptureTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer {
-                boundaryCaptureInProgress = false
-                boundaryCaptureTask = nil
-                statusItemController.debugSetBoundaryCaptureBusy(false)
-            }
-            let stateBefore = String(describing: await managementLoop.state)
-            do {
-                // This does not enter the management gate, suspend a reveal,
-                // refresh the Board, create a coordinator, or touch recovery.
-                let report = await inventory.capture(applications: descriptors, accessibilityTrusted: true)
-                let snapshot = try await orderingBackend.capture()
-                guard !Task.isCancelled, !interactionGate.isTerminating else { return }
-                let ownAfter = statusItemController.debugOwnControls
-                let stateAfter = String(describing: await managementLoop.state)
-                let unchanged = generation == lifecycleGeneration
-                    && policy == editorModel?.acceptedPolicy
-                    && ownBefore == ownAfter && stateBefore == stateAfter
-                    && !interactionGate.isBusy && !isRefreshing
-                guard let executable = Bundle.main.executableURL else {
-                    throw OrderingError.invalidSnapshot("missing executable identity")
-                }
-                let digest = SHA256.hash(data: try Data(contentsOf: executable))
-                    .map { String(format: "%02x", $0) }.joined()
-                let evidence = DebugBoundaryEvidence(
-                    id: UUID(), startedAt: startedAt, finishedAt: Date(),
-                    appVersion: BlennyApplicationVersion.display,
-                    appPath: Bundle.main.bundleURL.path, executableSHA256: digest,
-                    processIdentifier: ProcessInfo.processInfo.processIdentifier,
-                    stateBefore: stateBefore, stateAfter: stateAfter, contextUnchanged: unchanged,
-                    ownControlsBefore: ownBefore, ownControlsAfter: ownAfter,
-                    ownKeyEvidence: OwnControlKeyEvidence(
-                        tableKeys: Set(try snapshot.table().keys),
-                        bundleIdentifier: Bundle.main.bundleIdentifier ?? "unknown",
-                        autosaveNames: ownAfter.compactMap(\.autosaveName)),
-                    clickCheck: statusItemController.debugClickCheck,
-                    acceptedPolicy: policy, inventory: report, ordering: snapshot,
-                    singleItemCandidates: try OrderingIdentityResolver.resolve(snapshot: snapshot),
-                    notes: [
-                        "Read-only evidence, not a placement plan or restoration receipt.",
-                        "Own frames use AppKit screen coordinates; AX inventory frames use Accessibility coordinates. Do not compare Y without conversion.",
-                        "Inventory and preference captures are sequential, not an atomic screen snapshot.",
-                        "Stored keys and configuration eligibility do not establish a live per-item identity; retain unresolved and historical keys separately.",
-                        "Own key evidence matches canonical bundle keys to instantiated autosave names; alternative namespaces still require verification.",
-                        "localContentVisible is AppKit content state, not proof of physical screen visibility.",
-                        "No complete physical partition or write eligibility is claimed by this export.",
-                        unchanged ? "Context unchanged at sampled endpoints." : "Context changed during capture; do not use for boundary conclusions."
-                    ])
-                let directory = boundaryEvidenceDirectory
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
-                    attributes: [.posixPermissions: 0o700])
-                guard directory.resolvingSymlinksInPath().pathComponents.contains("LocalData") else {
-                    throw OrderingError.invalidSnapshot("evidence destination must remain inside LocalData")
-                }
-                let url = directory.appendingPathComponent("boundary-\(evidence.id.uuidString).json")
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                let data = try encoder.encode(evidence)
-                guard data.count <= 16 * 1_024 * 1_024 else { throw OrderingError.propertyListLimitExceeded }
-                try data.write(to: url, options: .atomic)
-                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(url.path, forType: .string)
-                editorWindowController.setStatus(unchanged
-                    ? "Boundary snapshot saved. File path copied."
-                    : "Snapshot saved, but state changed during capture. File path copied.", isError: !unchanged)
-            } catch {
-                editorWindowController.setStatus("Could not save boundary snapshot: \(error.localizedDescription)", isError: true)
-            }
-        }
-    }
-
-    #if DEBUG
-    private func positionRevealArrow(restoring: Bool) {
-        guard !boundaryCaptureInProgress, !isReadOnlyValidation, !isRefreshing,
-              !interactionGate.isTerminating, AccessibilityAuthorization.isTrusted,
-              let model = editorModel,
-              (restoring || !editorWindowController.hasDraftChanges),
-              beginOrderingInteraction(message: restoring ? "Restoring control positions…" : "Preparing control positions…") else { return }
-        let policy = model.acceptedPolicy
-        managementInteractionTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { finishOrderingInteraction() }
-            do {
-                let coordinator = try await orderingCoordinator(forRecovery: restoring)
-                if restoring {
-                    let result = try await coordinator.restoreFallbackPosition()
-                    editorWindowController.setStatus(result == nil ? "No control placement to undo." : "Previous control positions restored.", isError: false)
-                    return
-                }
-                let previousReceipt = try await fallbackRecoveryStore.load()
-                guard previousReceipt?.isPendingRestoration != true else {
-                    throw OrderingTransactionError.recoveryRequired
-                }
-                let snapshot = try await orderingBackend.capture()
-                let identity = try await orderingBackend.fallbackIdentity()
-                let candidate = try FallbackBoundaryCandidate.make(snapshot: snapshot, policy: policy, includeFish: true)
-                let alert = NSAlert()
-                alert.messageText = "Position Blenny’s controls?"
-                alert.informativeText = "Place the double arrow and fish between Revealable and Visible items, with the arrow on the left. Other apps’ saved positions stay unchanged.\n\nThis placement stays after Stop or Quit and follows changes you apply in Organize. Undo Control Placement restores the previous positions and turns off automatic adjustment."
-                if let previousReceipt, !previousReceipt.delta.canBeReplaced(by: candidate.delta) {
-                    alert.informativeText += "\n\nThe saved control positions have changed. This replaces the old control Undo record with the current positions. The old record is archived; Undo Control Placement will return to the positions before this operation."
-                }
-                alert.addButton(withTitle: "Position Controls")
-                alert.addButton(withTitle: "Cancel")
-                guard alert.runModal() == .alertFirstButtonReturn else { return }
-                _ = try await coordinator.applyFallbackPosition(candidate.delta,
-                    baseline: snapshot, identity: identity, persistsAfterQuit: true,
-                    reviewedPreviousReceipt: previousReceipt)
-                editorWindowController.setStatus("Control positions saved.", isError: false)
-            } catch FallbackPositionDelta.Failure.unchangedPosition {
-                editorWindowController.setStatus("Blenny’s controls are already positioned.", isError: false)
-            } catch {
-                let alert = NSAlert()
-                alert.messageText = "Couldn’t update Blenny’s controls"
-                alert.informativeText = error.localizedDescription
-                    + "\n\nIf restoration is needed, choose Undo Control Placement."
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-                editorWindowController.setStatus("Control positions could not be updated.", isError: true)
-            }
-        }
-    }
-    #endif
-
-    private func updateAcceptedControlBoundary() async -> String? {
-        guard let policy = editorModel?.acceptedPolicy, !interactionGate.isTerminating else { return nil }
-        do {
-            guard try await fallbackRecoveryStore.load() != nil else { return nil }
-            // Persistent fallback placement is dormant while the native
-            // overflow control is usable (or its exact AppKit identity is not
-            // currently available). An unrelated Apply or Undo must leave that
-            // older placement unchanged instead of reporting the completed
-            // primary operation as a failure.
-            #if DEBUG
-            guard statusItemController.debugFallbackNativeIdentity != nil else { return nil }
-            #endif
-            let coordinator = try await orderingCoordinator()
-            _ = try await coordinator.updateAcceptedControlBoundary(policy: policy)
-            return nil
-        } catch {
-            return "Blenny’s controls could not be positioned: \(error.localizedDescription) Use Position Blenny Controls to review the placement."
-        }
-    }
-
-    private func readOrderingForBoard() async {
-        discardOrderingPreview()
-        do {
-            let snapshot = try await orderingBackend.capture()
-            guard !interactionGate.isTerminating else { return }
-            guard presentOrderingCandidates(snapshot) else {
-                await updateOrderingRecoveryPresentation()
-                return
-            }
-            editorWindowController.orderingPresentation.finishSuccessfulRead()
-        } catch {
-            lastOrderingSnapshot = nil
-            editorWindowController.orderingPresentation.hasObservation = false
-            presentOrderingError(error)
-        }
-        await updateOrderingRecoveryPresentation()
-    }
-
-    private func presentBoardGeometry(report: DiagnosticReport, candidates: [PolicyCandidate]) {
-        // Public AX placement can still be displayed when private preferences
-        // are unavailable. This observation never grants ordering eligibility.
-        let records = Dictionary(grouping: report.items.filter {
-            $0.source == .applicationExtrasMenuBar && $0.classification == .manageableCandidate
-                && $0.role == "AXMenuBarItem" && $0.subrole == "AXMenuExtra"
-        }, by: { $0.ownerBundleIdentifier ?? "" })
-        let singleFrames = records.compactMapValues { owned -> RectSnapshot? in
-            owned.count == 1 ? owned.first?.frame : nil
-        }
-        let ambiguousOwners = OrderingObservedGeometry.ambiguousOwners(frames: singleFrames)
-        let icons = WorkspacePolicyIconResolver()
-        editorWindowController.orderingPresentation.rows = candidates.map { candidate in
-            let icon = icons.applicationIcon(bundleIdentifier: candidate.bundleIdentifier)
-            let owned = records[candidate.bundleIdentifier] ?? []
-            let frame = owned.count == 1 && candidate.menuBarItemCount == 1
-                && NSScreen.screens.count == 1
-                && !ambiguousOwners.contains(candidate.bundleIdentifier) ? owned.first?.frame : nil
-            let x = frame.flatMap { frame -> Double? in
-                guard frame.x.isFinite, frame.y.isFinite, frame.width.isFinite,
-                      frame.height.isFinite, frame.width > 0, frame.height > 0,
-                      frame.x >= 0, frame.x + frame.width <= (NSScreen.screens.first?.frame.width ?? 0)
-                else { return nil }
-                return frame.x
-            }
-            return DebugOrderingRow(
-                bundleIdentifier: candidate.bundleIdentifier, name: icon.displayName, icon: icon.image,
-                reason: ambiguousOwners.contains(candidate.bundleIdentifier)
-                    ? "The current menu-bar observation does not expose a separate position for this application."
-                    : "Ordering identity and preferences are not verified.",
-                isEligible: false, observedX: x
-            )
-        }
-        editorWindowController.orderingPresentation.hasObservation = false
-    }
-
-    private func previewBoardConfiguration(_ request: DebugOrderingConfigurationRequest, applyWhenReady: Bool = false) {
-        guard !orderingRecoveryKnown,
-              let model = editorModel,
-              request.sourceCandidateGeneration == editorWindowController.candidateGeneration,
-              beginOrderingInteraction(message: "Checking changes…") else { return }
-        discardOrderingPreview()
-        let generation = lifecycleGeneration
-        managementInteractionTask = Task { [weak self] in
-            guard let self else { return }
-            var handoffToApply = false
-            defer { if !handoffToApply { finishOrderingInteraction() } }
-            do {
-                let current = try await orderingBackend.capture()
-                guard generation == lifecycleGeneration,
-                      !interactionGate.isTerminating,
-                      request == editorWindowController.currentOrderingConfigurationRequest,
-                      model.acceptedPolicy.policyFingerprint == current.policyFingerprint,
-                      Int(truncatingIfNeeded: generation) == current.lifecycleGeneration else {
-                    throw OrderingError.staleSnapshot("the area draft or management context changed while preparing the review")
-                }
-                // This creates a new review from current configuration. The
-                // Board supplies desired owner order, not stale numeric inputs.
-                // Execution still checks the resulting plan against a fresh
-                // snapshot before the serial writer can change anything.
-                let candidates = try OrderingConfigurationSubjectIdentityResolver.resolve(snapshot: current)
-                let bySubject = Dictionary(uniqueKeysWithValues: candidates.map { ($0.subjectID, $0) })
-                let allEligible = request.orderedSubjects.filter { subject in
-                    guard bySubject[subject]?.eligible == true else { return false }
-                    if case let .systemItem(item) = subject {
-                        return item.isOrderingOffered
-                    }
-                    return true
-                }
-                let allEligibleSet = Set(allEligible)
-                let unavailable = request.unavailableOrderChanges(
-                    eligibleSubjects: allEligibleSet, blenny: model.blennyBundleIdentifier
-                )
-                guard unavailable.isEmpty else {
-                    let names = unavailable.map { bySubject[$0]?.displayName ?? $0.boardID }
-                    throw OrderingError.unavailableOrderChanges(names)
-                }
-                let required = Set(request.subjectsRequiringConfiguration)
-                let selected = allEligible.filter { required.contains($0) }
-                let selectedSet = Set(selected)
-                let omitted = request.orderedSubjects.filter { !selectedSet.contains($0) }
-                let plan: OrderingPlan? = try OrderingPlan.makeConfigurationOrdering(
-                    snapshot: current, orderedSubjects: selected
-                )
-                var policy: PreparedPolicyEdit?
-                if model.hasDraftChanges {
-                    let core = try await makeCore(scope: model.validationScope, permitsReviewedActivation: true)
-                    let policyPreview = try await core.preview(
-                        draft: model.draft, candidates: model.candidateInventory,
-                        observedRunningBundleIdentifiers: observedRunningBundleIdentifiers,
-                        candidateGeneration: editorWindowController.candidateGeneration,
-                        runtimeContractFingerprint: runtimeContractFingerprint
-                    )
-                    guard let prepared = policyPreview.1 else {
-                        throw PolicyInterfaceWriteError.applyPreflightUnavailable(policyPreview.0.validationFailureSummary)
-                    }
-                    policy = prepared
-                }
-                guard editorModel?.draft == model.draft,
-                      request == editorWindowController.currentOrderingConfigurationRequest,
-                      generation == lifecycleGeneration else {
-                    throw PolicyEditingCoreError.staleReviewedPlan
-                }
-                guard plan != nil || policy != nil else {
-                    throw OrderingError.invalidSelection
-                }
-                let undoRebaseReview: OrderingUndoLedgerRebaseReview?
-                if plan != nil, let receipt = try await orderingRecoveryStore.load() {
-                    undoRebaseReview = try receipt.undoLedgerRebaseReview(in: current)
-                } else {
-                    undoRebaseReview = nil
-                }
-                let fingerprint = try OrderingValue.dictionary([
-                    "ordering": .string(plan?.fingerprint ?? "no-addressable-ordering-keys"),
-                    "policy": .string(policy?.newPolicy.policyFingerprint ?? model.acceptedPolicy.policyFingerprint),
-                    "layout": .string(request.sourceLayoutGeneration.uuidString),
-                    "undoRebase": .string(undoRebaseReview?.token ?? "retain-existing-undo")
-                ]).canonicalFingerprint
-                preparedOrderingPlan = plan
-                preparedBoardPolicy = policy
-                preparedBoardRequest = request
-                preparedBoardFingerprint = fingerprint
-                preparedUnsortedNames = omitted.filter {
-                    request.originalPolicies[$0] != request.draftSubjectPolicies[$0]
-                }.map { bySubject[$0]?.displayName ?? $0.boardID }
-                preparedUndoRebaseToken = undoRebaseReview?.token
-                let presentation = editorWindowController.orderingPresentation
-                if let undoRebaseReview {
-                    // Replacing stale Undo history still requires explicit consent.
-                    presentation.requiresUndoReplacement = true
-                    presentation.preview = DebugOrderingPreview(
-                        fingerprint: fingerprint, title: "Replace previous Undo?",
-                        detail: undoRebaseReview.userDescription, visibleScope: "",
-                        targetBundleIdentifiers: [], beforeOrder: [], afterOrder: []
-                    )
-                    presentation.message = "The menu bar changed outside Blenny. Applying will replace the previous Undo history."
-                    presentation.technicalDetail = undoRebaseReview.userDescription
-                } else if applyWhenReady {
-                    // Synchronous handoff: no user event can change the draft between gates.
-                    handoffToApply = true
-                    applyBoardConfiguration(fingerprint, continuingInteraction: true)
-                }
-            } catch { presentOrderingError(error) }
-        }
-    }
-
-    private func previewBoardOrdering(_ orderedBundles: [String]) {
-        guard !orderingRecoveryKnown, let previous = lastOrderingSnapshot,
-              beginOrderingInteraction(message: "Reading and reviewing the requested menu-bar order…") else { return }
-        discardOrderingPreview()
-        let generation = lifecycleGeneration
-        managementInteractionTask = Task { [weak self] in
-            guard let self else { return }
-            defer { finishOrderingInteraction() }
-            do {
-                guard try await orderingRecoveryStore.load() == nil else {
-                    throw OrderingTransactionError.recoveryRequired
-                }
-                if case .ordinaryRevealSession = await managementLoop.state {
-                    throw OrderingError.staleSnapshot("close the ordinary reveal session before ordering")
-                }
-                let current = try await orderingBackend.capture()
-                // A drag refers to the board that was actually displayed. A new
-                // snapshot may refresh values, but must not reinterpret the
-                // gesture after another app, intent or selected order changed.
-                let selected = Set(orderedBundles)
-                func observedOrder(_ snapshot: OrderingSnapshot) -> [String] {
-                    snapshot.observationsByPID.values.filter {
-                        $0.process.bundleIdentifier.map(selected.contains) == true
-                            && $0.axComplete && $0.itemFrames.count == 1
-                    }.sorted { $0.itemFrames[0].x < $1.itemFrames[0].x }
-                        .compactMap(\.process.bundleIdentifier)
-                }
-                guard previous.beforeProcesses == previous.afterProcesses,
-                      current.beforeProcesses == current.afterProcesses,
-                      previous.afterProcesses.sorted(by: { $0.pid < $1.pid })
-                        == current.afterProcesses.sorted(by: { $0.pid < $1.pid }),
-                      previous.policyFingerprint == current.policyFingerprint,
-                      previous.displaySignature == current.displaySignature,
-                      previous.lifecycleGeneration == current.lifecycleGeneration,
-                      observedOrder(previous).count == selected.count,
-                      observedOrder(previous) == observedOrder(current) else {
-                    presentOrderingCandidates(current)
-                    throw OrderingError.staleSnapshot("the displayed order or application inventory changed; review the refreshed board")
-                }
-                let plan = try OrderingPlan.makeReordering(
-                    snapshot: current, orderedBundleIdentifiers: orderedBundles
-                )
-                guard generation == lifecycleGeneration, !interactionGate.isTerminating else {
-                    throw OrderingTransactionError.contextInvalidated
-                }
-                preparedOrderingPlan = plan
-                presentOrderingCandidates(current)
-                let names = Dictionary(uniqueKeysWithValues: plan.targets.map {
-                    ($0.bundleIdentifier, $0.displayName)
-                })
-                editorWindowController.orderingPresentation.preview = DebugOrderingPreview(
-                    id: plan.id, fingerprint: plan.fingerprint,
-                    title: "Review menu-bar order",
-                    detail: "Existing preferred slots are reassigned once. Other applications and area assignments remain unchanged.",
-                    visibleScope: "\(plan.targets.count) application owners · one display",
-                    targetBundleIdentifiers: orderedBundles,
-                    beforeOrder: observedOrder(current).compactMap { names[$0] },
-                    afterOrder: orderedBundles.compactMap { names[$0] }
-                )
-                editorWindowController.orderingPresentation.message =
-                    "Apply Order changes the real menu bar. Restore Order returns this trial to its original positions."
-            } catch { presentOrderingError(error) }
-        }
-    }
-
-    private func previewOrdering(_ bundles: [String]) {
-        guard !orderingRecoveryKnown,
-              beginOrderingInteraction(message: "Preparing the exact exchange and inverse…") else { return }
-        discardOrderingPreview()
-        let generation = lifecycleGeneration
-        managementInteractionTask = Task { [weak self] in
-            guard let self else { return }
-            defer { finishOrderingInteraction() }
-            do {
-                if case .ordinaryRevealSession = await managementLoop.state {
-                    throw OrderingError.staleSnapshot("close the ordinary reveal session before ordering")
-                }
-                guard try await orderingRecoveryStore.load() == nil else {
-                    throw OrderingTransactionError.recoveryRequired
-                }
-                let snapshot = try await orderingBackend.capture()
-                let plan = try OrderingPlan.make(snapshot: snapshot, bundleIdentifiers: bundles)
-                guard generation == lifecycleGeneration, !interactionGate.isTerminating else {
-                    throw OrderingTransactionError.contextInvalidated
-                }
-                preparedOrderingPlan = plan
-                presentOrderingCandidates(snapshot)
-                let before = plan.targets.sorted { $0.frame.x < $1.frame.x }.map(\.displayName)
-                editorWindowController.orderingPresentation.preview = DebugOrderingPreview(
-                    id: plan.id, fingerprint: plan.fingerprint,
-                    title: "Exchange the selected positions",
-                    detail: "Other icons may remain between these applications. Preferred positions do not fix absolute screen coordinates.",
-                    visibleScope: "Two observable application bundles · one display · Debug session",
-                    targetBundleIdentifiers: plan.targets.map(\.bundleIdentifier),
-                    beforeOrder: before, afterOrder: Array(before.reversed()),
-                    technicalDetails: plan.targets.map {
-                        DebugOrderingTechnicalDetail(key: $0.key,
-                            value: "\(orderingPositionLabel($0.before)) → \(orderingPositionLabel($0.after)); Restore returns \(orderingPositionLabel($0.before))")
-                    } + [DebugOrderingTechnicalDetail(key: "Preview fingerprint", value: plan.fingerprint)]
-                )
-                editorWindowController.orderingPresentation.message =
-                    "Review the two applications. Exchange Positions performs one real menu-bar write and one verification."
-            } catch { presentOrderingError(error) }
-        }
-    }
-
-    private func applyOrdering(_ fingerprint: String) {
-        if preparedBoardRequest != nil {
-            applyBoardConfiguration(fingerprint)
-            return
-        }
-        guard !isReadOnlyValidation, !orderingRecoveryKnown,
-              let plan = preparedOrderingPlan, plan.fingerprint == fingerprint,
-              beginOrderingInteraction(message: "Checking and applying the real menu-bar order…") else { return }
-        discardOrderingPreview()
-        activeOrderingPlan = plan
-        managementInteractionTask = Task { [weak self] in
-            guard let self else { return }
-            defer { finishOrderingInteraction() }
-            do {
-                if case .ordinaryRevealSession = await managementLoop.state {
-                    throw OrderingError.staleSnapshot("close the ordinary reveal session before ordering")
-                }
-                let writer = try await orderingCoordinator()
-                let observed = try await writer.applyOrdering(plan, confirmedFingerprint: fingerprint)
-                presentOrderingCandidates(observed)
-                editorWindowController.orderingPresentation.message =
-                    "The real relative order was verified. Restore Order returns the original preferred positions; Stop or Quit also restores this session."
-            } catch { presentOrderingError(error) }
-            await updateOrderingRecoveryPresentation()
-            if !orderingRecoveryKnown { activeOrderingPlan = nil }
-        }
-    }
-
-    private func applyBoardConfiguration(_ fingerprint: String, continuingInteraction: Bool = false) {
-        guard !isReadOnlyValidation, !orderingRecoveryKnown,
-              let request = preparedBoardRequest,
-              let model = editorModel,
-              preparedBoardFingerprint == fingerprint,
-              request == editorWindowController.currentOrderingConfigurationRequest else {
-            if continuingInteraction { finishOrderingInteraction() }
-            return
-        }
-        guard continuingInteraction || beginOrderingInteraction(message: "Applying changes…") else { return }
-        let plan = preparedOrderingPlan
-        let policy = preparedBoardPolicy
-        let undoRebaseToken = preparedUndoRebaseToken
-        let unsortedNames = preparedUnsortedNames
-        let generation = lifecycleGeneration
-        discardOrderingPreview()
-        managementInteractionTask = Task { [weak self] in
-            guard let self else { return }
-            defer { finishOrderingInteraction() }
-            var configurationCommitted = false
-            do {
-                guard let plan else { throw OrderingError.invalidSelection }
-                if case .ordinaryRevealSession = await managementLoop.state,
-                   let baseline = activeBaselinePlan {
-                    await endOrdinaryReveal(
-                        baseline: baseline,
-                        persistedManagementEnabled: model.acceptedPolicy.managementEnabled
-                    )
-                }
-                if let policy {
-                    let observation = try await captureApplyPreflight()
-                    let core = try await makeCore(scope: model.validationScope, permitsReviewedActivation: true)
-                    let refreshed = try await core.preview(
-                        draft: model.draft, candidates: observation.candidates,
-                        observedRunningBundleIdentifiers: observation.runningBundleIdentifiers,
-                        candidateGeneration: editorWindowController.candidateGeneration,
-                        runtimeContractFingerprint: runtimeContractFingerprint
-                    )
-                    guard let checked = refreshed.1,
-                          checked.newPolicy == policy.newPolicy,
-                          checked.oldPolicy == policy.oldPolicy,
-                          checked.reviewBinding == policy.reviewBinding else {
-                        throw PolicyEditingCoreError.staleReviewedPlan
-                    }
-                }
-                guard generation == lifecycleGeneration,
-                      !interactionGate.isTerminating,
-                      editorModel?.draft == model.draft,
-                      request == editorWindowController.currentOrderingConfigurationRequest else {
-                    throw PolicyEditingCoreError.staleReviewedPlan
-                }
-                let writer = try await orderingCoordinator()
-                let result = try await writer.applyConfigurationOrdering(
-                    plan, confirmedFingerprint: plan.fingerprint,
-                    policyChange: policy, policyStore: persistentStore,
-                    confirmedUndoRebaseToken: undoRebaseToken
-                )
-                configurationCommitted = true
-                if let policy {
-                    activeBaselinePlan = policy.report.newBaselinePlan
-                    activeRevealPlan = policy.report.newRevealPlan
-                    try await managementLoop.synchronizeCommittedPolicy(
-                        policy.newPolicy, baseline: activeBaselinePlan
-                    )
-                    try await synchronizeInterfaceAfterCommit(policy.newPolicy, previousModel: model)
-                }
-                guard editorWindowController.installCommittedOrderingLayout(
-                    from: request
-                ) else {
-                    throw OrderingError.staleSnapshot(
-                        "the committed candidate scope changed; refresh the board"
-                    )
-                }
-                guard generation == lifecycleGeneration, !interactionGate.isTerminating else {
-                    throw ManagementLoopError.staleLifecycleGeneration
-                }
-                let displayedSnapshot = policy == nil ? result.snapshot : try await orderingBackend.capture()
-                presentOrderingCandidates(displayedSnapshot)
-                editorWindowController.initializeOrderingLayoutFromCurrentRows(force: true)
-                let visual: String
-                switch result.physicalVerificationStatus {
-                case .verified:
-                    visual = "Order verified."
-                case .mismatch:
-                    visual = "The menu bar does not yet match the saved order."
-                case .unavailable:
-                    visual = "Some on-screen positions could not be verified."
-                }
-                editorWindowController.orderingPresentation.message =
-                    "Changes applied. \(visual)"
-                    + (unsortedNames.isEmpty ? "" : " Visibility only: \(unsortedNames.joined(separator: ", ")).")
-                if let failure = await updateAcceptedControlBoundary() {
-                    editorWindowController.orderingPresentation.message =
-                        (editorWindowController.orderingPresentation.message ?? "") + " \(failure)"
-                    editorWindowController.orderingPresentation.isError = true
-                }
-            } catch {
-                if configurationCommitted {
-                    presentCommittedOrderingRefreshFailure(error)
-                } else {
-                    if let policy { await reconcileManagementAfterFailure(policy) }
-                    presentOrderingError(error)
-                }
-            }
-            await updateOrderingRecoveryPresentation()
-        }
-    }
-
-    private func restoreOrdering() {
-        guard !isReadOnlyValidation,
-              beginOrderingInteraction(message: "Checking the saved order…") else { return }
-        discardOrderingPreview()
-        managementInteractionTask = Task { [weak self] in
-            guard let self else { return }
-            var needsAutomaticRefresh = false
-            defer {
-                finishOrderingInteraction()
-                // One read-only follow-up after releasing the interaction gate.
-                // Refresh does not reapply the transaction or schedule retries.
-                if needsAutomaticRefresh { refresh() }
-            }
-            var preferencesRestored = false
-            do {
-                let writer = try await orderingCoordinator(forRecovery: true)
-                var inverse: PreparedPolicyEdit?
-                let priorModel = editorModel
-                let receipt = try await orderingRecoveryStore.load()
-                if receipt?.hasPendingRevisionRollback != true,
-                   let undo = receipt?.undoPolicy,
-                   let model = priorModel {
-                    let observation = try await captureApplyPreflight()
-                    let core = try await makeCore(scope: model.validationScope, permitsReviewedActivation: true)
-                    inverse = try await core.previewUndoKeepingManagementState(
-                        targetPolicy: undo.before,
-                        candidates: observation.candidates,
-                        observedRunningBundleIdentifiers: observation.runningBundleIdentifiers,
-                        candidateGeneration: editorWindowController.candidateGeneration,
-                        runtimeContractFingerprint: runtimeContractFingerprint
-                    ).1
-                    let currentPolicy = try await persistentStore?.load()
-                    guard inverse != nil || currentPolicy == undo.before else {
-                        throw PolicyEditingCoreError.staleReviewedPlan
-                    }
-                }
-                let result = try await writer.restoreOrdering(policyStore: persistentStore, policyUndo: inverse)
-                guard result.preferencesRestored else {
-                    throw OrderingTransactionError.restorationNotVerified
-                }
-                preferencesRestored = true
-                if let inverse, let model = priorModel {
-                    activeBaselinePlan = inverse.report.newBaselinePlan
-                    activeRevealPlan = inverse.report.newRevealPlan
-                    try await managementLoop.synchronizeCommittedPolicy(
-                        inverse.newPolicy, baseline: activeBaselinePlan)
-                    try await synchronizeInterfaceAfterCommit(inverse.newPolicy, previousModel: model)
-                }
-                editorWindowController.setStatus("Changes undone.", isError: false)
-                activeOrderingPlan = nil
-                guard presentOrderingCandidates(try await orderingBackend.capture()) else {
-                    needsAutomaticRefresh = true
-                    await updateOrderingRecoveryPresentation()
-                    return
-                }
-                editorWindowController.orderingPresentation.requiresObservationRefresh = false
-                editorWindowController.initializeOrderingLayoutFromCurrentRows(force: true)
-                editorWindowController.orderingPresentation.message = "Changes undone."
-                editorWindowController.orderingPresentation.technicalDetail = result.relativeOrderVerified
-                    ? nil : "Saved settings were restored and verified. On-screen positions were not independently verified."
-                if let failure = await updateAcceptedControlBoundary() {
-                    editorWindowController.orderingPresentation.message =
-                        (editorWindowController.orderingPresentation.message ?? "") + " \(failure)"
-                    editorWindowController.orderingPresentation.isError = true
-                }
-            } catch {
-                if preferencesRestored {
-                    presentCommittedOrderingRefreshFailure(error, restored: true)
-                    editorWindowController.orderingPresentation.message = "Changes undone. Updating the Board…"
-                    needsAutomaticRefresh = true
-                } else {
-                    presentOrderingError(error)
-                }
-            }
-            await updateOrderingRecoveryPresentation()
-        }
-    }
-
-    private func updateOrderingRecoveryPresentation() async {
-        let presentation = editorWindowController.orderingPresentation
-        do {
-            let receipt = try await orderingRecoveryStore.load()
-            orderingRecoveryKnown = receipt?.isPendingRestoration == true
-            presentation.hasPendingRecovery = orderingRecoveryKnown
-            presentation.hasRecovery = receipt?.isPendingRestoration == true
-                || receipt?.hasConfigurationUndo == true
-            if let receipt {
-                if receipt.isPendingRestoration && (receipt.phase != .applied || activeOrderingPlan == nil) {
-                    presentation.message = "An unfinished change needs recovery. Choose Recover Changes."
-                }
-                if receipt.isPendingRestoration { presentation.canApply = false }
-            }
-        } catch {
-            orderingRecoveryKnown = true
-            presentation.hasPendingRecovery = true
-            presentation.hasRecovery = true
-            presentOrderingError(error)
-        }
-    }
-
-    @discardableResult
-    private func presentOrderingCandidates(_ snapshot: OrderingSnapshot) -> Bool {
-        do {
-            let knownBundles = Set(editorModel?.candidateInventory.candidates.map(\.bundleIdentifier) ?? [])
-            let candidates = try OrderingConfigurationIdentityResolver.resolve(snapshot: snapshot).filter {
-                !$0.keys.isEmpty || knownBundles.contains($0.bundleIdentifier)
-                    || $0.process.map { snapshot.observationsByPID[$0.pid] != nil } == true
-            }
-            let icons = WorkspacePolicyIconResolver()
-            let observedFrames = Dictionary(uniqueKeysWithValues: candidates.compactMap { candidate -> (String, RectSnapshot)? in
-                guard let process = candidate.process,
-                      let observation = snapshot.observationsByPID[process.pid],
-                      observation.axComplete, observation.itemFrames.count == 1,
-                      let frame = observation.itemFrames.first,
-                      frame.width > 0, frame.height > 0,
-                      frame.x >= snapshot.displayFrame.x,
-                      frame.x + frame.width <= snapshot.displayFrame.x + snapshot.displayFrame.width else { return nil }
-                return (candidate.bundleIdentifier, frame)
-            })
-            let ambiguousObservedOwners = OrderingObservedGeometry.ambiguousOwners(frames: observedFrames)
-            lastOrderingSnapshot = snapshot
-            editorWindowController.orderingPresentation.hasObservation = true
-            editorWindowController.orderingPresentation.rows = candidates.map { candidate in
-                let frame = ambiguousObservedOwners.contains(candidate.bundleIdentifier)
-                    ? nil : observedFrames[candidate.bundleIdentifier]
-                let values = candidate.keys.map(\.value)
-                let position = values.compactMap { value -> Double? in
-                    switch value {
-                    case let .integer(number): Double(number)
-                    case let .real(number): number
-                    default: nil
-                    }
-                }.max()
-                let excluded = candidate.reasons.contains(.selfExcluded)
-                    || candidate.reasons.contains(.systemOwnerExcluded)
-                return DebugOrderingRow(
-                    bundleIdentifier: candidate.bundleIdentifier, name: candidate.displayName,
-                    icon: icons.applicationIcon(bundleIdentifier: candidate.bundleIdentifier).image,
-                    systemKey: candidate.keys.isEmpty ? nil : candidate.keys.map(\.key).joined(separator: ", "),
-                    currentPositionLabel: values.isEmpty ? nil : values.map(orderingPositionLabel).joined(separator: ", "),
-                    reason: candidate.reasons.isEmpty ? nil : candidate.reasons.map(\.userDescription).joined(separator: "; "),
-                    isEligible: candidate.eligible,
-                    observedX: frame?.x,
-                    configuredPosition: position,
-                    availability: candidate.eligible ? .ready : (excluded ? .blocked : .needsMapping)
-                )
-            }
-            let systemCandidates = try OrderingConfigurationSubjectIdentityResolver.resolve(snapshot: snapshot)
-                .filter { if case .systemItem = $0.subjectID { true } else { false } }
-            editorWindowController.orderingPresentation.rows += systemCandidates.map { candidate in
-                guard case let .systemItem(item) = candidate.subjectID else { preconditionFailure() }
-                let orderingOffered = item.isOrderingOffered
-                let values = candidate.keys.map(\.value)
-                let position = values.compactMap { value -> Double? in
-                    switch value {
-                    case let .integer(number): Double(number)
-                    case let .real(number): number
-                    default: nil
-                    }
-                }.first
-                let icon = icons.systemIcon(observation: .init(
-                    observationIdentifier: item.observationIdentifier,
-                    ownerBundleIdentifier: item.hostBundleIdentifier,
-                    displayName: item.displayName, observationCount: 0
-                )).image
-                return DebugOrderingRow(
-                    subjectID: candidate.subjectID, name: candidate.displayName, icon: icon,
-                    systemKey: candidate.keys.isEmpty ? nil : item.configurationKey,
-                    currentPositionLabel: values.first.map(orderingPositionLabel),
-                    reason: orderingOffered
-                        ? (candidate.reasons.isEmpty ? nil : candidate.reasons.map(\.userDescription).joined(separator: "; "))
-                        : "Sorting is not supported in this version; Visible, Revealable, and Hidden remain available.",
-                    isEligible: orderingOffered && candidate.eligible,
-                    observedX: nil, configuredPosition: position,
-                    availability: orderingOffered
-                        ? (candidate.eligible ? .ready : .needsMapping)
-                        : .blocked,
-                    policy: editorModel?.effectiveSystemItemPolicy(for: item.observationIdentifier)
-                        ?? (item == .bluetooth
-                            ? editorModel?.draft.bluetoothPolicy
-                            : editorModel?.draft.systemItemPolicies[item.observationIdentifier])
-                        ?? .visible
-                )
-            }
-            editorWindowController.initializeOrderingLayoutFromCurrentRows()
-            return true
-        } catch {
-            lastOrderingSnapshot = nil
-            editorWindowController.orderingPresentation.hasObservation = false
-            presentOrderingError(error)
-            return false
-        }
-    }
-
-    private func orderingPositionLabel(_ value: OrderingValue) -> String {
-        switch value {
-        case let .integer(number): String(number)
-        case let .real(number): String(number)
-        default: "Unsupported position"
-        }
-    }
-
-    private func presentOrderingError(_ error: Error) {
-        sessionDiagnostic("ordering-failure \(error.localizedDescription)")
-        let presentation = editorWindowController.orderingPresentation
-        presentation.needsDataAccess = false
-        if let backendError = error as? MacOS27MenuBarOrderingBackendError {
-            switch backendError {
-            case let .groupFileOpenFailed(code), let .groupFileMetadataReadFailed(code),
-                 let .groupFileReadFailed(code):
-                presentation.needsDataAccess = code == EPERM || code == EACCES
-            default: break
-            }
-        }
-        presentation.isError = true
-        presentation.message = presentation.needsDataAccess
-            ? "Choose the menu bar layout file so Blenny can apply and undo your order."
-            : "The operation could not finish. See Details before trying again."
-        if let backendError = error as? MacOS27MenuBarOrderingBackendError,
-           backendError == .runtimeUnsupported || backendError == .runtimeContractDiffers {
-            presentation.message = "Ordering is unavailable on this macOS build."
-        } else if case let .unavailableOrderChanges(names) = error as? OrderingError {
-            presentation.message = "This draft moves items marked No sort: \(names.joined(separator: ", ")). Put them back or discard changes."
-        } else if case .staleSnapshot = error as? OrderingError {
-            presentation.message = "The menu bar changed. Discard changes and refresh before trying again."
-        }
-        presentation.technicalDetail = error.localizedDescription
-        presentation.canApply = false
-    }
-
-    private func presentCommittedOrderingRefreshFailure(_ error: Error, restored: Bool = false) {
-        sessionDiagnostic("ordering-committed-refresh-failure \(error.localizedDescription)")
-        // A failure to refresh the Board cannot turn a verified commit into a
-        // failed write or invite the user to repeat that write.
-        lastOrderingSnapshot = nil
-        let presentation = editorWindowController.orderingPresentation
-        presentation.hasObservation = false
-        presentation.isError = false
-        presentation.canApply = false
-        presentation.requiresObservationRefresh = true
-        presentation.message = (restored ? "Changes undone." : "Changes applied.")
-            + " Refresh to update the Board. Do not apply again."
-        presentation.technicalDetail = error.localizedDescription
-    }
-}
-#endif

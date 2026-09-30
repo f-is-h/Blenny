@@ -1,0 +1,6 @@
+# actionlint 1.7.11 predates this official hosted label. This is a linter label
+# extension, not a self-hosted execution choice. ci-toolchain.sh asserts the OS.
+# Catalog: https://github.com/actions/runner-images/blob/main/README.md
+self-hosted-runner:
+  labels:
+    - xcode-27

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BlennyCore
 
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 
 @Suite("Ordering Board arrangement")
 struct OrderingBoardArrangementTests {

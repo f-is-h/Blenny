@@ -5,9 +5,10 @@ set -euo pipefail
 version=""
 base_ref=""
 allow_dirty=false
+phase=pre-trigger
 
 usage() {
-  print -u2 "Usage: $0 --version X.Y.Z --base PREVIOUS_TAG [--allow-dirty]"
+  print -u2 "Usage: $0 --version X.Y.Z --base PREVIOUS_TAG [--phase prepare|pre-trigger|published] [--allow-dirty]"
   exit 64
 }
 
@@ -27,6 +28,11 @@ while (( $# > 0 )); do
       allow_dirty=true
       shift
       ;;
+    --phase)
+      (( $# >= 2 )) || usage
+      phase="$2"
+      shift 2
+      ;;
     *)
       usage
       ;;
@@ -35,6 +41,8 @@ done
 
 [[ "$version" == <->.<->.<-> ]] || usage
 [[ -n "$base_ref" ]] || usage
+[[ "$phase" == prepare || "$phase" == pre-trigger || "$phase" == published ]] || usage
+[[ "$phase" == prepare || "$allow_dirty" == false ]] || { print -u2 '--allow-dirty is preparation-only'; exit 64; }
 
 repository_root=$(git rev-parse --show-toplevel)
 cd "$repository_root"
@@ -76,7 +84,11 @@ commit_count=$(git rev-list --count "$range")
 if (( commit_count > 0 )); then
   pass "$commit_count commit(s) found in $range"
 else
-  fail "version range contains no commits: $range"
+  if [[ "$phase" == prepare ]]; then
+    print "INFO: version range contains no commits; preparation does not authorize a commit"
+  else
+    fail "version range contains no commits: $range"
+  fi
 fi
 
 bad_subjects=$(git log --format='%s' "$range" | while IFS= read -r subject; do
@@ -182,19 +194,52 @@ roadmap_section=$(awk -v version="$version" '
   collecting && index($0, "## ") == 1 && index($0, "## " version " ") != 1 { exit }
   collecting { print }
 ' docs/ROADMAP.md)
-if print -r -- "$roadmap_section" | grep -Fq "Status: **Complete" \
-  && grep -Fq "Version \`$version\` completed" README.md \
-  && grep -Eq "Current phase: \`$version\`.*complete" PROJECT_BRIEF.md; then
-  pass "top-level version documents mention a completed $version milestone"
+if [[ "$version" == 0.* ]]; then
+  if print -r -- "$roadmap_section" | grep -Fq "Status: **Complete" \
+    && grep -Fq "Version \`$version\` completed" README.md \
+    && grep -Eq "Current phase: \`$version\`.*complete" PROJECT_BRIEF.md; then
+    pass "top-level version documents mention a completed $version milestone"
+  else
+    fail "top-level version documents are not aligned for $version"
+  fi
 else
-  fail "top-level version documents are not aligned for $version"
+  if python3 scripts/release_tools.py check && python3 scripts/release_tools.py coverage \
+    && grep -Fq "$version" PROJECT_BRIEF.md \
+    && print -r -- "$roadmap_section" | grep -Fq "$version"; then
+    pass "prepared version documents and contribution coverage agree for $version"
+  else
+    fail "prepared version documents disagree for $version"
+  fi
+  if [[ "$phase" == pre-trigger ]]; then
+    python3 scripts/release_tools.py acceptance \
+      && pass 'development acceptance recorded before the trigger' \
+      || fail 'pre-trigger development acceptance is incomplete or stale'
+  elif [[ "$phase" == published ]]; then
+    python3 - "$version" <<'PUBLISHED' \
+      && pass 'published receipt and feed agree' \
+      || fail 'published receipt or feed evidence is missing'
+import json,sys,xml.etree.ElementTree as ET
+from pathlib import Path
+version=sys.argv[1]
+receipt=json.loads(Path('docs/public-release.json').read_text())
+assert receipt['status']=='published' and receipt['version']==version
+assert receipt['anonymousAssetVerification'] is True
+assert any(i.findtext('{http://www.andymatuschak.org/xml-namespaces/sparkle}shortVersionString')==version for i in ET.parse('appcast.xml').findall('channel/item'))
+PUBLISHED
+  else
+    print 'INFO: owner acceptance, source closure and hosted publication are checked at their respective phases'
+  fi
 fi
 
 tag="v$version"
 if git rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1; then
   tag_type=$(git cat-file -t "$tag")
   tag_target=$(git rev-list -n 1 "$tag")
-  head_target=$(git rev-parse HEAD)
+  if [[ "$phase" == published && -f docs/public-release.json ]]; then
+    head_target=$(python3 -c 'import json; print(json.load(open("docs/public-release.json"))["sourceCommit"])')
+  else
+    head_target=$(git rev-parse HEAD)
+  fi
   [[ "$tag_type" == "tag" ]] \
     && pass "$tag is annotated" \
     || fail "$tag is not annotated"

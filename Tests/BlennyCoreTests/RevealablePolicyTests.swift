@@ -71,7 +71,7 @@ struct RevealablePolicyTests {
 
     @Test("Persistent system items map all three policies across reveal sessions")
     func persistentSystemItemPolicyPlanning() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let assignments = try BundlePolicyAssignments(
             visible: [visible], revealable: [revealable], hidden: [hidden]
         )

@@ -36,6 +36,7 @@ struct SettingsLayoutTests {
                                 setLaunchAtLogin: { _ in invokedActions += 1 },
                                 openLoginItemsSettings: { invokedActions += 1 },
                                 checkForUpdates: updates ? { invokedActions += 1 } : nil,
+                                setAutomaticUpdateChecks: updates ? { _ in invokedActions += 1 } : nil,
                                 showFishPlacementGuide: {}, hideSharedSystemItem: { _ in },
                                 restoreSharedSystemItem: { _ in }
                             )

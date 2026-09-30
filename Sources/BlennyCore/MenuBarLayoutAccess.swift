@@ -1,4 +1,4 @@
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 import Darwin
 import Foundation
 
@@ -103,59 +103,8 @@ public struct MenuBarLayoutBookmarkStore {
         guard data.count <= Self.maximumBookmarkBytes else {
             throw MenuBarLayoutAccessError.bookmarkTooLarge
         }
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        guard chmod(directory.path, 0o700) == 0 else {
-            throw MenuBarLayoutAccessError.storageUnavailable
-        }
-        let directoryDescriptor = open(
-            directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
-        )
-        guard directoryDescriptor >= 0 else {
-            throw MenuBarLayoutAccessError.storageUnavailable
-        }
-        defer { close(directoryDescriptor) }
-        try validateDirectory(directoryDescriptor)
-
-        let temporaryName = ".layout-access.\(UUID().uuidString).tmp"
-        let temporary = openat(
-            directoryDescriptor,
-            temporaryName,
-            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-            0o600
-        )
-        guard temporary >= 0 else { throw MenuBarLayoutAccessError.storageUnavailable }
-        var keepTemporary = true
-        defer {
-            close(temporary)
-            if keepTemporary { unlinkat(directoryDescriptor, temporaryName, 0) }
-        }
-
-        var offset = 0
-        while offset < data.count {
-            let remaining = data.count - offset
-            let count = data.withUnsafeBytes { bytes in
-                Darwin.write(temporary, bytes.baseAddress!.advanced(by: offset), remaining)
-            }
-            if count < 0 {
-                if errno == EINTR { continue }
-                throw MenuBarLayoutAccessError.storageUnavailable
-            }
-            guard count > 0 else { throw MenuBarLayoutAccessError.storageUnavailable }
-            offset += count
-        }
-        guard fsync(temporary) == 0,
-              renameat(
-                directoryDescriptor, temporaryName,
-                directoryDescriptor, Self.fileName
-              ) == 0,
-              fsync(directoryDescriptor) == 0 else {
-            throw MenuBarLayoutAccessError.storageUnavailable
-        }
-        keepTemporary = false
+        do { try DurablePrivateFile.write(data, to: bookmarkURL) }
+        catch { throw MenuBarLayoutAccessError.storageUnavailable }
         guard try load() == data else { throw MenuBarLayoutAccessError.invalidStorage }
     }
 
@@ -174,21 +123,47 @@ public struct MenuBarLayoutBookmarkStore {
     }
 }
 
+struct MenuBarLayoutAccessOperations {
+    var resolve: (Data) throws -> (url: URL, stale: Bool)
+    var bookmark: (URL) throws -> Data
+    var start: (URL) -> Bool
+    var stop: (URL) -> Void
+
+    static var system: Self {
+        Self(resolve: { data in
+            var stale = false
+            let url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI],
+                              relativeTo: nil, bookmarkDataIsStale: &stale)
+            return (url, stale)
+        }, bookmark: { url in
+            try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        }, start: { $0.startAccessingSecurityScopedResource() }, stop: { $0.stopAccessingSecurityScopedResource() })
+    }
+}
+
 public final class MenuBarLayoutAccessSession {
     public let expectedFileURL: URL
     private let store: MenuBarLayoutBookmarkStore
     private var activeURL: URL?
+    private let operations: MenuBarLayoutAccessOperations
 
     public init(
         store: MenuBarLayoutBookmarkStore,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         self.store = store
+        operations = .system
+        expectedFileURL = Self.expectedLayoutFileURL(homeDirectory: homeDirectory)
+    }
+
+    init(store: MenuBarLayoutBookmarkStore, homeDirectory: URL, operations: MenuBarLayoutAccessOperations) {
+        self.store = store
+        self.operations = operations
         expectedFileURL = Self.expectedLayoutFileURL(homeDirectory: homeDirectory)
     }
 
     deinit {
-        activeURL?.stopAccessingSecurityScopedResource()
+        if let activeURL { operations.stop(activeURL) }
     }
 
     public var isActive: Bool { activeURL != nil }
@@ -218,36 +193,33 @@ public final class MenuBarLayoutAccessSession {
 
     public func grant(selectedURL: URL) throws {
         try validateSelection(selectedURL)
-        let bookmark = try selectedURL.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        )
-        try store.save(bookmark)
-        try activate(bookmark: bookmark)
+        let bookmark = try operations.bookmark(selectedURL)
+        try activate(bookmark: bookmark, persist: true)
     }
 
-    private func activate(bookmark: Data) throws {
-        var stale = false
-        let resolved: URL
-        do {
-            resolved = try URL(
-                resolvingBookmarkData: bookmark,
-                options: [.withSecurityScope, .withoutUI],
-                relativeTo: nil,
-                bookmarkDataIsStale: &stale
-            )
-        } catch {
-            throw MenuBarLayoutAccessError.bookmarkResolutionFailed
-        }
-        guard !stale else { throw MenuBarLayoutAccessError.bookmarkStale }
+    private func activate(bookmark: Data, persist: Bool = false) throws {
+        let resolution: (url: URL, stale: Bool)
+        do { resolution = try operations.resolve(bookmark) }
+        catch { throw MenuBarLayoutAccessError.bookmarkResolutionFailed }
+        let resolved = resolution.url
         try validateSelection(resolved)
-        guard resolved.startAccessingSecurityScopedResource() else {
+        guard operations.start(resolved) else {
             throw MenuBarLayoutAccessError.securityScopeUnavailable
+        }
+        do {
+            if resolution.stale {
+                // Renew once only after validating and entering the existing exact-file grant.
+                try store.save(operations.bookmark(resolved))
+            } else if persist {
+                try store.save(bookmark)
+            }
+        } catch {
+            operations.stop(resolved)
+            throw error
         }
         let previous = activeURL
         activeURL = resolved
-        previous?.stopAccessingSecurityScopedResource()
+        if let previous { operations.stop(previous) }
     }
 }
 #endif

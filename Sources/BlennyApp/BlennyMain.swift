@@ -1,14 +1,23 @@
 import AppKit
 import Darwin
 import Foundation
-#if DEBUG
 import BlennyCore
-#endif
 
 @main
 @MainActor
 enum BlennyMain {
     static func main() {
+        if CommandLine.arguments.contains("--diagnose-access") {
+            do {
+                FileHandle.standardOutput.write(try AccessDiagnostic.run())
+                FileHandle.standardOutput.write(Data("\n".utf8))
+            } catch {
+                FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
+                Darwin.exit(1)
+            }
+            return
+        }
+
         #if DEBUG
         if CommandLine.arguments.contains("--ordering-preference-read-only") {
             let access = MenuBarLayoutAccessSession(store: MenuBarLayoutBookmarkStore(
@@ -92,6 +101,15 @@ enum BlennyMain {
         }
         if ProcessInfo.processInfo.environment[DebugSelfPositionValidationDelegate.modeKey] != nil {
             let delegate = DebugSelfPositionValidationDelegate()
+            application.delegate = delegate
+            application.setActivationPolicy(.accessory)
+            withExtendedLifetime(delegate) { application.run() }
+            return
+        }
+        #endif
+        #if BLENNY_UPDATE_TEST
+        if Bundle.main.object(forInfoDictionaryKey: "BlennyUpdateTest") as? Bool == true {
+            let delegate = SparkleLocalTestDriver()
             application.delegate = delegate
             application.setActivationPolicy(.accessory)
             withExtendedLifetime(delegate) { application.run() }

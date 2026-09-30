@@ -15,7 +15,7 @@ struct SystemItemPolicyCatalogTests {
 
     @Test("Debug catalog contains only the eight exact writable mappings")
     func exactDebugCatalog() {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         #expect(SystemItemPolicyCatalog.items == [
             .init(identifier: "com.apple.menuextra.battery", rawValue: 0, displayName: "Battery"),
             .init(identifier: "com.apple.menuextra.bluetooth", rawValue: 1, displayName: "Bluetooth"),
@@ -36,7 +36,7 @@ struct SystemItemPolicyCatalogTests {
 
     @Test("Additional policy keys are exact, validated, and schema-gated")
     func strictPersistenceValidation() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let empty = try document()
         #expect(empty.schemaVersion == 3)
         let sound = "com.apple.menuextra.sound"
@@ -65,7 +65,7 @@ struct SystemItemPolicyCatalogTests {
 
     @Test("Persistent policy identities accept only trusted live composites")
     func persistentPolicyObservationMapping() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let observations = [
             "com.apple.systemuiserver|:siri|axmenubaritem":
                 "com.apple.menuextra.siri",
@@ -125,7 +125,7 @@ struct SystemItemPolicyCatalogTests {
 
     @Test("System control capabilities require a unique exact owner and writer target")
     func observedCapabilityIdentity() {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let wifi = SystemMenuBarItemObservation(
             observationIdentifier: "com.apple.menuextra.wifi",
             ownerBundleIdentifier: "com.apple.controlcenter",
@@ -213,7 +213,7 @@ struct SystemItemPolicyCatalogTests {
 
     @Test("Tampered receipt keys cannot decode into a writable policy")
     func tamperedPersistenceDecodeFailsClosed() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let source = try document(systemItemPolicies: [
             "com.apple.menuextra.sound": .hidden,
         ])
@@ -253,7 +253,7 @@ struct SystemItemPolicyCatalogTests {
 
     @Test("Draft, persistence transforms, diff, and plans preserve item intent")
     func policyFlowsCarrySystemItemPolicies() throws {
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let sound = "com.apple.menuextra.sound"
         let wifi = "com.apple.menuextra.wifi"
         let accepted = try document(systemItemPolicies: [sound: .hidden])

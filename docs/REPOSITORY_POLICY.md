@@ -7,18 +7,34 @@ This supersedes the earlier `0.12.x` candidate plan.
 
 ## License and publication scope
 
-License adoption, notices and app packaging are 1.0.0 public-release gates. Apache-2.0
-remains the owner's preferred direction, but this milestone includes no LICENSE
-or NOTICE files in Git or app packages. Owner-only drafts may remain locally
-excluded. Complete the licensing work before public distribution.
+The owner selected Apache-2.0 for 1.0.0 on 2026-09-29. LICENSE, NOTICE and
+THIRD_PARTY_NOTICES.txt are prepared for the authorized source commit and
+packaged with the application. Sparkle's
+license is included in full. No private signing material is part of the source.
 Third-party names and interface descriptions do not grant rights in another
-party's implementation or trademarks. Ice uses GPL-3.0-or-later; its nontrivial
-implementation is not incorporated into Blenny.
+party's implementation or trademarks. Any third-party dependency must have
+compatible licensing and retain its required notices.
 
 Sanitized research and original reproducible probes stay in this same repository.
 They do not require a second public mirror. Raw evidence and owner-only Chinese
 notes remain ignored and require a private backup. Published historical reports
 retain their original evidence and explicitly identify superseded conclusions.
+
+## Distribution route
+
+The owner selected the existing fixed self-signed certificate and independent
+Sparkle EdDSA key for 1.0.0. Developer ID and Apple notarization are not release
+gates. Signature integrity and update authentication do not imply Apple trust.
+Document the actual first-launch steps without disabling system protection.
+
+From the first public 1.0.0, every public binary is built on GitHub from the
+authorized annotated source tag. Local signed packages are development acceptance
+artifacts. Complete all human acceptance, release-content review, hosted setup,
+visibility decisions and exact-ref authorization before that trigger. The release
+workflow then signs, verifies, publishes and checks delivery automatically, with
+no required reviewer, second publish workflow or post-build owner test. Failed
+checks still stop publication; reruns reuse sealed bytes and never replace a
+published version. See RELEASE_AUTOMATION_PLAN_1.0.0.md and DISTRIBUTION.md.
 
 ## History
 
@@ -69,7 +85,14 @@ Before changing the repository from private to public:
 4. Verify that every shipped binary can be built from the published source.
 5. Confirm that all unsupported behavior is documented, isolated, build-gated, and recoverable.
 6. Select the license and add required notices.
-7. Build, test, sign, notarize, install, restore, and uninstall the release candidate.
+7. Build, test, sign with the pinned self-signed identity, verify Sparkle updates,
+   install, restore and validate uninstall during development. Validate the hosted
+   workflow and signing setup before the first formal trigger.
 8. Publish source and the first public binary together.
+
+The owner authorizes the exact destination, main commit and annotated tag before
+the production trigger. That authorization covers the tag's automatic asset and
+feed transaction. Visibility changes and controlled signing-secret transfer remain
+explicit setup actions. No workflow may infer those permissions or export keys.
 
 Historical research may be published with the product when it is sanitized. Its presence is not a promise that abandoned probes remain supported.

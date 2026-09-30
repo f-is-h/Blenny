@@ -770,7 +770,7 @@ struct PolicyEditingTransactionTests {
             .init(bundleIdentifier: weather, processIdentifier: 20, menuBarItemCount: 1),
         ])
 
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         let preview = try await core.previewResumeManaging(
             candidates: candidates,
             observedRunningBundleIdentifiers: [blenny, weather]

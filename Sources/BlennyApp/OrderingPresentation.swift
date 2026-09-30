@@ -2,16 +2,16 @@ import AppKit
 import BlennyCore
 import SwiftUI
 
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 
-enum DebugOrderingAvailability: Equatable {
+enum OrderingAvailability: Equatable {
     case ready
     case needsMapping
     case unverified
     case blocked
 }
 
-struct DebugOrderingRow: Identifiable {
+struct OrderingRow: Identifiable {
     let subjectID: OrderingSubjectID
     let name: String
     let icon: NSImage?
@@ -21,7 +21,7 @@ struct DebugOrderingRow: Identifiable {
     let isEligible: Bool
     let observedX: Double?
     let configuredPosition: Double?
-    let availability: DebugOrderingAvailability
+    let availability: OrderingAvailability
     let policy: MenuBarBundlePolicy?
 
     var id: String { subjectID.boardID }
@@ -45,7 +45,7 @@ struct DebugOrderingRow: Identifiable {
         isEligible: Bool,
         observedX: Double? = nil,
         configuredPosition: Double? = nil,
-        availability: DebugOrderingAvailability? = nil,
+        availability: OrderingAvailability? = nil,
         policy: MenuBarBundlePolicy? = nil
     ) {
         self.init(
@@ -73,7 +73,7 @@ struct DebugOrderingRow: Identifiable {
         isEligible: Bool,
         observedX: Double? = nil,
         configuredPosition: Double? = nil,
-        availability: DebugOrderingAvailability? = nil,
+        availability: OrderingAvailability? = nil,
         policy: MenuBarBundlePolicy? = nil
     ) {
         self.subjectID = subjectID
@@ -99,7 +99,7 @@ struct DebugOrderingRow: Identifiable {
         configuredPosition: Double?,
         isEligible: Bool,
         observedX: Double?
-    ) -> DebugOrderingAvailability {
+    ) -> OrderingAvailability {
         if isEligible { return .ready }
         if systemKey == nil || configuredPosition == nil { return .needsMapping }
         if observedX == nil { return .unverified }
@@ -107,16 +107,16 @@ struct DebugOrderingRow: Identifiable {
     }
 }
 
-struct DebugExactSystemBoardItem: Identifiable {
+struct ExactSystemBoardItem: Identifiable {
     let item: ExactSystemOrderingItem
     let observation: SystemMenuBarItemObservation
-    let row: DebugOrderingRow
+    let row: OrderingRow
 
     var id: String { row.subjectID.boardID }
     var subjectID: OrderingSubjectID { .systemItem(item) }
 }
 
-struct DebugOrderingConfigurationRequest: Equatable {
+struct OrderingConfigurationRequest: Equatable {
     let orderedSubjects: [OrderingSubjectID]
     let originalOrderedSubjects: [OrderingSubjectID]
     let originalPolicies: [OrderingSubjectID: MenuBarBundlePolicy]
@@ -171,7 +171,7 @@ struct DebugOrderingConfigurationRequest: Equatable {
     }
 }
 
-struct DebugOrderingTechnicalDetail: Identifiable, Equatable {
+struct OrderingTechnicalDetail: Identifiable, Equatable {
     let key: String
     let value: String
 
@@ -183,7 +183,7 @@ struct DebugOrderingTechnicalDetail: Identifiable, Equatable {
     }
 }
 
-struct DebugOrderingPreview: Identifiable, Equatable {
+struct OrderingPreview: Identifiable, Equatable {
     let id: UUID
     let fingerprint: String
     let title: String
@@ -192,7 +192,7 @@ struct DebugOrderingPreview: Identifiable, Equatable {
     let targetBundleIdentifiers: [String]
     let beforeOrder: [String]
     let afterOrder: [String]
-    let technicalDetails: [DebugOrderingTechnicalDetail]
+    let technicalDetails: [OrderingTechnicalDetail]
 
     init(
         id: UUID = UUID(),
@@ -203,7 +203,7 @@ struct DebugOrderingPreview: Identifiable, Equatable {
         targetBundleIdentifiers: [String],
         beforeOrder: [String],
         afterOrder: [String],
-        technicalDetails: [DebugOrderingTechnicalDetail] = []
+        technicalDetails: [OrderingTechnicalDetail] = []
     ) {
         self.id = id
         self.fingerprint = fingerprint
@@ -218,9 +218,9 @@ struct DebugOrderingPreview: Identifiable, Equatable {
 }
 
 @MainActor
-final class DebugOrderingPresentation: ObservableObject {
-    @Published var rows: [DebugOrderingRow] = []
-    @Published var preview: DebugOrderingPreview?
+final class OrderingPresentation: ObservableObject {
+    @Published var rows: [OrderingRow] = []
+    @Published var preview: OrderingPreview?
     @Published var message: String?
     @Published var technicalDetail: String?
     @Published var requiresUndoReplacement = false
@@ -238,7 +238,7 @@ final class DebugOrderingPresentation: ObservableObject {
     var onRefresh: () -> Void = {}
     var onPreview: ([String]) -> Void = { _ in }
     var onReorder: ([String]) -> Void = { _ in }
-    var onPreviewConfiguration: (DebugOrderingConfigurationRequest) -> Void = { _ in }
+    var onPreviewConfiguration: (OrderingConfigurationRequest) -> Void = { _ in }
     var onApply: (String) -> Void = { _ in }
     var onRestore: () -> Void = {}
     var onDiscard: () -> Void = {}
@@ -256,7 +256,7 @@ final class DebugOrderingPresentation: ObservableObject {
     func requestReorder(_ desiredLeftToRightOwnerIdentifiers: [String]) {
         onReorder(desiredLeftToRightOwnerIdentifiers)
     }
-    func requestConfigurationPreview(_ request: DebugOrderingConfigurationRequest) {
+    func requestConfigurationPreview(_ request: OrderingConfigurationRequest) {
         onPreviewConfiguration(request)
     }
     func requestApply(fingerprint: String) { onApply(fingerprint) }
@@ -271,8 +271,8 @@ final class DebugOrderingPresentation: ObservableObject {
 
 /// Compact ordering review and recovery controls embedded beneath the Board.
 /// The Board stays visible when an ordering read fails.
-struct DebugOrderingStatusBar: View {
-    @ObservedObject var presentation: DebugOrderingPresentation
+struct OrderingStatusBar: View {
+    @ObservedObject var presentation: OrderingPresentation
     var managementEnabled: Bool? = nil
     var hasDraftChanges = false
     @State private var showsDetails = false

@@ -1,0 +1,8 @@
+{
+  "id": "initial-lifecycle",
+  "version": "1.0.0",
+  "category": "added",
+  "technical": "Separate AppKit window, settings, login and updater services; revalidate saved management intent at launch and gate update interaction during pending work.",
+  "user": "Resume your saved management choice at startup, control login launch in Settings, and receive authenticated Sparkle updates.",
+  "commits": []
+}

@@ -1,4 +1,4 @@
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 import Foundation
 
 /// Pure value transformation for the attended fallback experiment. This is not

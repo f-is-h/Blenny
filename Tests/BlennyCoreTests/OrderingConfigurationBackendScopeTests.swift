@@ -1,4 +1,4 @@
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 import Testing
 import Foundation
 @testable import BlennyCore

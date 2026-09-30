@@ -1,4 +1,4 @@
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 import CryptoKit
 import Foundation
 
@@ -386,7 +386,7 @@ public enum OrderingTransactionError: Error, Equatable, LocalizedError, Sendable
         case .invalidReceipt: "The ordering recovery record is invalid. It has been preserved for inspection."
         case .receiptStorageUnavailable: "A private durable ordering recovery record could not be verified."
         case .writerOccupied: "Another Blenny process owns ordering recovery."
-        case .contextInvalidated: "The session changed during ordering. The original positions require restoration."
+        case .contextInvalidated: "The session changed during ordering. Review the current state before trying again."
         case .movementNotVerified: "The real menu-bar order could not be verified."
         case .restorationNotVerified: "Preferred positions were restored, but the original relative order could not be verified. The recovery record is retained."
         case .restorationAlreadyAttempted: "Restoration was already attempted without confirmation. Blenny will inspect the state but will not repeat the write."

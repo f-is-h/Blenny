@@ -1,0 +1,8 @@
+{
+  "id": "vm-native-overflow-and-scrollbars",
+  "version": "1.0.0",
+  "category": "fixed",
+  "technical": "Use never-visible indicators for the three policy lanes and recognize all 40 locale entries (37 distinct exact label pairs) observed in macOS 27.0.1 MenuBarAgent resources, preserving native control identity and the shared reveal writer across takeover.",
+  "user": "Keep the three policy areas free of persistent scrollbars, and let the system overflow arrow take over expansion and collapse across the system languages represented by macOS 27 resource labels.",
+  "commits": []
+}

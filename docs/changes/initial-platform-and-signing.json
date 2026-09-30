@@ -1,0 +1,8 @@
+{
+  "id": "initial-platform-and-signing",
+  "version": "1.0.0",
+  "category": "limitations",
+  "technical": "Require Apple silicon, macOS 27 only and Xcode 27; retain the pinned self-signed certificate and independent Sparkle EdDSA identity, excluding test and diagnostic builds from distribution.",
+  "user": "Requires Apple silicon and macOS 27 only. Blenny is self-signed and is not notarized by Apple; follow the README first-launch and permission instructions.",
+  "commits": []
+}

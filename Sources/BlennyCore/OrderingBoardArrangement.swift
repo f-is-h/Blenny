@@ -1,6 +1,6 @@
 import Foundation
 
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 
 public struct OrderingBoardOwner: Equatable, Sendable {
     public let bundleIdentifier: String

@@ -1,0 +1,8 @@
+{
+  "id": "initial-backend-limits",
+  "version": "1.0.0",
+  "category": "limitations",
+  "technical": "Document observed macOS 27 native Clock event, Now Playing and unattributed Gaming/Wine visibility, deferred system-item sorting and native overflow-adjacency limits without unsupported workarounds.",
+  "user": "During management, native Clock clicks cannot open Notification Center, and Now Playing or unattributed Gaming/Wine items may disappear. Some system items cannot be sorted; adjacency to the overflow arrow is not guaranteed. See README for tested workarounds and recovery.",
+  "commits": []
+}

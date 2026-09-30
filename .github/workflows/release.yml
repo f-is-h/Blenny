@@ -1,0 +1,185 @@
+name: Release
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+permissions: {}
+# One publisher across all versions; a later tag cannot race an earlier feed write.
+concurrency:
+  group: blenny-public-release
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'f-is-h/Blenny' && (github.event_name == 'push' || github.ref == 'refs/heads/main')
+    runs-on: xcode-27
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      artifact: ${{ steps.seal.outputs.name }}
+      production: ${{ steps.mode.outputs.production }}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select production tag or verification-only mode
+        id: mode
+        env:
+          RELEASE_EVENT: ${{ github.event_name }}
+        run: |
+          if [[ "$RELEASE_EVENT" == push ]]; then
+            echo 'mode=production' >> "$GITHUB_OUTPUT"
+            echo 'production=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'mode=verification' >> "$GITHUB_OUTPUT"
+            echo 'production=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Assert supported hosted toolchain
+        run: zsh scripts/ci-toolchain.sh
+      - name: Verify source and pre-trigger evidence
+        env:
+          RELEASE_MODE: ${{ steps.mode.outputs.mode }}
+        run: python3 scripts/ci-release.py preflight --mode "$RELEASE_MODE"
+      - name: Test exact source
+        run: |
+          mkdir -p LocalData/ci
+          set -o pipefail
+          zsh scripts/verify-local.sh 2>&1 | tee LocalData/ci/verification.log
+      - name: Audit exact source and history
+        env:
+          RELEASE_MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          version=$(python3 -c 'import sys; sys.path.insert(0,"scripts"); from release_tools import marketing_version; print(marketing_version())')
+          base=$(python3 -c 'import sys; sys.path.insert(0,"scripts"); from release_tools import release_records; r=release_records()[0]; print(r["previousPublicTag"] or r["engineeringBaseCommit"])')
+          phase=prepare
+          if [[ "$RELEASE_MODE" == production ]]; then phase=pre-trigger; fi
+          zsh .agents/skills/blenny-release/scripts/release_audit.sh --version "$version" --base "$base" --phase "$phase"
+      - name: Recover immutable artifact for a rerun
+        id: recover
+        env:
+          PRODUCTION: ${{ steps.mode.outputs.production }}
+        run: |
+          args=()
+          if [[ "$PRODUCTION" == true ]]; then args+=(--production); fi
+          python3 scripts/ci-release.py recover LocalData/sealed "${args[@]}"
+      - name: Allocate monotonic internal build
+        if: steps.recover.outputs.reused != 'true'
+        id: number
+        env:
+          RELEASE_MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          build=$(python3 scripts/ci-release.py allocate --mode "$RELEASE_MODE")
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+      - name: Sign and package on GitHub
+        if: steps.recover.outputs.reused != 'true'
+        env:
+          BLENNY_CERTIFICATE_P12_BASE64: ${{ secrets.BLENNY_CERTIFICATE_P12_BASE64 }}
+          BLENNY_CERTIFICATE_PASSWORD: ${{ secrets.BLENNY_CERTIFICATE_PASSWORD }}
+          BLENNY_SPARKLE_PRIVATE_KEY: ${{ secrets.BLENNY_SPARKLE_PRIVATE_KEY }}
+          INTERNAL_BUILD: ${{ steps.number.outputs.build }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          export BLENNY_RELEASE_TAG="$RELEASE_TAG"
+          zsh scripts/ci-sign-package.sh LocalData/sealed "$INTERNAL_BUILD"
+      - name: Verify sealed provenance
+        env:
+          PRODUCTION: ${{ steps.mode.outputs.production }}
+        run: |
+          args=(--source "$GITHUB_SHA")
+          if [[ "$PRODUCTION" == true ]]; then args+=(--production); fi
+          python3 scripts/verify-artifact.py LocalData/sealed "${args[@]}"
+      - name: Name sealed transfer
+        id: seal
+        run: |
+          version=$(python3 -c 'import sys; sys.path.insert(0,"scripts"); from release_tools import marketing_version; print(marketing_version())')
+          echo "name=sealed-$version-$GITHUB_SHA-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Seal artifact between jobs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.seal.outputs.name }}
+          path: |
+            LocalData/sealed/*.dmg
+            LocalData/sealed/*.dmg.sha256
+            LocalData/sealed/*.receipt.json
+            LocalData/sealed/release-notes.md
+          if-no-files-found: error
+          retention-days: 30
+      - name: Retain verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-checks-${{ github.run_id }}-${{ github.run_attempt }}
+          path: LocalData/ci/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Verification-only result
+        if: steps.mode.outputs.production != 'true'
+        run: echo 'Hosted verification complete. No release, tag or production feed was published.' >> "$GITHUB_STEP_SUMMARY"
+  publish:
+    needs: build
+    if: needs.build.outputs.production == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: LocalData/sealed
+          digest-mismatch: error
+      - name: Publish sealed assets and verify anonymous HTTPS delivery
+        run: python3 scripts/ci-release.py publish LocalData/sealed
+      - name: Record automatic publication result
+        if: always()
+        run: |
+          if [[ -f LocalData/sealed/publication-result.json ]]; then
+            cat LocalData/sealed/publication-result.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Release failed; inspect the failed step. Public assets, if already published, remain immutable. A rerun reuses sealed bytes.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Preserve publication receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: publication-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: LocalData/sealed/publication-result.json
+          if-no-files-found: ignore
+          retention-days: 90
+  hosted-update-check:
+    needs: publish
+    runs-on: xcode-27
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Assert supported hosted toolchain
+        run: zsh scripts/ci-toolchain.sh
+      - name: Check public Sparkle information without starting management
+        run: python3 scripts/hosted-update-check.py
+      - name: Record hosted update result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hosted-update-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: LocalData/hosted-update/result.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Final release summary
+        run: |
+          cat LocalData/hosted-update/result.json >> "$GITHUB_STEP_SUMMARY"
+          echo 'Release completed automatically. Anonymous assets/feed and Sparkle information checks passed; human development acceptance was recorded before the tag trigger.' >> "$GITHUB_STEP_SUMMARY"

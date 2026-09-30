@@ -1,0 +1,8 @@
+{
+  "id": "initial-organization",
+  "version": "1.0.0",
+  "category": "added",
+  "technical": "Promote the accepted macOS 27 ordering and bundle-policy backend to Debug and ordinary Release, with one serial writer, fresh preflight and durable recovery.",
+  "user": "Organize menu bar applications into Visible, Revealable and Hidden, and review visibility and order together before applying changes.",
+  "commits": []
+}

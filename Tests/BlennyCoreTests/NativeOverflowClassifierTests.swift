@@ -29,6 +29,33 @@ struct NativeOverflowClassifierTests {
         #expect(result.classification == .nativeOverflowPresentationControl)
     }
 
+    @Test("All resource locale pairs classify exactly and reject ambiguity", arguments: NativeOverflowLocaleFixture.all)
+    func resourceLocalePair(labels: NativeOverflowLocaleFixture.Labels) {
+        for (label, state) in [(labels.collapsed, NativeOverflowPresentationState.collapsed), (labels.expanded, .expanded)] {
+            #expect(NativeOverflowClassifier.classify(
+                ownerBundleIdentifier: "com.apple.MenuBarAgent", role: "AXButton",
+                title: label, itemDescription: nil, accessibilityIdentifier: nil
+            ).classification == .nativeOverflowPresentationControl)
+            #expect(NativeOverflowPresentationStateClassifier.classify(
+                title: nil, itemDescription: label, accessibilityIdentifier: nil
+            ) == state)
+            #expect(NativeOverflowClassifier.classify(
+                ownerBundleIdentifier: "com.apple.MenuBarAgent", role: "AXGroup",
+                title: label, itemDescription: nil, accessibilityIdentifier: nil
+            ).classification == .systemOwnedPresentation)
+            #expect(NativeOverflowClassifier.classify(
+                ownerBundleIdentifier: "com.example.StatusApp", role: "AXButton",
+                title: label, itemDescription: nil, accessibilityIdentifier: nil
+            ).classification == .manageableCandidate)
+            #expect(NativeOverflowPresentationStateClassifier.classify(
+                title: nil, itemDescription: label + " unexpected suffix", accessibilityIdentifier: nil
+            ) == .unknown)
+        }
+        #expect(NativeOverflowPresentationStateClassifier.classify(
+            title: labels.collapsed, itemDescription: labels.expanded, accessibilityIdentifier: nil
+        ) == .unknown)
+    }
+
     @Test("overflow text on a non-button remains generic system presentation")
     func rejectsNonButtonOverflowMarker() {
         let result = NativeOverflowClassifier.classify(

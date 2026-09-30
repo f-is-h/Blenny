@@ -25,9 +25,9 @@ final class StatusItemController: NSObject {
     #if DEBUG && BLENNY_GROUPED_FALLBACK_TRIAL
     private var groupedStatusContent: GroupedStatusItemContent?
     #endif
-    #if DEBUG
     private let fallbackDiagnosticSession = UUID().uuidString
     private var fallbackCreationCount = 0
+    #if DEBUG
     private(set) var debugClickCheck = NativeControlClickCheck()
     private(set) var debugDispatchClickCheckID: UUID?
     private var debugBoundaryCapture: (() -> Void)?
@@ -440,6 +440,24 @@ final class StatusItemController: NSObject {
         return true
     }
 
+    var onPositionControls: (() -> Void)?
+    var onUndoControlPlacement: (() -> Void)?
+
+    var fallbackNativeIdentity: FallbackNativeIdentity? {
+        guard !nativeOverflow.isUsable, let item = revealStatusItem,
+              item.autosaveName == "Item-1", item.length == Self.ordinaryStatusItemLength,
+              item.button?.window != nil, item.button?.isHidden == false,
+              statusItem.autosaveName == "Blenny.Fish",
+              statusItem.length == Self.ordinaryStatusItemLength,
+              statusItem.button?.window != nil, statusItem.button?.isHidden == false,
+              let session = UUID(uuidString: fallbackDiagnosticSession) else { return nil }
+        return FallbackNativeIdentity(pid: ProcessInfo.processInfo.processIdentifier,
+            session: session, instance: fallbackCreationCount)
+    }
+
+    @objc private func onPositionControlsAction() { onPositionControls?() }
+    @objc private func onUndoControlPlacementAction() { onUndoControlPlacement?() }
+
     #if DEBUG
     var debugSelfPositionSummary: String {
         "fishWidth=\(statusItem.length) arrowWidth=\(revealStatusItem?.length ?? 0) "
@@ -579,25 +597,7 @@ final class StatusItemController: NSObject {
         return result
     }
 
-    #if DEBUG
-    var debugMoveFallback: (() -> Void)?
-    var debugRestoreFallback: (() -> Void)?
 
-    var debugFallbackNativeIdentity: FallbackNativeIdentity? {
-        guard !nativeOverflow.isUsable, let item = revealStatusItem,
-              item.autosaveName == "Item-1", item.length == Self.ordinaryStatusItemLength,
-              item.button?.window != nil, item.button?.isHidden == false,
-              statusItem.autosaveName == "Blenny.Fish",
-              statusItem.length == Self.ordinaryStatusItemLength,
-              statusItem.button?.window != nil, statusItem.button?.isHidden == false,
-              let session = UUID(uuidString: fallbackDiagnosticSession) else { return nil }
-        return FallbackNativeIdentity(pid: ProcessInfo.processInfo.processIdentifier,
-            session: session, instance: fallbackCreationCount)
-    }
-
-    @objc private func debugMoveFallbackAction() { debugMoveFallback?() }
-    @objc private func debugRestoreFallbackAction() { debugRestoreFallback?() }
-    #endif
 
     func debugConfigureBoundaryCapture(directory: URL, capture: @escaping () -> Void) {
         debugBoundaryDirectory = directory
@@ -917,9 +917,7 @@ final class StatusItemController: NSObject {
             withLength: Self.ordinaryStatusItemLength
         )
         revealStatusItem = item
-        #if DEBUG
         fallbackCreationCount += 1
-        #endif
         item.button?.target = self
         item.button?.action = #selector(handleRevealStatusButton(_:))
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -977,25 +975,26 @@ final class StatusItemController: NSObject {
             item.target = self
             debugMenu.addItem(item)
         }
-        #if DEBUG
-        let move = NSMenuItem(title: "Position Blenny Controls…",
-            action: #selector(debugMoveFallbackAction), keyEquivalent: "")
-        let restore = NSMenuItem(title: "Undo Control Placement",
-            action: #selector(debugRestoreFallbackAction), keyEquivalent: "")
-        for item in [move, restore] {
-            item.target = self
-            item.isEnabled = true
-            debugMenu.addItem(item)
-        }
-        #endif
+
         let diagnosticParent = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
         diagnosticParent.submenu = debugMenu
         setMenuIcon(diagnosticParent, symbol: "ladybug")
         for (item, symbol) in zip(
-            [refreshItem, fallbackSlotDiagnosticItem, arm, debugSaveBoundaryItem, open, move, restore],
-            ["arrow.clockwise", "info.circle", "cursorarrow", "camera", "folder", "arrow.left.arrow.right", "arrow.uturn.backward"]
+            [refreshItem, fallbackSlotDiagnosticItem, arm, debugSaveBoundaryItem, open],
+            ["arrow.clockwise", "info.circle", "cursorarrow", "camera", "folder"]
         ) { setMenuIcon(item, symbol: symbol) }
         #endif
+        let move = NSMenuItem(title: "Position Blenny Controls…",
+            action: #selector(onPositionControlsAction), keyEquivalent: "")
+        let restore = NSMenuItem(title: "Undo Control Placement",
+            action: #selector(onUndoControlPlacementAction), keyEquivalent: "")
+        for item in [move, restore] {
+            item.target = self
+            item.isEnabled = true
+            menu.addItem(item)
+        }
+        setMenuIcon(move, symbol: "arrow.left.arrow.right")
+        setMenuIcon(restore, symbol: "arrow.uturn.backward")
         menu.addItem(ordinaryRevealItem)
         menu.addItem(resumeManagingItem)
         menu.addItem(stopManagingItem)

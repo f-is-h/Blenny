@@ -1,0 +1,7 @@
+{
+  "id": "version-and-release-automation",
+  "version": "1.0.0",
+  "category": "internal",
+  "technical": "Separate marketing-version display from diagnostic build identity; generate changelog and release notes from structured fragments and prepare a single unattended GitHub signing, packaging, publication and feed workflow.",
+  "commits": []
+}

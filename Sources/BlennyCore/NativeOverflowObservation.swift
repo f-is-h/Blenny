@@ -77,15 +77,18 @@ public enum NativeOverflowPresentationStateClassifier {
         "更多菜单栏项目",
         "顯示隱藏的選單列項目",
         "更多選單列項目",
-        "メニューバーの項目をさらに表示"
+        "メニューバーの項目をさらに表示",
+        "非表示のメニューバー項目を表示"
     ]
 
     private static let expandedMarkers = [
         "hide hidden menu bar items",
         "hide more menu bar items",
+        "hide menu bar items",
         "隐藏菜单栏项目",
         "隱藏選單列項目",
-        "メニューバーの追加項目を隠す"
+        "メニューバーの追加項目を隠す",
+        "メニューバー項目を非表示"
     ]
 
     public static func classify(
@@ -97,8 +100,8 @@ public enum NativeOverflowPresentationStateClassifier {
             .compactMap(MenuBarItemIdentityResolver.normalize)
         // Substrings are unsafe: "hide more menu bar items" also contains the
         // collapsed marker "more menu bar items". Contradictory labels fail closed.
-        let collapsed = labels.contains { collapsedMarkers.contains($0) }
-        let expanded = labels.contains { expandedMarkers.contains($0) }
+        let collapsed = labels.contains { collapsedMarkers.contains($0) || MacOS27NativeOverflowLabels.collapsed.contains($0) }
+        let expanded = labels.contains { expandedMarkers.contains($0) || MacOS27NativeOverflowLabels.expanded.contains($0) }
         guard collapsed != expanded else { return .unknown }
         return collapsed ? .collapsed : .expanded
     }

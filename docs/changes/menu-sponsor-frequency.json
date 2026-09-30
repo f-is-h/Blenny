@@ -1,0 +1,8 @@
+{
+  "id": "menu-sponsor-frequency",
+  "version": "1.0.0",
+  "category": "changed",
+  "technical": "Set frequency=one-time on the status-menu GitHub Sponsors URL while preserving its project, source and menu-placement metadata.",
+  "user": "Open one-time GitHub sponsorship by default from the menu bar's right-click menu.",
+  "commits": []
+}

@@ -51,7 +51,7 @@ public enum SystemItemCapabilityIdentity {
         return item.identifier
     }
 
-    #if DEBUG
+    #if BLENNY_PRODUCT || DEBUG
     public static func orderingItem(
         for observation: SystemMenuBarItemObservation,
         retainedWhileAbsent: Bool = false

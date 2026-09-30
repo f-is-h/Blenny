@@ -1,0 +1,8 @@
+{
+  "id": "first-apply-and-undo",
+  "version": "1.0.0",
+  "category": "fixed",
+  "technical": "Seed the implicit initial policy before first Apply, restore sparse snapshots within approved owner scope, and permit missing-backup startup only for the exact initial visible policy after Undo.",
+  "user": "Apply changes safely on a fresh installation, then undo them and reopen Blenny without a spurious missing-backup error.",
+  "commits": []
+}

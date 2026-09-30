@@ -15,7 +15,7 @@ enum OrderingBoardLifecycleSelfCheck {
             throw CheckFailure(message: "Grouped native controls must retain separate, adjacent hit targets")
         }
         #endif
-        let staleError = DebugOrderingPresentation()
+        let staleError = OrderingPresentation()
         staleError.isError = true
         staleError.needsDataAccess = true
         staleError.technicalDetail = "Earlier file access refusal"
@@ -395,7 +395,7 @@ enum OrderingBoardLifecycleSelfCheck {
             candidateGeneration: UUID()
         )
         let eligible: Set<OrderingSubjectID> = [.application(beta), .application(gamma)]
-        let initialRequest = DebugOrderingConfigurationRequest(draft: layout)
+        let initialRequest = OrderingConfigurationRequest(draft: layout)
         try require(initialRequest.unavailableOrderChanges(
             eligibleSubjects: eligible, blenny: blenny
         ).isEmpty, "unchanged layout reported an unsupported ordering change")
@@ -408,14 +408,14 @@ enum OrderingBoardLifecycleSelfCheck {
         let visibilityOnly = try layout.moving(
             source, to: .init(policy: .hidden, position: .end)
         ).get()
-        try require(DebugOrderingConfigurationRequest(draft: visibilityOnly)
+        try require(OrderingConfigurationRequest(draft: visibilityOnly)
             .unavailableOrderChanges(eligibleSubjects: eligible, blenny: blenny).isEmpty,
             "valid visibility-only move required unsupported sorting")
 
         let reordered = try layout.moving(
             source, to: .init(policy: .visible, position: .after(beta))
         ).get()
-        try require(DebugOrderingConfigurationRequest(draft: reordered)
+        try require(OrderingConfigurationRequest(draft: reordered)
             .unavailableOrderChanges(eligibleSubjects: eligible, blenny: blenny)
             == [.application(alpha)],
             "unsupported same-area ordering could be silently omitted")
@@ -546,7 +546,7 @@ enum OrderingBoardLifecycleSelfCheck {
         let model = ProductInterfaceModel()
         model.display(model: editor, observationCount: observationsCount, recoveryAvailable: true)
         model.setAccessibilityTrusted(true, hasRequestedSystemPrompt: true)
-        model.setManagementRuntimeState(.stopped, developmentMutationAvailable: true)
+        model.setManagementRuntimeState(.stopped, managementBackendAvailable: true)
         setRows(model, alphaFirst: true)
         model.initializeOrderingLayoutFromCurrentRows(force: true)
         let initialLayout = try require(model.orderingLayoutDraft, "local-draft layout unavailable")
@@ -950,21 +950,21 @@ enum OrderingBoardLifecycleSelfCheck {
             ? [("com.example.OrderingAlpha", 900), ("com.example.OrderingBeta", 700)]
             : [("com.example.OrderingBeta", 900), ("com.example.OrderingAlpha", 700)]
         model.orderingPresentation.rows = positions.map { identifier, position in
-            DebugOrderingRow(
+            OrderingRow(
                 bundleIdentifier: identifier, name: identifier,
                 systemKey: "status:\(identifier)::item",
                 currentPositionLabel: String(position), isEligible: true,
                 configuredPosition: position, availability: .ready
             )
         } + [
-            DebugOrderingRow(
+            OrderingRow(
                 bundleIdentifier: "com.example.OrderingGamma",
                 name: "com.example.OrderingGamma",
                 systemKey: "status:com.example.OrderingGamma::item",
                 currentPositionLabel: "500", isEligible: true,
                 configuredPosition: 500, availability: .ready
             ),
-            DebugOrderingRow(
+            OrderingRow(
                 subjectID: .systemItem(.siri),
                 name: ExactSystemOrderingItem.siri.displayName,
                 systemKey: ExactSystemOrderingItem.siri.configurationKey,

@@ -22,11 +22,26 @@ actor PolicyInterfaceStore: PersistentBundlePolicyStoring {
     }
 
     func save(_ document: PersistentBundlePolicyDocument) async throws {
+        // The first reviewed Apply needs the same baseline used by preview,
+        // including a durable previous-policy backup for the next launch.
+        if try await persistentStore.load() == nil {
+            try await persistentStore.save(initialPolicy)
+        }
         try await persistentStore.save(document)
     }
 
     func restoreBackup() async throws -> PersistentBundlePolicyDocument? {
         try await persistentStore.restoreBackup()
+    }
+
+    func restoreSnapshot(
+        document: PersistentBundlePolicyDocument,
+        backup: PersistentBundlePolicyBackup?,
+        expecting: PersistentBundlePolicyDocument
+    ) async throws {
+        try await persistentStore.restoreSnapshot(
+            document: document, backup: backup, expecting: expecting
+        )
     }
 }
 

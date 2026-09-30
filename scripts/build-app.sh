@@ -1,6 +1,9 @@
 #!/bin/zsh
 
 set -euo pipefail
+: ${DEVELOPER_DIR:?Select the Xcode 27 developer directory explicitly}
+[[ "$(xcodebuild -version)" == 'Xcode 27.'* ]] || { print -u2 'Xcode 27 required'; exit 69; }
+[[ "$(xcrun --sdk macosx --show-sdk-version)" == 27.* ]] || { print -u2 'macOS 27 SDK required'; exit 69; }
 
 script_directory=${0:A:h}
 repository_root=${script_directory:h}
@@ -17,8 +20,14 @@ esac
 ordering_trial=${BLENNY_ORDERING_TRIAL:-NO}
 shared_system_item_trial=${BLENNY_SHARED_SYSTEM_ITEM_TRIAL:-NO}
 now_playing_legacy_trial=${BLENNY_NOW_PLAYING_LEGACY_REVEAL_TRIAL:-NO}
-code_sign_identity=${BLENNY_CODE_SIGN_IDENTITY:--}
+pinned_identity=$(<"$repository_root/Config/SigningIdentity.sha1")
+code_sign_identity=${BLENNY_CODE_SIGN_IDENTITY:-$pinned_identity}
+if [[ "$code_sign_identity" == "-" && "${BLENNY_ALLOW_ADHOC:-NO}" != YES ]]; then
+  print -u2 "Ad-hoc signing requires BLENNY_ALLOW_ADHOC=YES and is not distributable"
+  exit 64
+fi
 update_feed_url=${BLENNY_UPDATE_FEED_URL:-}
+update_test=${BLENNY_UPDATE_TEST:-NO}
 build_number_override=${BLENNY_BUILD_NUMBER:-}
 
 if [[ -z "$code_sign_identity" ]]; then
@@ -26,8 +35,10 @@ if [[ -z "$code_sign_identity" ]]; then
   exit 64
 fi
 if [[ -n "$update_feed_url" && "$update_feed_url" != https://* ]]; then
-  print -u2 "BLENNY_UPDATE_FEED_URL must be an HTTPS URL"
-  exit 64
+  if [[ "$update_test" != YES || "$update_feed_url" != http://127.0.0.1:* ]]; then
+    print -u2 "BLENNY_UPDATE_FEED_URL must be HTTPS (test builds allow exact loopback)"
+    exit 64
+  fi
 fi
 if [[ -n "$update_feed_url" && "$code_sign_identity" == "-" ]]; then
   print -u2 "A Sparkle-enabled package requires a persistent code-signing identity"
@@ -57,8 +68,11 @@ else
   build_root=${BLENNY_BUILD_ROOT:-"$repository_root/build/$configuration"}
 fi
 
-scratch_directory="$build_root/swift"
+scratch_directory=${BLENNY_SWIFT_SCRATCH_PATH:-"$build_root/swift"}
 swift_build_options=()
+if [[ "$update_test" == YES ]]; then
+  swift_build_options+=(-Xswiftc -DBLENNY_UPDATE_TEST)
+fi
 
 if [[ "$now_playing_legacy_trial" == "YES" ]]; then
   swift_build_options+=(
@@ -161,13 +175,20 @@ fi
 cp "$repository_root/Config/Info.plist" "$contents_directory/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" \
   "$contents_directory/Info.plist"
-if [[ "$configuration" == "release" && "$ordering_trial" != "YES" ]]; then
-  /usr/libexec/PlistBuddy -c 'Delete :NSAppDataUsageDescription' \
+if [[ -n "$update_feed_url" ]]; then
+  plutil -replace SUFeedURL -string "$update_feed_url" \
     "$contents_directory/Info.plist"
 fi
-if [[ -n "$update_feed_url" ]]; then
-  plutil -insert SUFeedURL -string "$update_feed_url" \
-    "$contents_directory/Info.plist"
+if [[ "$code_sign_identity" == "-" ]]; then
+  # Contributor builds cannot participate in the owner's authenticated release channel.
+  plutil -remove SUFeedURL "$contents_directory/Info.plist"
+fi
+for legal_file in LICENSE NOTICE THIRD_PARTY_NOTICES.txt; do
+  cp "$repository_root/$legal_file" "$resources_directory/$legal_file"
+done
+if [[ "$update_test" == YES ]]; then
+  plutil -insert BlennyUpdateTest -bool YES "$contents_directory/Info.plist"
+  plutil -insert NSAppTransportSecurity -json '{"NSAllowsLocalNetworking":true,"NSExceptionDomains":{"127.0.0.1":{"NSExceptionAllowsInsecureHTTPLoads":true}}}' "$contents_directory/Info.plist"
 fi
 cp "$repository_root/Assets/MenuBar/BlennyMenuBarTemplate.svg" "$resources_directory/BlennyMenuBarTemplate.svg"
 
@@ -217,17 +238,17 @@ done
 codesign --force --sign "$code_sign_identity" --options runtime \
   "$sparkle_target"
 codesign_options=(--force --sign "$code_sign_identity" --identifier "$bundle_identifier")
-if [[ "$configuration" == "debug" || "$ordering_trial" == "YES" ]]; then
+if [[ "$configuration" == "debug" || "$configuration" == "release" ]]; then
   codesign_options+=(--entitlements "$repository_root/Config/OrderingTrial.entitlements")
 fi
 codesign "${codesign_options[@]}" "$application_directory"
 codesign --verify --deep --strict "$application_directory"
-if [[ -n "$update_feed_url" ]]; then
+if [[ "$code_sign_identity" != "-" ]]; then
   requirement=$(codesign -dr - "$application_directory" 2>&1)
   expected_identity_hash=$(<"$repository_root/Config/SigningIdentity.sha1")
   expected_requirement="identifier \"xyz.fi5h.blenny\" and certificate root = H\"${expected_identity_hash:l}\""
   if [[ "$requirement" != *"$expected_requirement"* ]]; then
-    print -u2 "A Sparkle-enabled package must use the pinned Blenny signing certificate"
+    print -u2 "A signed Blenny package must use the pinned Blenny signing certificate"
     exit 65
   fi
 fi

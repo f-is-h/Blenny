@@ -1,4 +1,4 @@
-#if DEBUG
+#if BLENNY_PRODUCT || DEBUG
 import Darwin
 import Foundation
 import Testing
@@ -11,7 +11,7 @@ struct MenuBarLayoutAccessTests {
     func exactLayoutFileOnly() throws {
         let home = URL(fileURLWithPath: "/fixture-home/tester", isDirectory: true)
         let store = MenuBarLayoutBookmarkStore(
-            directory: home.appendingPathComponent("Library/Application Support/Blenny/DebugOrdering")
+            directory: home.appendingPathComponent("Library/Application Support/Blenny/Ordering")
         )
         let session = MenuBarLayoutAccessSession(store: store, homeDirectory: home)
         let expected = home.appendingPathComponent(
@@ -59,11 +59,13 @@ struct MenuBarLayoutAccessTests {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         let link = root.appendingPathComponent("linked", isDirectory: true)
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: destination)
+        let originalMode = try permissions(of: destination)
         let store = MenuBarLayoutBookmarkStore(directory: link)
 
         #expect(throws: MenuBarLayoutAccessError.self) {
             try store.save(Data("bookmark".utf8))
         }
+        #expect(try permissions(of: destination) == originalMode)
     }
 
     private func temporaryDirectory() -> URL {

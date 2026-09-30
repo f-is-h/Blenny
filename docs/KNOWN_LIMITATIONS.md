@@ -1,14 +1,14 @@
 # Known limitations
 
-## Experimental ordering scope
+## Current ordering scope
 
-Version 0.10.0 ordering is available in Debug and the explicitly enabled optimized
-owner-test build on the admitted macOS 27 runtime. Ordinary Release excludes it.
-It is not a general guarantee for every application, monitor or future OS build.
-Unknown identities and incomplete owner scope remain unsupported.
+Version 1.0.0 enables accepted ordering in both Debug and ordinary Release on
+the admitted macOS 27 runtime. Current local verification uses Apple silicon,
+macOS 27.0 build 26A428. Other system builds or display configurations have not
+been verified. Unknown identities and incomplete owner scope fail closed.
 
 Siri, Time Machine and Control Center sorting is deferred. Their mapped three-state
-visibility controls remain available in the experimental configuration; visibility
+visibility controls remain available when their exact capability is established; visibility
 support does not imply ordering support. Clock and native overflow stay read-only.
 
 Exact adjacency of the native overflow arrow and Blenny's controls is not

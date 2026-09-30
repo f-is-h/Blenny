@@ -27,7 +27,7 @@ struct PolicyIconResolverTests {
         )
         #expect(PolicyIconDescriptor.fallback.symbolName == "questionmark.square.dashed")
 
-        #if DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
+        #if BLENNY_PRODUCT || DEBUG || BLENNY_SHARED_SYSTEM_ITEM_TRIAL
         #expect(
             PolicyIconResolver.applicationDescriptor(
                 bundleIdentifier: "com.apple.weather.menu",
