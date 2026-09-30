@@ -13,13 +13,13 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-from release_tools import (ROOT, REPOSITORY, ci_build_number, git, marketing_version,
+from release_tools import (ROOT, CONTROLLER_ROOT, REPOSITORY, ci_build_number, git, marketing_version,
                            product_digest, validate_acceptance, validate_coverage,
                            validate_documents, version_notes, version_tuple, write_json)
 
 
 def load_script(name):
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), ROOT / "scripts" / (name + ".py"))
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), CONTROLLER_ROOT / "scripts" / (name + ".py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -76,12 +76,53 @@ def ensure_order(version, existing_releases, current_tag):
             raise ValueError("Cannot publish an equal/older marketing version")
 
 
+def select_source(operation, requested_tag):
+    """Select immutable application source separately from the reviewed controller."""
+    if os.getenv("GITHUB_ACTIONS") != "true" or os.getenv("GITHUB_REPOSITORY") != REPOSITORY:
+        raise ValueError("Source selection requires the expected hosted repository")
+    event, ref = os.getenv("GITHUB_EVENT_NAME"), os.getenv("GITHUB_REF")
+    controller = git("rev-parse", "HEAD", root=CONTROLLER_ROOT)
+    if controller != os.environ["GITHUB_SHA"] or git("status", "--porcelain", root=CONTROLLER_ROOT):
+        raise ValueError("Release controller must be clean and match the immutable workflow revision")
+    if event == "push":
+        if not ref or not ref.startswith("refs/tags/v"):
+            raise ValueError("Automatic publication requires a version-tag push")
+        operation, requested_tag = "publish", ref.removeprefix("refs/tags/")
+    elif event != "workflow_dispatch" or ref != "refs/heads/main":
+        raise ValueError("Manual release controls must run from reviewed main")
+    if operation not in {"verification", "signing-diagnostics", "publish"}:
+        raise ValueError("Unknown release operation")
+    if operation == "publish" and not requested_tag:
+        raise ValueError("Manual publication requires an explicit existing version tag")
+    selected = controller
+    tag_object = ""
+    if requested_tag:
+        if not requested_tag.startswith("v"):
+            raise ValueError("Expected a canonical vX.Y.Z source tag")
+        version_tuple(requested_tag[1:])
+        if git("cat-file", "-t", "refs/tags/" + requested_tag, root=CONTROLLER_ROOT) != "tag":
+            raise ValueError("Selected source tag must be annotated")
+        selected = git("rev-parse", requested_tag + "^{commit}", root=CONTROLLER_ROOT)
+        tag_object = git("rev-parse", "refs/tags/" + requested_tag, root=CONTROLLER_ROOT)
+        remote = api(f"repos/{REPOSITORY}/git/ref/tags/{requested_tag}")
+        if remote["object"]["sha"] != tag_object:
+            raise ValueError("Selected remote tag was replaced or diverged")
+        run("git", "-C", str(CONTROLLER_ROOT), "merge-base", "--is-ancestor", selected, "origin/main")
+    return dict(mode="production" if operation == "publish" else "verification",
+                production=str(operation == "publish").lower(), diagnostics=str(operation == "signing-diagnostics").lower(),
+                source_ref=selected, source_sha=selected, source_tag=requested_tag, tag_object=tag_object)
+
+
 def preflight(mode):
     if os.getenv("GITHUB_ACTIONS") != "true" or os.getenv("GITHUB_REPOSITORY") != REPOSITORY:
         raise ValueError("Hosted release commands require the expected GitHub Actions repository")
     source = git("rev-parse", "HEAD")
-    if git("status", "--porcelain") or source != os.environ["GITHUB_SHA"]:
-        raise ValueError("Release checkout must be clean and match the immutable workflow source")
+    expected_source = os.getenv("BLENNY_RELEASE_SOURCE_SHA", os.environ["GITHUB_SHA"])
+    if git("status", "--porcelain") or source != expected_source:
+        raise ValueError("Release checkout must be clean and match the selected immutable source")
+    if ROOT != CONTROLLER_ROOT:
+        if git("rev-parse", "HEAD", root=CONTROLLER_ROOT) != os.environ["GITHUB_SHA"] or git("status", "--porcelain", root=CONTROLLER_ROOT):
+            raise ValueError("Release controller differs from the immutable workflow revision")
     validate_documents()
     validate_coverage()
     version = marketing_version()
@@ -89,8 +130,11 @@ def preflight(mode):
     if mode == "verification" and (os.getenv("GITHUB_EVENT_NAME") != "workflow_dispatch" or os.getenv("GITHUB_REF") != "refs/heads/main"):
         raise ValueError("Verification-only signing is explicitly dispatched from reviewed main")
     if mode == "production":
-        if os.getenv("GITHUB_REF") != "refs/tags/" + tag or os.getenv("GITHUB_EVENT_NAME") != "push":
-            raise ValueError("Production publication requires an annotated version-tag push")
+        automatic = os.getenv("GITHUB_EVENT_NAME") == "push" and os.getenv("GITHUB_REF") == "refs/tags/" + tag
+        manual = (os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch" and os.getenv("GITHUB_REF") == "refs/heads/main"
+                  and os.getenv("BLENNY_RELEASE_TAG") == tag and ROOT != CONTROLLER_ROOT)
+        if not (automatic or manual):
+            raise ValueError("Publication requires a version-tag push or explicit existing-tag dispatch from reviewed main")
         if git("cat-file", "-t", "refs/tags/" + tag) != "tag" or git("rev-parse", tag + "^{commit}") != source:
             raise ValueError("Release tag must be annotated and point to the checked-out source")
         run("git", "merge-base", "--is-ancestor", source, "origin/main")
@@ -216,7 +260,8 @@ def publish(directory):
                                     download_url=urls[receipt["archive"]], release_url=release["html_url"], notes=version_notes(version))
             public_receipt = dict(status="published", version=version, build=receipt["build"], sourceCommit=source,
                                   tag=tag, sha256=receipt["sha256"], releaseURL=release["html_url"], assets=urls,
-                                  anonymousAssetVerification=True, workflowRun=os.environ["GITHUB_RUN_ID"])
+                                  anonymousAssetVerification=True, workflowRun=os.environ["GITHUB_RUN_ID"],
+                                  workflowCommit=receipt.get("workflowCommit", source))
             write_json(worktree / "docs/public-release.json", public_receipt)
             run("git", "-C", str(worktree), "config", "user.name", "github-actions[bot]")
             run("git", "-C", str(worktree), "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
@@ -242,6 +287,9 @@ def publish(directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    select_parser = commands.add_parser("select")
+    select_parser.add_argument("--operation", required=True)
+    select_parser.add_argument("--tag", default="")
     for name in ("preflight", "allocate"):
         sub = commands.add_parser(name)
         sub.add_argument("--mode", choices=["verification", "production"], required=True)
@@ -251,7 +299,16 @@ def main():
     publish_parser = commands.add_parser("publish")
     publish_parser.add_argument("directory", type=Path)
     args = parser.parse_args()
-    if args.command == "preflight":
+    if args.command == "select":
+        selected = select_source(args.operation, args.tag)
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            for key, value in selected.items():
+                output.write(key + "=" + value + "\n")
+        with open(os.environ["GITHUB_ENV"], "a") as environment:
+            environment.write("BLENNY_RELEASE_SOURCE_SHA=" + selected['source_sha'] + "\n")
+            environment.write("BLENNY_RELEASE_TAG=" + selected['source_tag'] + "\n")
+        print(json.dumps(selected))
+    elif args.command == "preflight":
         source, version, tag = preflight(args.mode)
         print(json.dumps(dict(source=source, version=version, tag=tag)))
     elif args.command == "allocate":

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -64,6 +65,8 @@ def verify(directory, root=ROOT, production=False, source=None):
     verify_signature(archive, receipt["edSignature"], info["SUPublicEDKey"])
     if production:
         toolchain = receipt["toolchain"]
+        if not re.fullmatch(r"[a-f0-9]{40}", receipt.get("workflowCommit", receipt["sourceCommit"])):
+            raise ValueError("Invalid release-controller commit provenance")
         if receipt["buildOrigin"] != "github-actions" or receipt["sourceDirty"] is not False or receipt["tag"] != "v" + version:
             raise ValueError("Public artifacts must be clean, tag-bound GitHub builds")
         if receipt.get("sparkleFixtureVerified") is not True:

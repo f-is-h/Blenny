@@ -3,6 +3,18 @@ on:
   push:
     tags: ['v*.*.*']
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Choose verification, signing diagnosis, or publication of an existing tag
+        type: choice
+        required: false
+        default: verification
+        options: [verification, signing-diagnostics, publish]
+      release_tag:
+        description: Existing annotated vX.Y.Z tag (required for publish)
+        type: string
+        required: false
+        default: ''
 permissions: {}
 # One publisher across all versions; a later tag cannot race an earlier feed write.
 concurrency:
@@ -13,44 +25,58 @@ jobs:
     if: github.repository == 'f-is-h/Blenny' && (github.event_name == 'push' || github.ref == 'refs/heads/main')
     runs-on: xcode-27
     timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: source
     permissions:
       contents: read
       actions: read
     outputs:
       artifact: ${{ steps.seal.outputs.name }}
       production: ${{ steps.mode.outputs.production }}
+      source_sha: ${{ steps.mode.outputs.source_sha }}
+      source_tag: ${{ steps.mode.outputs.source_tag }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer
       GH_TOKEN: ${{ github.token }}
+      BLENNY_RELEASE_SOURCE_ROOT: ${{ github.workspace }}/source
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+          path: controller
+          ref: ${{ github.sha }}
       - name: Select production tag or verification-only mode
         id: mode
+        working-directory: controller
         env:
-          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_OPERATION: ${{ inputs.operation || 'verification' }}
+          REQUESTED_TAG: ${{ inputs.release_tag || '' }}
         run: |
-          if [[ "$RELEASE_EVENT" == push ]]; then
-            echo 'mode=production' >> "$GITHUB_OUTPUT"
-            echo 'production=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'mode=verification' >> "$GITHUB_OUTPUT"
-            echo 'production=false' >> "$GITHUB_OUTPUT"
-          fi
+          python3 scripts/ci-release.py select --operation "$RELEASE_OPERATION" --tag "$REQUESTED_TAG"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.mode.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: source
       - name: Assert supported hosted toolchain
-        run: zsh scripts/ci-toolchain.sh
+        run: zsh ../controller/scripts/ci-toolchain.sh
+      - name: Verify release controller contracts
+        run: python3 ../controller/scripts/test-ci-release.py
       - name: Verify source and pre-trigger evidence
         env:
           RELEASE_MODE: ${{ steps.mode.outputs.mode }}
-        run: python3 scripts/ci-release.py preflight --mode "$RELEASE_MODE"
+        run: python3 ../controller/scripts/ci-release.py preflight --mode "$RELEASE_MODE"
       - name: Test exact source
+        if: steps.mode.outputs.diagnostics != 'true'
         run: |
           mkdir -p LocalData/ci
           set -o pipefail
           zsh scripts/verify-local.sh 2>&1 | tee LocalData/ci/verification.log
       - name: Audit exact source and history
+        if: steps.mode.outputs.diagnostics != 'true'
         env:
           RELEASE_MODE: ${{ steps.mode.outputs.mode }}
         run: |
@@ -60,53 +86,56 @@ jobs:
           if [[ "$RELEASE_MODE" == production ]]; then phase=pre-trigger; fi
           zsh .agents/skills/blenny-release/scripts/release_audit.sh --version "$version" --base "$base" --phase "$phase"
       - name: Recover immutable artifact for a rerun
+        if: steps.mode.outputs.diagnostics != 'true'
         id: recover
         env:
           PRODUCTION: ${{ steps.mode.outputs.production }}
         run: |
           args=()
           if [[ "$PRODUCTION" == true ]]; then args+=(--production); fi
-          python3 scripts/ci-release.py recover LocalData/sealed "${args[@]}"
+          python3 ../controller/scripts/ci-release.py recover LocalData/sealed "${args[@]}"
       - name: Allocate monotonic internal build
-        if: steps.recover.outputs.reused != 'true'
+        if: steps.mode.outputs.diagnostics != 'true' && steps.recover.outputs.reused != 'true'
         id: number
         env:
           RELEASE_MODE: ${{ steps.mode.outputs.mode }}
         run: |
-          build=$(python3 scripts/ci-release.py allocate --mode "$RELEASE_MODE")
+          build=$(python3 ../controller/scripts/ci-release.py allocate --mode "$RELEASE_MODE")
           echo "build=$build" >> "$GITHUB_OUTPUT"
       - name: Sign and package on GitHub
-        if: steps.recover.outputs.reused != 'true'
+        if: steps.mode.outputs.diagnostics == 'true' || steps.recover.outputs.reused != 'true'
         env:
           BLENNY_CERTIFICATE_P12_BASE64: ${{ secrets.BLENNY_CERTIFICATE_P12_BASE64 }}
           BLENNY_CERTIFICATE_PASSWORD: ${{ secrets.BLENNY_CERTIFICATE_PASSWORD }}
           BLENNY_SPARKLE_PRIVATE_KEY: ${{ secrets.BLENNY_SPARKLE_PRIVATE_KEY }}
           INTERNAL_BUILD: ${{ steps.number.outputs.build }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          BLENNY_SIGNING_DIAGNOSTICS_ONLY: ${{ steps.mode.outputs.diagnostics }}
         run: |
-          export BLENNY_RELEASE_TAG="$RELEASE_TAG"
-          zsh scripts/ci-sign-package.sh LocalData/sealed "$INTERNAL_BUILD"
+          zsh ../controller/scripts/ci-sign-package.sh LocalData/sealed "${INTERNAL_BUILD:-0}"
       - name: Verify sealed provenance
+        if: steps.mode.outputs.diagnostics != 'true'
         env:
           PRODUCTION: ${{ steps.mode.outputs.production }}
         run: |
-          args=(--source "$GITHUB_SHA")
+          args=(--source "$BLENNY_RELEASE_SOURCE_SHA")
           if [[ "$PRODUCTION" == true ]]; then args+=(--production); fi
-          python3 scripts/verify-artifact.py LocalData/sealed "${args[@]}"
+          python3 ../controller/scripts/verify-artifact.py LocalData/sealed "${args[@]}"
       - name: Name sealed transfer
+        if: steps.mode.outputs.diagnostics != 'true'
         id: seal
         run: |
           version=$(python3 -c 'import sys; sys.path.insert(0,"scripts"); from release_tools import marketing_version; print(marketing_version())')
-          echo "name=sealed-$version-$GITHUB_SHA-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "name=sealed-$version-$BLENNY_RELEASE_SOURCE_SHA-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - name: Seal artifact between jobs
+        if: steps.mode.outputs.diagnostics != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.seal.outputs.name }}
           path: |
-            LocalData/sealed/*.dmg
-            LocalData/sealed/*.dmg.sha256
-            LocalData/sealed/*.receipt.json
-            LocalData/sealed/release-notes.md
+            source/LocalData/sealed/*.dmg
+            source/LocalData/sealed/*.dmg.sha256
+            source/LocalData/sealed/*.receipt.json
+            source/LocalData/sealed/release-notes.md
           if-no-files-found: error
           retention-days: 30
       - name: Retain verification evidence
@@ -114,32 +143,54 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-checks-${{ github.run_id }}-${{ github.run_attempt }}
-          path: LocalData/ci/*.log
+          path: |
+            source/LocalData/ci/*.log
+            source/LocalData/ci/signing-diagnostic.json
           if-no-files-found: ignore
           retention-days: 14
       - name: Verification-only result
-        if: steps.mode.outputs.production != 'true'
+        if: steps.mode.outputs.production != 'true' && steps.mode.outputs.diagnostics != 'true'
         run: echo 'Hosted verification complete. No release, tag or production feed was published.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Signing diagnostic result
+        if: always() && steps.mode.outputs.diagnostics == 'true'
+        run: |
+          if [[ -f LocalData/ci/signing-diagnostic.json ]]; then
+            cat LocalData/ci/signing-diagnostic.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo 'Signing diagnostic only. No application build, public asset or production feed write was performed.' >> "$GITHUB_STEP_SUMMARY"
   publish:
     needs: build
     if: needs.build.outputs.production == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: source
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      BLENNY_RELEASE_SOURCE_ROOT: ${{ github.workspace }}/source
+      BLENNY_RELEASE_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+      BLENNY_RELEASE_TAG: ${{ needs.build.outputs.source_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          path: controller
+          ref: ${{ github.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: source
+          ref: ${{ needs.build.outputs.source_sha }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ needs.build.outputs.artifact }}
-          path: LocalData/sealed
+          path: source/LocalData/sealed
           digest-mismatch: error
       - name: Publish sealed assets and verify anonymous HTTPS delivery
-        run: python3 scripts/ci-release.py publish LocalData/sealed
+        run: python3 ../controller/scripts/ci-release.py publish LocalData/sealed
       - name: Record automatic publication result
         if: always()
         run: |
@@ -153,30 +204,42 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: publication-result-${{ github.run_id }}-${{ github.run_attempt }}
-          path: LocalData/sealed/publication-result.json
+          path: source/LocalData/sealed/publication-result.json
           if-no-files-found: ignore
           retention-days: 90
   hosted-update-check:
-    needs: publish
+    needs: [build, publish]
     runs-on: xcode-27
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: source
     permissions:
       contents: read
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer
+      BLENNY_RELEASE_SOURCE_ROOT: ${{ github.workspace }}/source
+      BLENNY_RELEASE_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          path: controller
+          ref: ${{ github.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: source
+          ref: ${{ needs.build.outputs.source_sha }}
       - name: Assert supported hosted toolchain
-        run: zsh scripts/ci-toolchain.sh
+        run: zsh ../controller/scripts/ci-toolchain.sh
       - name: Check public Sparkle information without starting management
-        run: python3 scripts/hosted-update-check.py
+        run: python3 ../controller/scripts/hosted-update-check.py
       - name: Record hosted update result
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hosted-update-result-${{ github.run_id }}-${{ github.run_attempt }}
-          path: LocalData/hosted-update/result.json
+          path: source/LocalData/hosted-update/result.json
           if-no-files-found: error
           retention-days: 90
       - name: Final release summary

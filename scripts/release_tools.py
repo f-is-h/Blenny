@@ -4,13 +4,21 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import plistlib
 import re
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
 REPOSITORY = "f-is-h/Blenny"
+CONTROLLER_ROOT = Path(__file__).resolve().parent.parent
+ROOT = CONTROLLER_ROOT
+if os.getenv("BLENNY_RELEASE_SOURCE_ROOT"):
+    ROOT = Path(os.environ["BLENNY_RELEASE_SOURCE_ROOT"]).resolve()
+    workspace = Path(os.environ.get("GITHUB_WORKSPACE", "/nonexistent-workspace")).resolve()
+    if (os.getenv("GITHUB_ACTIONS") != "true" or os.getenv("GITHUB_REPOSITORY") != REPOSITORY
+            or not ROOT.is_relative_to(workspace)):
+        raise ValueError("A separate release-source checkout is restricted to the expected hosted workspace")
 CATEGORIES = {"added": "Added", "changed": "Changed", "fixed": "Fixed",
               "security": "Security", "internal": "Engineering", "limitations": "Requirements and limitations"}
 CI_BUILD_OFFSET = 1000

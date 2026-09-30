@@ -170,5 +170,263 @@ class ReleaseTransactionTests(unittest.TestCase):
                 self.assertEqual(detaches[0][2], "-quiet")
 
 
+class ManualReleaseSourceTests(unittest.TestCase):
+    def setUp(self):
+        self.controller = "b" * 40
+        self.source = "a" * 40
+        self.tag_object = "c" * 40
+        self.environment = dict(GITHUB_ACTIONS="true", GITHUB_REPOSITORY="f-is-h/Blenny",
+                                GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_REF="refs/heads/main",
+                                GITHUB_SHA=self.controller)
+        self.addCleanup(patch.stopall)
+        patch.dict(os.environ, self.environment).start()
+        self.git = patch.object(ci, "git", side_effect=self.git_result).start()
+        self.api = patch.object(ci, "api", return_value={"object": {"sha": self.tag_object}}).start()
+        self.run = patch.object(ci, "run").start()
+
+    def git_result(self, *args, **kwargs):
+        if args == ("status", "--porcelain"):
+            return ""
+        if args == ("rev-parse", "HEAD"):
+            return self.controller
+        if args[0] == "cat-file":
+            return "tag"
+        if args[0] == "rev-parse":
+            return self.source if args[1].endswith("^{commit}") else self.tag_object
+        self.fail("Unexpected Git operation: " + repr(args))
+
+    def test_manual_publication_selects_original_tag_source_without_changing_version(self):
+        selected = ci.select_source("publish", "v1.0.0")
+        self.assertEqual(selected["source_sha"], self.source)
+        self.assertNotEqual(selected["source_sha"], self.controller)
+        self.assertEqual(selected["source_tag"], "v1.0.0")
+        self.assertEqual(selected["production"], "true")
+        self.run.assert_called_once_with("git", "-C", str(ci.CONTROLLER_ROOT), "merge-base", "--is-ancestor", self.source, "origin/main")
+
+    def test_manual_publication_rejects_missing_or_noncanonical_tags(self):
+        for tag in ["", "main", "v1.0.0;echo injected", "v../1.0.0", "v01.0.0", "v1.0.0\n"]:
+            with self.subTest(tag=tag), self.assertRaises(ValueError):
+                ci.select_source("publish", tag)
+
+    def test_diagnosis_and_verification_never_select_publication(self):
+        for operation in ["signing-diagnostics", "verification"]:
+            selected = ci.select_source(operation, "v1.0.0")
+            self.assertEqual(selected["production"], "false")
+            self.assertEqual(selected["diagnostics"], str(operation == "signing-diagnostics").lower())
+
+    def test_tag_push_uses_event_tag_even_when_dispatch_arguments_disagree(self):
+        with patch.dict(os.environ, GITHUB_EVENT_NAME="push", GITHUB_REF="refs/tags/v1.0.0"):
+            selected = ci.select_source("signing-diagnostics", "v9.9.9")
+        self.assertEqual(selected["source_tag"], "v1.0.0")
+        self.assertEqual(selected["production"], "true")
+
+    def test_remote_tag_divergence_is_rejected_before_build(self):
+        self.api.return_value = {"object": {"sha": "d" * 40}}
+        with self.assertRaisesRegex(ValueError, "replaced or diverged"):
+            ci.select_source("publish", "v1.0.0")
+        self.run.assert_not_called()
+
+    def test_lightweight_tag_is_rejected(self):
+        self.git.side_effect = lambda *args, **kwargs: "commit" if args[0] == "cat-file" else self.git_result(*args, **kwargs)
+        with self.assertRaisesRegex(ValueError, "annotated"):
+            ci.select_source("publish", "v1.0.0")
+
+    def test_manual_controls_reject_another_branch_and_dirty_controller(self):
+        with patch.dict(os.environ, GITHUB_REF="refs/heads/other"), self.assertRaisesRegex(ValueError, "reviewed main"):
+            ci.select_source("publish", "v1.0.0")
+        self.git.side_effect = lambda *args, **kwargs: " M unsafe.py" if args[0] == "status" else self.git_result(*args, **kwargs)
+        with self.assertRaisesRegex(ValueError, "clean"):
+            ci.select_source("publish", "v1.0.0")
+
+    def test_manual_form_never_defaults_to_publication_and_enforces_separate_checkouts(self):
+        checker = ci.load_script("check-workflows")
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            shutil.copytree(ci.CONTROLLER_ROOT / ".github/workflows", root / ".github/workflows")
+            release = root / ".github/workflows/release.yml"
+            original = release.read_text()
+            release.write_text(original.replace("default: verification", "default: publish"))
+            with self.assertRaisesRegex(ValueError, "default stays verification"):
+                checker.check(root)
+            release.write_text(original.replace("ref: ${{ needs.build.outputs.source_sha }}", "ref: ${{ github.sha }}"))
+            with self.assertRaisesRegex(ValueError, "source separate"):
+                checker.check(root)
+
+    def test_diagnostics_without_tag_stays_on_reviewed_controller_source(self):
+        selected = ci.select_source("signing-diagnostics", "")
+        self.assertEqual(selected["source_sha"], self.controller)
+        self.api.assert_not_called()
+
+    def test_manual_preflight_checks_clean_original_source_acceptance_and_remote_tag(self):
+        source_root = Path("/isolated-source-fixture")
+        def source_git(*args, **kwargs):
+            if args == ("rev-parse", "HEAD"):
+                return self.controller if kwargs.get("root") == ci.CONTROLLER_ROOT else self.source
+            return self.git_result(*args, **kwargs)
+        with patch.object(ci, "ROOT", source_root), patch.object(ci, "git", side_effect=source_git), \
+             patch.object(ci, "validate_documents"), patch.object(ci, "validate_coverage"), \
+             patch.object(ci, "marketing_version", return_value="1.0.0"), \
+             patch.object(ci, "validate_acceptance") as acceptance, \
+             patch.object(ci, "gh", return_value=json.dumps({"object": {"sha": self.tag_object}})), \
+             patch.object(ci, "api", return_value={"private": False}), patch.object(ci, "releases", return_value=[]), \
+             patch.dict(os.environ, BLENNY_RELEASE_SOURCE_SHA=self.source, BLENNY_RELEASE_TAG="v1.0.0"):
+            self.assertEqual(ci.preflight("production"), (self.source, "1.0.0", "v1.0.0"))
+            acceptance.assert_called_once()
+            with patch.object(ci, "validate_acceptance", side_effect=ValueError("stale acceptance")), self.assertRaisesRegex(ValueError, "stale"):
+                ci.preflight("production")
+            with patch.object(ci, "gh", return_value=json.dumps({"object": {"sha": "d" * 40}})), self.assertRaisesRegex(ValueError, "diverged"):
+                ci.preflight("production")
+            with patch.dict(os.environ, BLENNY_RELEASE_TAG="v1.0.1"), self.assertRaisesRegex(ValueError, "explicit existing-tag"):
+                ci.preflight("production")
+
+
+class HostedSigningTrustTests(unittest.TestCase):
+    """Run the real signing wrapper with an isolated simulated Security CLI."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        for name in ["scripts", "Config", "bin", "runner"]:
+            (self.root / name).mkdir()
+        shutil.copyfile(Path(__file__).with_name("ci-sign-package.sh"), self.root / "scripts/ci-sign-package.sh")
+        self.der = b"isolated-public-certificate-fixture"
+        self.fingerprint = hashlib.sha1(self.der).hexdigest().upper()
+        (self.root / "Config/SigningIdentity.sha1").write_text(self.fingerprint + "\n")
+        (self.root / "Config/Info.plist").write_text('<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>1.0.0</string></dict></plist>')
+        self.trace = self.root / "security-trace.jsonl"
+        self.fake_command("security", '''import base64, json, os, pathlib, sys
+args = sys.argv[1:]
+root = pathlib.Path(os.environ["SIGNING_FIXTURE_ROOT"])
+with (root / "security-trace.jsonl").open("a") as trace:
+    trace.write(json.dumps(args) + "\\n")
+command = args[0]
+if command == "list-keychains" and "-s" not in args:
+    print('    "fixture-original.keychain-db"')
+elif command == "default-keychain" and "-s" not in args:
+    print('"fixture-default.keychain-db"')
+elif command == "find-certificate":
+    encoded = base64.b64encode(b"isolated-public-certificate-fixture").decode()
+    print("-----BEGIN CERTIFICATE-----\\n" + encoded + "\\n-----END CERTIFICATE-----")
+elif command == "trust-settings-export":
+    mode = os.environ.get("SIGNING_FIXTURE_EXPORT", "existing")
+    if mode == "absent":
+        print("No Trust Settings were found.", file=sys.stderr)
+        sys.exit(1)
+    if mode == "failure":
+        print("Export denied", file=sys.stderr)
+        sys.exit(1)
+    pathlib.Path(args[-1]).write_text("fixture-original-trust-settings")
+elif command == "add-trusted-cert":
+    (root / "trusted").touch()
+elif command == "find-identity":
+    has_key = os.environ.get("SIGNING_FIXTURE_KEY", "yes") == "yes"
+    valid = (root / "trusted").exists() and os.environ.get("SIGNING_FIXTURE_VALID", "yes") == "yes"
+    if has_key and ("-v" not in args or valid):
+        print("1) " + os.environ["SIGNING_FIXTURE_FINGERPRINT"] + ' "Fixture Identity"')
+elif command == "trust-settings-import":
+    if os.environ.get("SIGNING_FIXTURE_RESTORE", "yes") == "no":
+        sys.exit(88)
+    assert pathlib.Path(args[-1]).read_text() == "fixture-original-trust-settings"
+    (root / "trusted").unlink(missing_ok=True)
+elif command == "remove-trusted-cert":
+    (root / "trusted").unlink(missing_ok=True)
+''')
+        self.fake_command("sudo", '''import os, sys
+assert sys.argv[1:3] == ["-n", "security"]
+os.execvp("security", ["security", *sys.argv[3:]])
+''')
+        for name in ["build-app.sh", "prepare-release.sh"]:
+            (self.root / "scripts" / name).write_text("#!/bin/zsh\nexit ${SIGNING_FIXTURE_PACKAGE_STATUS:-0}\n")
+        (self.root / "scripts/prepare-release.sh").write_text('''#!/bin/zsh
+mkdir -p "$2"
+print '{"version":"1.0.0"}' > "$2/Blenny-1.0.0.receipt.json"
+''')
+        for name in ["test-sparkle-local.py", "verify-artifact.py"]:
+            (self.root / "scripts" / name).write_text("pass\n")
+        self.env = {**os.environ, "PATH": str(self.root / "bin") + os.pathsep + os.environ["PATH"],
+                    "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": "f-is-h/Blenny", "GITHUB_SHA": "a" * 40,
+                    "RUNNER_TEMP": str(self.root / "runner"), "SIGNING_FIXTURE_ROOT": str(self.root),
+                    "BLENNY_RELEASE_SOURCE_ROOT": str(self.root), "GITHUB_WORKSPACE": str(self.root),
+                    "BLENNY_RELEASE_SOURCE_SHA": "a" * 40, "BLENNY_SIGNING_DIAGNOSTICS_ONLY": "false",
+                    "SIGNING_FIXTURE_FINGERPRINT": self.fingerprint,
+                    "BLENNY_CERTIFICATE_P12_BASE64": base64.b64encode(b"fixture-p12").decode(),
+                    "BLENNY_CERTIFICATE_PASSWORD": "fixture-password", "BLENNY_SPARKLE_PRIVATE_KEY": "fixture-update-key"}
+
+    def fake_command(self, name, source):
+        path = self.root / "bin" / name
+        path.write_text("#!" + shutil.which("python3") + "\n" + source)
+        path.chmod(0o700)
+
+    def execute(self, **environment):
+        result = subprocess.run(["zsh", str(self.root / "scripts/ci-sign-package.sh"), str(self.root / "sealed"), "1103"],
+                                env={**self.env, **environment}, capture_output=True, text=True)
+        self.assertEqual(list((self.root / "runner").iterdir()), [])
+        self.assertNotIn("fixture-password", result.stdout + result.stderr)
+        self.assertNotIn("fixture-update-key", result.stdout + result.stderr)
+        calls = [json.loads(line) for line in self.trace.read_text().splitlines()]
+        self.assertTrue(any(call[0] == "delete-keychain" for call in calls))
+        self.assertIn(["default-keychain", "-d", "user", "-s", "fixture-default.keychain-db"], calls)
+        self.assertIn(["list-keychains", "-d", "user", "-s", "fixture-original.keychain-db"], calls)
+        return result, calls
+
+    def test_correct_self_signed_certificate_is_trusted_for_code_signing_then_restored(self):
+        result, calls = self.execute()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        trust = next(call for call in calls if call[0] == "add-trusted-cert")
+        self.assertEqual(trust[1:7], ["-d", "-r", "trustRoot", "-p", "codeSign", "-k"])
+        self.assertEqual(sum(call[0] == "find-identity" for call in calls), 3)
+        self.assertTrue(any(call[:2] == ["trust-settings-import", "-d"] for call in calls))
+        self.assertLess([call[0] for call in calls].index("remove-trusted-cert"), [call[0] for call in calls].index("trust-settings-import"))
+        self.assertFalse((self.root / "trusted").exists())
+        diagnostic = json.loads((self.root / "LocalData/ci/signing-diagnostic.json").read_text())
+        self.assertEqual(diagnostic["cause"], "missing-hosted-code-signing-trust")
+        self.assertTrue(diagnostic["pinnedIdentityPresent"])
+        self.assertFalse(diagnostic["validIdentityBeforeTrust"])
+        self.assertTrue(diagnostic["validIdentityAfterTrust"])
+
+    def test_wrong_certificate_is_rejected_before_trust_mutation(self):
+        (self.root / "Config/SigningIdentity.sha1").write_text("B" * 40 + "\n")
+        result, calls = self.execute()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not match the pinned", result.stderr)
+        self.assertFalse(any(call[0] in ["add-trusted-cert", "trust-settings-export"] for call in calls))
+
+    def test_absent_prior_trust_is_removed_even_when_packaging_fails(self):
+        result, calls = self.execute(SIGNING_FIXTURE_EXPORT="absent", SIGNING_FIXTURE_PACKAGE_STATUS="42")
+        self.assertEqual(result.returncode, 42)
+        self.assertTrue(any(call[:2] == ["remove-trusted-cert", "-d"] for call in calls))
+        self.assertFalse((self.root / "trusted").exists())
+
+    def test_unusable_identity_after_trust_restores_snapshot(self):
+        result, calls = self.execute(SIGNING_FIXTURE_VALID="no")
+        self.assertEqual(result.returncode, 65)
+        self.assertIn("no valid usable", result.stderr)
+        self.assertTrue(any(call[0] == "trust-settings-import" for call in calls))
+
+    def test_snapshot_failure_prevents_trust_mutation(self):
+        result, calls = self.execute(SIGNING_FIXTURE_EXPORT="failure")
+        self.assertEqual(result.returncode, 65)
+        self.assertFalse(any(call[0] == "add-trusted-cert" for call in calls))
+
+    def test_failed_trust_restoration_cannot_report_success(self):
+        result, calls = self.execute(SIGNING_FIXTURE_RESTORE="no")
+        self.assertEqual(result.returncode, 65)
+        self.assertIn("trust restoration failed", result.stderr)
+
+    def test_certificate_without_private_key_is_diagnosed_before_trust(self):
+        result, calls = self.execute(SIGNING_FIXTURE_KEY="no")
+        self.assertEqual(result.returncode, 65)
+        self.assertFalse(any(call[0] == "add-trusted-cert" for call in calls))
+        report = json.loads((self.root / "LocalData/ci/signing-diagnostic.json").read_text())
+        self.assertEqual(report["cause"], "matching-certificate-has-no-usable-private-key")
+
+    def test_diagnostics_only_skips_build_and_preserves_private_key_secrecy(self):
+        result, calls = self.execute(BLENNY_SIGNING_DIAGNOSTICS_ONLY="true", SIGNING_FIXTURE_PACKAGE_STATUS="42")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no application build or publication", result.stdout)
+        self.assertFalse((self.root / "trusted").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

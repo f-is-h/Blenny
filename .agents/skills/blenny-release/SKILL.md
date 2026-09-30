@@ -90,6 +90,15 @@ authorization. Do all authorized local preparation before requesting this decisi
 
 Push only the named branch and named tag. Never use `--mirror`, `--all`, `--tags`, or force push for a normal release. Verify the remote branch and tag immediately afterward and report their object IDs.
 
+For a tooling-only repair after a failed trigger, preserve the application version
+and existing public tag. Review and authorize the forward controller commit on
+main. Use release.yml's `signing-diagnostics` operation first when signing remains
+unexplained; it does not build or publish. For manual production, select `publish`
+and the exact existing annotated `release_tag`. The workflow checks out controller
+and source separately and records both commits. This manual entry shares all
+production gates and never creates or moves a tag. It may retry an unpublished
+version; after publication, reuse sealed bytes and reject conflicts.
+
 Then observe `.github/workflows/release.yml` through completion. Do not ask for
 another approval, post-build VM test or draft-publication action. The tag approval
 covers its automatic publication transaction. On failure, report whether assets

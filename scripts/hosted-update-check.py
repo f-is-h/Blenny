@@ -21,7 +21,7 @@ def main():
     receipt_url = f"https://github.com/{REPOSITORY}/releases/download/v{version}/Blenny-{version}.receipt.json"
     with urllib.request.urlopen(receipt_url, timeout=60) as response:
         receipt = json.load(response)
-    if receipt["sourceCommit"] != os.environ["GITHUB_SHA"] or receipt["version"] != version:
+    if receipt["sourceCommit"] != os.getenv("BLENNY_RELEASE_SOURCE_SHA", os.environ["GITHUB_SHA"]) or receipt["version"] != version:
         raise ValueError("Public receipt differs from the released source")
     output = ROOT / "LocalData/hosted-update"
     output.mkdir(parents=True, exist_ok=True)

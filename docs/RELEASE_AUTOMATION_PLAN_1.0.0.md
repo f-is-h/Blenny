@@ -184,9 +184,23 @@ Implement three workflows, sharing existing scripts instead of duplicating them.
 ### release.yml: unattended publication
 
 Prefer an authorized push of an annotated `vX.Y.Z` tag as the single production
-trigger. A verification-only manual mode may exercise the pipeline during setup;
-it must not create public releases, tags or production feed commits. Do not publish
+trigger. On 2026-10-01 the owner also authorized adding a manual production entry
+for an existing annotated version tag, and specified that CI-only repairs do not
+require a marketing-version increase. Manual dispatch is restricted to reviewed
+main, requires an explicit tag for publication and uses the same gates and sealed
+transaction as the automatic path. Verification and signing-diagnostic operations
+remain non-publishing. Do not publish
 on an arbitrary main push, README edit or commit-message keyword.
+
+Check out the immutable workflow/controller revision and the selected immutable
+application source in separate directories. Build and audit the exact tag source
+without editing its tracked files. A tooling repair can run from a later reviewed
+main commit while preserving `1.0.0`, its source tag, accepted product digest and
+reviewed notes. Record both the application `sourceCommit` and the signing
+`workflowCommit` in the sealed receipt. Never retarget a public tag or replace
+published assets. A signing-diagnostic dispatch reports certificate fingerprint
+and private-key/validity checks before and after temporary hosted trust; it does
+not build, publish or update the feed.
 
 Execute the following without a human checkpoint between steps:
 

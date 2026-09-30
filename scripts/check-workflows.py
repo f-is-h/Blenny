@@ -41,7 +41,18 @@ def check(root=ROOT):
         raise ValueError("Unexpected default workflow permissions")
     events = release.get("on", release.get("true"))
     if set(events) != {"push", "workflow_dispatch"} or events["push"] != {"tags": ["v*.*.*"]}:
-        raise ValueError("Production publishing must only trigger on a version tag")
+        raise ValueError("Expected version-tag pushes and explicit manual release operations")
+    inputs = events["workflow_dispatch"]["inputs"]
+    if (inputs["operation"]["default"] != "verification" or inputs["operation"]["type"] != "choice"
+            or inputs["operation"]["options"] != ["verification", "signing-diagnostics", "publish"]
+            or inputs["release_tag"]["type"] != "string" or inputs["release_tag"]["default"] != ""):
+        raise ValueError("Manual publication must be explicit; the default stays verification-only")
+    for name, job in release["jobs"].items():
+        checkouts = {s["with"]["path"]: s["with"] for s in job["steps"] if s.get("uses", "").startswith("actions/checkout@")}
+        source_ref = "${{ steps.mode.outputs.source_sha }}" if name == "build" else "${{ needs.build.outputs.source_sha }}"
+        if (set(checkouts) != {"controller", "source"} or checkouts["controller"]["ref"] != "${{ github.sha }}"
+                or checkouts["source"]["ref"] != source_ref or job["defaults"]["run"]["working-directory"] != "source"):
+            raise ValueError("Keep immutable workflow/controller and selected application source separate in every job")
     if release["concurrency"] != {"group": "blenny-public-release", "cancel-in-progress": False}:
         raise ValueError("Public release concurrency must span the whole repository")
     if release["jobs"]["publish"]["if"] != "needs.build.outputs.production == 'true'":

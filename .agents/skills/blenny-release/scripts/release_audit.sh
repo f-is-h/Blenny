@@ -243,9 +243,15 @@ if git rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1; then
   [[ "$tag_type" == "tag" ]] \
     && pass "$tag is annotated" \
     || fail "$tag is not annotated"
-  [[ "$tag_target" == "$head_target" ]] \
-    && pass "$tag points to HEAD ($head_target)" \
-    || fail "$tag points to $tag_target instead of HEAD $head_target"
+  if [[ "$tag_target" == "$head_target" ]]; then
+    pass "$tag points to the audited release source ($head_target)"
+  elif [[ "$phase" == prepare ]] \
+    && git merge-base --is-ancestor "$tag_target" HEAD \
+    && git diff --quiet "$tag_target" -- Sources Assets Config Package.swift Package.resolved LICENSE NOTICE THIRD_PARTY_NOTICES.txt; then
+    pass "$tag is preserved; application inputs are unchanged while release tooling is prepared"
+  else
+    fail "$tag points to $tag_target instead of release source $head_target"
+  fi
 else
   print "INFO: $tag is absent and may be created only after the full audit passes"
 fi

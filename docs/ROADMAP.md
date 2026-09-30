@@ -1,6 +1,6 @@
 # Blenny roadmap
 
-Current version: **1.0.0 source finalized for local closure**. Local checks passed;
+Current version: **1.0.0 source and annotated tag public; binary publication pending**. Local checks passed;
 the owner confirmed all development acceptance except multiple displays on
 2026-09-30. GitHub-built publication remains pending. Ordinary
 Release now includes accepted daily ordering. The selected self-signed route,
@@ -36,10 +36,14 @@ Blenny advances by verified exit criteria, not by elapsed time or commit count. 
 - `0.y.z` patch versions after a `0.y.0` milestone contain fixes and compatibility updates without expanding that milestone's scope.
 - The first public, open-source release is assigned version `1.0.0`.
   Its source and signed binaries must ship together after acceptance and approval.
-- From 1.0.0, every new public binary increments the marketing version. Public UI
+- From 1.0.0, functional application changes require a new marketing version.
+  CI-only repairs before a version's first successful binary publication can
+  retain its existing source tag and version. Published bytes remain immutable;
+  recovery reuses them. Public UI
   omits Build; CI retains monotonically increasing integer CFBundleVersion for
   Sparkle. Only GitHub-built binaries enter the public channel. All human acceptance
-  precedes the authorized annotated-tag trigger; publication then runs unattended.
+  precedes the authorized tag push or explicit existing-tag dispatch on reviewed
+  main; publication then runs unattended.
 - `1.0.0` begins the stable product contract and published macOS compatibility policy.
 - A version advances only when every required exit criterion is verified and restoration is complete.
 - An explicitly scoped safety-feasibility investigation may close with an evidenced no-go; that does not mean the proposed feature or its implementation gate passed.
@@ -1070,13 +1074,15 @@ physical coverage is not inferred for other languages. See TECH_SPIKE_1.0.0.md.
 
 The approved [automation plan](RELEASE_AUTOMATION_PLAN_1.0.0.md) governs release
 closure: all owner acceptance and source/notes review precede the annotated-tag
-trigger. GitHub builds every public binary and publishes automatically afterward,
+push or explicit existing-tag dispatch. GitHub builds every public binary and publishes automatically afterward,
 without a second human checkpoint. Marketing-only display, structured release
 fragments, normal CI, preparation PRs and the sealed-asset publication workflow
-are implemented locally. Hosted runner/signing setup and VM observations remain
-separate pending evidence. See [distribution](DISTRIBUTION.md).
+are implemented locally. Hosted source tests and history audit passed; signing
+stopped at the identity check after P12 import. Diagnose that failure before
+manual publication. CI tooling and application source are checked out separately
+to preserve the existing v1.0.0 tag. See [distribution](DISTRIBUTION.md).
 
-Status: **Local source closure authorized; local checks and owner development acceptance complete, with multiple displays explicitly unverified. GitHub publication pending.** Follow the owner-approved
+Status: **Source and annotated tag public; source checks and owner development acceptance complete, with multiple displays explicitly unverified. Hosted signing diagnosis and binary publication pending.** Follow the owner-approved
 [implementation and acceptance plan](IMPLEMENTATION_PLAN_1.0.0.md).
 
 - Synchronize accepted everyday capabilities in Debug and ordinary Release,

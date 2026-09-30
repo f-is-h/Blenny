@@ -36,6 +36,14 @@ no required reviewer, second publish workflow or post-build owner test. Failed
 checks still stop publication; reruns reuse sealed bytes and never replace a
 published version. See RELEASE_AUTOMATION_PLAN_1.0.0.md and DISTRIBUTION.md.
 
+On 2026-10-01 the owner authorized a manual production entry on reviewed main
+for an explicit existing annotated source tag. The controller and application
+source have separate immutable checkouts and receipt fields. CI-only repairs can
+retain the application version and public tag before successful publication;
+functional application changes require a new version. This does not permit tag
+replacement, conflicting public assets, implicit key export or publication by
+the verification/diagnostic operations.
+
 ## History
 
 - Preserve the repository's genuine development history beginning on 2026-08-21, including the original first commit.

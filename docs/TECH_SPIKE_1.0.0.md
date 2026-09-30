@@ -15,6 +15,25 @@ artifacts, checks pinned signatures and provenance, verifies anonymous assets
 before updating the feed, and performs a manager-free Sparkle information check.
 These are implemented workflow paths, not evidence of a hosted run.
 
+## Hosted signing diagnosis and manual recovery (2026-10-01)
+
+The first production attempt stopped on repository visibility; the second passed
+660 Debug and 608 Release tests and the source/history audit, then stopped at the
+valid-identity check after P12 import. That check did not distinguish a wrong
+certificate from a missing private-key identity or missing hosted trust. The
+existing self-signed signing route is retained. A diagnostic dispatch now records
+the public fingerprint and identity validity before/after temporary runner trust;
+its actual hosted result is required before declaring the cause confirmed.
+
+The owner specified retaining 1.0.0 for CI-only repairs and requested a manual
+production entry for future use. The controller and selected annotated application
+source are checked out separately. The app is built from the clean original tag,
+with its accepted digest and reviewed notes; the receipt also records the workflow
+controller commit. Verification and diagnosis never publish. Manual production
+requires an explicit existing tag and shares the automatic publication gates;
+public tags and published asset bytes remain immutable. This implementation is
+prepared locally and does not imply successful hosted diagnosis or publication.
+
 The automation-stage follow-up passed 658 Debug and 606 ordinary Release tests,
 27 Python release tests, workflow boundary checks and pinned actionlint locally
 on macOS 27.0.1 build 26A434 with Xcode 27.0 / SDK 27.0. Eight negative package

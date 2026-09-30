@@ -69,6 +69,27 @@ archive. Neither implies Apple notarization or default Gatekeeper trust. Keep th
 selected self-signed identity and independent Blenny update key. Do not borrow
 Usage4Claude credentials or disable system protection.
 
+The hosted signing wrapper first compares the imported public certificate's SHA-1
+fingerprint with the pin, then snapshots the runner's admin trust settings and
+temporarily trusts that certificate for code signing only. P12 import does not
+transfer trust settings. It restores the snapshot (or removes only the temporary
+trust entry when no prior settings existed), restores the keychain search/default
+state and removes the temporary keychain on every exit path. A failed trust
+snapshot or restoration fails signing. These operations are confined to the
+ephemeral GitHub runner; they do not change the owner's or users' Mac trust.
+Apple documents the trusted-chain and certificate-validity requirements in
+[TN3161: Inside Code Signing: Certificates](https://developer.apple.com/documentation/technotes/tn3161-inside-code-signing-certificates).
+
+An existing public source tag remains immutable after a failed workflow. Changes
+to release tooling can be reviewed as forward commits on main without changing
+the application version. Manual dispatch selects the existing annotated source
+tag and checks out its exact commit separately from the release controller. The
+app, its build scripts, notes, product digest and acceptance come from that clean
+tag checkout; the temporary signing wrapper and publication controller come from
+the immutable workflow revision. The sealed receipt records both `sourceCommit`
+and `workflowCommit`. Rerunning the original failed tag event still runs its old
+workflow; use a reviewed main dispatch to apply a tooling repair.
+
 ## Development commands and notes
 
 ```sh
@@ -155,12 +176,29 @@ start normal CI. Its Actions write permission is for that dispatch; it has no
 signing secrets. It never tags, signs or publishes. The equivalent preparation command works
 locally before the initial authorized push.
 
-`release.yml` publishes only an annotated version-tag push with matching clean
-source, main ancestry, reviewed notes, development acceptance and increasing
-versions. Manual dispatch on reviewed main exercises signing and checks only;
-it cannot create a release, tag or production-feed commit. All action code and
+`release.yml` accepts an annotated version-tag push or an explicit publication
+dispatch on reviewed main. Both check the selected clean source, tag annotation,
+remote tag object, main ancestry, reviewed notes and development acceptance, and
+use the same sealed publication transaction. All action code and
 the actionlint archive are checksum/SHA pinned. Production runs serialize across
 the whole repository. Signing does not occur on PRs or arbitrary branches.
+
+The manual Actions form has three operations:
+
+- `verification` (default): test, sign and verify; no public release or feed write.
+- `signing-diagnostics`: compare the imported certificate fingerprint and report
+  whether its private-key identity is available and valid before/after temporary
+  hosted code-signing trust. It does not build an application or publish.
+- `publish`: requires an existing annotated `release_tag`, such as `v1.0.0`.
+  It tests and builds that exact tag source, then publishes automatically.
+
+Select main for manual execution. `release_tag` may also be supplied for the two
+non-publishing operations to inspect or verify that same frozen application
+source. Inputs are validated as data; the workflow never creates or moves a tag.
+Before the first successful publication, tooling-only repairs can retry the same
+marketing version. After publication, recovery must reuse the existing sealed
+bytes; conflicting bytes for a public version remain an error. Functional source
+changes require a new reviewed source tag and marketing version.
 
 The hosted signing job runs a separate manager-free Sparkle fixture covering
 cancel, equal/older versions, unavailable feed, wrong signature, damaged archive,

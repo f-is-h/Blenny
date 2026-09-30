@@ -1,21 +1,26 @@
 # Blenny
 
-Current phase: `1.0.0` source finalized for local commit/tag closure. Local checks
-passed; on 2026-09-30 the owner confirmed all development acceptance except
-multiple displays. GitHub-built publication remains pending. The owner-approved
+Current phase: `1.0.0` source and annotated tag are public. Local and hosted source
+checks passed; on 2026-09-30 the owner confirmed all development acceptance except
+multiple displays. GitHub binary publication remains pending a hosted signing
+diagnosis. The owner-approved
 [implementation plan](docs/IMPLEMENTATION_PLAN_1.0.0.md) supersedes the historical
 public-release gates below: accepted Release/Debug capability parity, existing
 self-signed signing and Sparkle updates, current-host validation, scoped
 refactoring and user documentation. Developer ID/notarization are not required.
 Website implementation is separate and excluded from the application commit.
-The owner authorized local 1.0.0 closure, will change visibility manually, and
-requested GitHub Actions publication afterward. Do not change visibility or push
-the production tag before public setup and exact-ref authorization are complete.
+The owner authorized the main source and v1.0.0 tag pushes. Do not infer further
+visibility, credential-export or tag-replacement authorization. On 2026-10-01 the
+owner requested retaining 1.0.0 for CI-only repairs and adding a manual production
+entry for an existing annotated tag. Source and controller are checked out
+separately; the release receipt records both commits. First diagnose the signing
+failure before invoking manual publication.
 
 The owner-approved [automation plan](docs/RELEASE_AUTOMATION_PLAN_1.0.0.md)
 places every human acceptance check in development. From the first public 1.0.0,
 GitHub builds each public binary and completes signing, verification, asset/feed
-publication and delivery checks after one authorized annotated-tag trigger,
+publication and delivery checks after an authorized annotated-tag push or explicit
+existing-tag dispatch on reviewed main,
 without another human checkpoint. UI displays only the marketing version;
 internal build identity remains diagnostic. Prepared notes are generated from
 structured fragments. Actual publication is recorded in docs/public-release.json
