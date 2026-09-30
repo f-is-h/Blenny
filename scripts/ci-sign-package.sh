@@ -22,22 +22,56 @@ trust_changed=NO
 # The hosted runner is ephemeral. Retain its search list and default keychain.
 search_list=(${(f)"$(security list-keychains -d user | sed 's/^[[:space:]]*"//;s/"[[:space:]]*$//')"})
 default_keychain=$(security default-keychain -d user | sed 's/^[[:space:]]*"//;s/"[[:space:]]*$//')
+cleanup_command() {
+  local privilege=$1 label=$2
+  shift 2
+  print -- "Hosted cleanup: $label"
+  local python=$(command -v python3)
+  local -a runner
+  runner=("$python")
+  [[ "$privilege" == admin ]] && runner=(sudo -n "$python")
+  "${runner[@]}" - "$label" "$@" <<'BOUNDED_CLEANUP'
+import os, signal, subprocess, sys
+label = sys.argv[1]
+process = subprocess.Popen(sys.argv[2:], start_new_session=True)
+try:
+    status = process.wait(timeout=20)
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGKILL)
+    process.wait(timeout=5)
+    print('Hosted cleanup timed out: ' + label, file=sys.stderr)
+    status = 65
+raise SystemExit(status)
+BOUNDED_CLEANUP
+}
 cleanup() {
-  local trust_restore_failed=NO
+  trap - EXIT INT TERM HUP
+  local cleanup_failed=NO
+  # Restore user keychain context before changing the admin trust domain.
+  cleanup_command user default-keychain security default-keychain -d user -s "$default_keychain" || cleanup_failed=YES
+  cleanup_command user keychain-search-list security list-keychains -d user -s "${search_list[@]}" || cleanup_failed=YES
   if [[ "$trust_changed" == YES ]]; then
-    sudo -n security remove-trusted-cert -d "$certificate" || trust_restore_failed=YES
+    cleanup_command admin remove-certificate-trust security remove-trusted-cert -d "$certificate" || cleanup_failed=YES
     if [[ -f "$trust_backup" ]]; then
-      sudo -n security trust-settings-import -d "$trust_backup" || trust_restore_failed=YES
+      cleanup_command admin restore-admin-trust security trust-settings-import -d "$trust_backup" || cleanup_failed=YES
     fi
   fi
-  security default-keychain -d user -s "$default_keychain" || true
-  security list-keychains -d user -s "${search_list[@]}" || true
-  security delete-keychain "$keychain" >/dev/null 2>&1 || true
+  cleanup_command user delete-temporary-keychain security delete-keychain "$keychain" || cleanup_failed=YES
   rm -rf "$secret_directory"
-  if [[ "$trust_restore_failed" == YES ]]; then
-    print -u2 'Hosted admin trust restoration failed; refusing successful signing completion'
+  if [[ -f "$diagnostic_report" ]]; then
+    python3 - "$diagnostic_report" "$cleanup_failed" <<'CLEANUP_REPORT'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1]); result = json.loads(path.read_text())
+result['cleanupCompleted'] = sys.argv[2] == 'NO'
+path.write_text(json.dumps(result, indent=2) + '\n')
+CLEANUP_REPORT
+  fi
+  if [[ "$cleanup_failed" == YES ]]; then
+    print -u2 'Hosted trust restoration failed or keychain cleanup failed; refusing successful signing completion'
     exit 65
   fi
+  print 'Hosted cleanup complete'
 }
 trap cleanup EXIT INT TERM HUP
 print -rn -- "$BLENNY_CERTIFICATE_P12_BASE64" | base64 --decode > "$secret_directory/certificate.p12"

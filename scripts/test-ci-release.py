@@ -330,11 +330,14 @@ elif command == "trust-settings-import":
     assert pathlib.Path(args[-1]).read_text() == "fixture-original-trust-settings"
     (root / "trusted").unlink(missing_ok=True)
 elif command == "remove-trusted-cert":
+    if os.environ.get("SIGNING_FIXTURE_REMOVE", "yes") == "hang":
+        import time
+        time.sleep(60)
     (root / "trusted").unlink(missing_ok=True)
 ''')
         self.fake_command("sudo", '''import os, sys
-assert sys.argv[1:3] == ["-n", "security"]
-os.execvp("security", ["security", *sys.argv[3:]])
+assert sys.argv[1] == "-n"
+os.execvp(sys.argv[2], sys.argv[2:])
 ''')
         for name in ["build-app.sh", "prepare-release.sh"]:
             (self.root / "scripts" / name).write_text("#!/bin/zsh\nexit ${SIGNING_FIXTURE_PACKAGE_STATUS:-0}\n")
@@ -384,6 +387,15 @@ print '{"version":"1.0.0"}' > "$2/Blenny-1.0.0.receipt.json"
         self.assertTrue(diagnostic["pinnedIdentityPresent"])
         self.assertFalse(diagnostic["validIdentityBeforeTrust"])
         self.assertTrue(diagnostic["validIdentityAfterTrust"])
+        self.assertTrue(diagnostic["cleanupCompleted"])
+
+    def test_hung_trust_cleanup_is_bounded_and_cannot_report_success(self):
+        result, calls = self.execute(SIGNING_FIXTURE_REMOVE="hang", BLENNY_SIGNING_DIAGNOSTICS_ONLY="true")
+        self.assertEqual(result.returncode, 65)
+        self.assertIn("timed out: remove-certificate-trust", result.stderr)
+        self.assertTrue(any(call[0] == "trust-settings-import" for call in calls))
+        diagnostic = json.loads((self.root / "LocalData/ci/signing-diagnostic.json").read_text())
+        self.assertFalse(diagnostic["cleanupCompleted"])
 
     def test_wrong_certificate_is_rejected_before_trust_mutation(self):
         (self.root / "Config/SigningIdentity.sha1").write_text("B" * 40 + "\n")

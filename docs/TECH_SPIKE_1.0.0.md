@@ -23,7 +23,13 @@ valid-identity check after P12 import. That check did not distinguish a wrong
 certificate from a missing private-key identity or missing hosted trust. The
 existing self-signed signing route is retained. A diagnostic dispatch now records
 the public fingerprint and identity validity before/after temporary runner trust;
-its actual hosted result is required before declaring the cause confirmed.
+run 36792759271 confirmed a matching pinned certificate and private-key identity,
+invalid before runner trust and valid immediately afterward. The original failure
+was missing hosted code-signing trust. The diagnostic finished in under a second,
+but its unbounded exit cleanup stalled and the run was cancelled. Cleanup is now
+instrumented and bounded per command; successful end-to-end runner cleanup remains
+a separate required result. The controller commit bb3f9ae also passed hosted
+Development checks (660 Debug and 608 Release tests, 45 Python tool tests).
 
 The owner specified retaining 1.0.0 for CI-only repairs and requested a manual
 production entry for future use. The controller and selected annotated application
@@ -32,7 +38,8 @@ with its accepted digest and reviewed notes; the receipt also records the workfl
 controller commit. Verification and diagnosis never publish. Manual production
 requires an explicit existing tag and shares the automatic publication gates;
 public tags and published asset bytes remain immutable. This implementation is
-prepared locally and does not imply successful hosted diagnosis or publication.
+available on main. Confirmed certificate diagnosis does not imply successful
+cleanup, packaging or publication.
 
 The automation-stage follow-up passed 658 Debug and 606 ordinary Release tests,
 27 Python release tests, workflow boundary checks and pinned actionlint locally

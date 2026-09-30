@@ -74,8 +74,11 @@ fingerprint with the pin, then snapshots the runner's admin trust settings and
 temporarily trusts that certificate for code signing only. P12 import does not
 transfer trust settings. It restores the snapshot (or removes only the temporary
 trust entry when no prior settings existed), restores the keychain search/default
-state and removes the temporary keychain on every exit path. A failed trust
-snapshot or restoration fails signing. These operations are confined to the
+state and removes the temporary keychain on every exit path. Cleanup restores
+user keychain context before the admin trust domain. Each cleanup command has a
+20-second process timeout and a named progress marker; timeout or any failed
+restoration makes the job fail. The diagnostic receipt records cleanup completion.
+A failed trust snapshot or restoration fails signing. These operations are confined to the
 ephemeral GitHub runner; they do not change the owner's or users' Mac trust.
 Apple documents the trusted-chain and certificate-validity requirements in
 [TN3161: Inside Code Signing: Certificates](https://developer.apple.com/documentation/technotes/tn3161-inside-code-signing-certificates).
