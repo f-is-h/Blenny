@@ -43,6 +43,27 @@ public tags and published asset bytes remain immutable. This implementation is
 available on main. Certificate diagnostics alone do not imply successful probe verification,
 cleanup, packaging or publication.
 
+## Hosted draft-publication recovery (2026-10-01)
+
+Controller a893e93 passed the actual fixed-root signing probe without modifying
+system trust (diagnostic run 36794394103), then completed verification-only
+packaging and Sparkle fixture checks (run 36794536859). The owner's manual
+production run 36796785800 also passed source tests, signing, sealed provenance
+and the build job. Publication created an empty draft, then failed because
+`GET /releases/tags/{tag}` returns published releases only. Treating its 404 as
+absence made the script dereference a missing release. No asset upload or feed
+write occurred in that attempt.
+
+The controller now checks the authenticated, paginated release list after a tag
+404 and rejects duplicate matches or lookup failures. It resumes the existing
+empty draft rather than creating another release. With no asset bytes present,
+a fresh dispatch may allocate a newer unpublished internal build. Partial drafts
+still require their matching sealed artifact; published assets remain immutable.
+Before publishing, downloaded draft files must also match every selected sealed
+file byte for byte. Tests cover draft lookup, first creation, empty-draft recovery,
+unavailable drafts and mismatched sealed bytes. This repair preserves v1.0.0 and
+its original application source; production retry remains owner initiated.
+
 The automation-stage follow-up passed 658 Debug and 606 ordinary Release tests,
 27 Python release tests, workflow boundary checks and pinned actionlint locally
 on macOS 27.0.1 build 26A434 with Xcode 27.0 / SDK 27.0. Eight negative package

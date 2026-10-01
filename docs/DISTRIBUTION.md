@@ -209,11 +209,15 @@ cancel, equal/older versions, unavailable feed, wrong signature, damaged archive
 installation/relaunch and state preservation. It then builds and verifies the
 ordinary Release DMG. Test flavors are never uploaded or advertised. The sealed
 DMG/checksum/receipt/notes transfer to publication unchanged. A rerun recovers a
-matching existing release or same-run Actions artifact. A partial draft resumes
+matching existing release or same-run Actions artifact. Release lookup falls back
+from the published-tag endpoint to the authenticated, paginated release list so
+an existing draft is recognized. An empty unpublished draft may resume with a
+newer internal build; it contains no sealed asset bytes to preserve. A partial draft resumes
 only from its sealed bytes. Expired/missing seals or conflicting bytes fail;
 published assets are never overwritten.
 
-The publication job uploads all assets, verifies the draft automatically, publishes,
+The publication job uploads all assets, verifies the draft automatically and
+compares every downloaded file with the selected sealed bytes before publishing,
 then checks anonymous downloaded bytes before adding the feed item. It writes only
 appcast.xml and docs/public-release.json on fresh origin/main, preserving unrelated
 changes. A concurrent main advance fails safely; a rerun starts from fresh main

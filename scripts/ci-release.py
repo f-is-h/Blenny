@@ -47,7 +47,12 @@ def optional_release(tag):
     if result.returncode == 0:
         return json.loads(result.stdout)
     if "HTTP 404" in result.stderr:
-        return None
+        # The tag endpoint returns published releases only. Authenticated list
+        # access also exposes drafts; require one exact match before resuming.
+        matches = [release for release in releases() if release["tag_name"] == tag]
+        if len(matches) > 1:
+            raise ValueError("Multiple releases exist for the selected tag")
+        return matches[0] if matches else None
     raise RuntimeError("Cannot establish existing release state: " + result.stderr.strip())
 
 
@@ -173,8 +178,10 @@ def recover(directory, production):
         run("gh", "run", "download", run_id, "--repo", REPOSITORY, "--name", selected["name"], "--dir", str(directory))
         artifact.verify(directory, production=production, source=source)
         return True
-    if release:
+    if release and release["assets"]:
         raise ValueError("Partial draft exists but its sealed source artifact is unavailable; refuse to rebuild different bytes")
+    # An empty unpublished draft contains no committed bytes. A new dispatch
+    # may allocate a newer internal build and resume that same draft.
     return False
 
 
@@ -231,6 +238,8 @@ def publish(directory):
     if release is None:
         run("gh", "release", "create", tag, "--repo", REPOSITORY, "--verify-tag", "--draft", "--title", f"Blenny {version}", "--notes-file", str(directory / "release-notes.md"))
         release = optional_release(tag)
+    if release is None:
+        raise ValueError("Created release is unavailable; stop before uploading assets")
     if release["body"].strip() != version_notes(version).strip():
         raise ValueError("Release transaction notes differ from the prepared, reviewed notes")
     if release["draft"]:
@@ -245,6 +254,8 @@ def publish(directory):
             downloaded = {p.name for p in Path(temp).iterdir()}
             if downloaded != {p.name for p in assets}:
                 raise ValueError("Draft asset set differs from sealed set")
+            if any((Path(temp) / path.name).read_bytes() != path.read_bytes() for path in assets):
+                raise ValueError("Draft asset bytes differ from selected sealed artifact")
         run("gh", "release", "edit", tag, "--repo", REPOSITORY, "--draft=false", "--latest")
         release = optional_release(tag)
     urls = verify_public_assets(release, directory, receipt)

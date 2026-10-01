@@ -57,11 +57,74 @@ class ReleaseTransactionTests(unittest.TestCase):
         ci.ensure_order("1.0.0", [dict(tag_name="v1.0.0", draft=False)], "v1.0.0")
 
     def test_existing_release_lookup_does_not_treat_auth_failure_as_absence(self):
-        with patch.object(ci.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "gh: Not Found (HTTP 404)")):
+        with patch.object(ci.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "gh: Not Found (HTTP 404)")), patch.object(ci, "releases", return_value=[]):
             self.assertIsNone(ci.optional_release("v1.0.0"))
-        with patch.object(ci.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "HTTP 403: forbidden")):
+        with patch.object(ci.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "HTTP 403: forbidden")), patch.object(ci, "releases") as listed:
             with self.assertRaisesRegex(RuntimeError, "Cannot establish"):
                 ci.optional_release("v1.0.0")
+            listed.assert_not_called()
+
+    def test_tag_404_finds_exact_draft_across_release_pages(self):
+        draft = dict(tag_name="v1.0.0", draft=True, assets=[])
+        pages = json.dumps([[dict(tag_name="v1.0.1", draft=True)], [draft]])
+        with patch.object(ci.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "HTTP 404")), patch.object(ci, "gh", return_value=pages) as gh:
+            self.assertEqual(ci.optional_release("v1.0.0"), draft)
+            self.assertEqual(gh.call_args.args, ("api", "--paginate", "--slurp", f"repos/{ci.REPOSITORY}/releases?per_page=100"))
+
+    def test_draft_list_failure_and_duplicate_tag_fail_closed(self):
+        with patch.object(ci.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "HTTP 404")), patch.object(ci, "gh", side_effect=subprocess.CalledProcessError(1, ["gh", "api"])):
+            with self.assertRaises(subprocess.CalledProcessError):
+                ci.optional_release("v1.0.0")
+        with patch.object(ci.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "HTTP 404")), patch.object(ci, "releases", return_value=[dict(tag_name="v1.0.0")] * 2):
+            with self.assertRaisesRegex(ValueError, "Multiple releases"):
+                ci.optional_release("v1.0.0")
+
+    def test_empty_draft_allows_new_unpublished_build(self):
+        with patch.object(ci, "preflight", return_value=("a" * 40, "1.0.0", "v1.0.0")), patch.object(ci, "optional_release", return_value=dict(draft=True, assets=[])), patch.object(ci, "gh", return_value='[{"artifacts": []}]'), patch.dict(os.environ, GITHUB_RUN_ID="123"), patch.object(ci, "run") as run:
+            self.assertFalse(ci.recover(self.directory, True))
+            run.assert_not_called()
+
+    def exercise_draft_publication(self, *, create=False, changed_bytes=False):
+        draft = dict(tag_name="v1.0.0", draft=True, assets=[], body=self.notes)
+        published = dict(draft=False, assets=[], body=self.notes, html_url=self.url)
+        lookups = ([None] if create else []) + [draft, published]
+        calls = []
+        def run(*args):
+            calls.append(args)
+            if args[:3] == ("gh", "release", "download"):
+                target = Path(args[-1])
+                for path in self.directory.iterdir():
+                    shutil.copyfile(path, target / path.name)
+                if changed_bytes:
+                    (target / self.receipt["archive"]).write_bytes(b"different previously sealed build")
+            if args[:2] == ("git", "fetch"):
+                raise RuntimeError("feed transaction reached")
+        with patch.object(ci, "preflight", return_value=("a" * 40, "1.0.0", "v1.0.0")), patch.object(ci.artifact, "verify", return_value=self.receipt), patch.object(ci, "optional_release", side_effect=lookups), patch.object(ci, "version_notes", return_value=self.notes), patch.object(ci, "run", side_effect=run), patch.object(ci, "verify_public_assets", return_value={n: self.url for n in self.assets}), patch("builtins.print"):
+            with self.assertRaisesRegex(ValueError if changed_bytes else RuntimeError, "bytes differ" if changed_bytes else "feed transaction reached"):
+                ci.publish(self.directory)
+        return calls
+
+    def test_first_publication_creates_reads_and_verifies_draft_before_publish(self):
+        calls = self.exercise_draft_publication(create=True)
+        self.assertEqual(sum(c[:3] == ("gh", "release", "create") for c in calls), 1)
+        self.assertEqual(sum(c[:3] == ("gh", "release", "upload") for c in calls), 4)
+        self.assertLess(next(i for i, c in enumerate(calls) if c[:3] == ("gh", "release", "download")), next(i for i, c in enumerate(calls) if c[:3] == ("gh", "release", "edit")))
+
+    def test_existing_empty_draft_is_resumed_without_duplicate_creation(self):
+        calls = self.exercise_draft_publication()
+        self.assertFalse(any(c[:3] == ("gh", "release", "create") for c in calls))
+        self.assertTrue(any(c[:3] == ("gh", "release", "edit") for c in calls))
+
+    def test_different_valid_draft_bytes_stop_before_publishing(self):
+        calls = self.exercise_draft_publication(changed_bytes=True)
+        self.assertFalse(any(c[:3] == ("gh", "release", "edit") for c in calls))
+
+    def test_created_but_unavailable_draft_has_explicit_failure(self):
+        with patch.object(ci, "preflight", return_value=("a" * 40, "1.0.0", "v1.0.0")), patch.object(ci.artifact, "verify", return_value=self.receipt), patch.object(ci, "optional_release", return_value=None), patch.object(ci, "run") as run:
+            with self.assertRaisesRegex(ValueError, "Created release is unavailable"):
+                ci.publish(self.directory)
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.args[:3], ("gh", "release", "create"))
 
     def test_partial_draft_recovers_sealed_artifact_without_rebuilding(self):
         release = dict(draft=True, assets=[dict(name=self.assets[0])])
