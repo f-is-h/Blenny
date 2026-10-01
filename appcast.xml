@@ -1,6 +1,40 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<?xml version='1.0' encoding='utf-8'?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
   <channel>
+    <item>
+      <title>Blenny 1.0.0</title>
+      <pubDate>Thu, 01 Oct 2026 06:19:34 +0000</pubDate>
+      <sparkle:version>1701</sparkle:version>
+      <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>27.0</sparkle:minimumSystemVersion>
+      <link>https://github.com/f-is-h/Blenny/releases/tag/v1.0.0</link>
+      <description sparkle:format="markdown">## 1.0.0 — 2026-09-30
+
+First public release. Earlier 0.x versions were private engineering milestones.
+
+### Added
+
+- Resume your saved management choice at startup, control login launch in Settings, and receive authenticated Sparkle updates.
+- Use a native Organization Board, menu bar controls and Settings. Capabilities are shown for the actual observed items, including applications with several icons.
+- Organize menu bar applications into Visible, Revealable and Hidden, and review visibility and order together before applying changes.
+- Undo Changes restores the state before the latest successful Apply. Stop and Quit release visibility restrictions while keeping the order you chose.
+
+### Changed
+
+- Open one-time GitHub sponsorship by default from the menu bar's right-click menu.
+
+### Fixed
+
+- Apply changes safely on a fresh installation, then undo them and reopen Blenny without a spurious missing-backup error.
+- Keep the three policy areas free of persistent scrollbars, and let the system overflow arrow take over expansion and collapse across the system languages represented by macOS 27 resource labels.
+
+### Requirements and limitations
+
+- During management, native Clock clicks cannot open Notification Center, and Now Playing or unattributed Gaming/Wine items may disappear. Some system items cannot be sorted; adjacency to the overflow arrow is not guaranteed. See README for tested workarounds and recovery.
+- Requires Apple silicon and macOS 27 only. Blenny is self-signed and is not notarized by Apple; follow the README first-launch and permission instructions.
+</description>
+      <enclosure url="https://github.com/f-is-h/Blenny/releases/download/v1.0.0/Blenny-1.0.0.dmg" length="5809778" type="application/octet-stream" sparkle:edSignature="J6YQQyRkWorz9hpuGiSr09IzYndVWrgNhIy8a6jbKnd7waF0TE7sYpwj0y1eIvIkCexv6lgCRsiHIiaZu5UaBA==" />
+    </item>
     <title>Blenny updates</title>
     <link>https://github.com/f-is-h/Blenny</link>
     <description>Signed Blenny updates</description>

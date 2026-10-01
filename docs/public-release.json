@@ -1,0 +1,18 @@
+{
+  "status": "published",
+  "version": "1.0.0",
+  "build": "1701",
+  "sourceCommit": "a7c004a77445e81fbea37e00274fde8738033f51",
+  "tag": "v1.0.0",
+  "sha256": "fbf7afa5208a3bcf58a527d263741acdbf0f908b6ba8921b9387e1f61b3cbe03",
+  "releaseURL": "https://github.com/f-is-h/Blenny/releases/tag/v1.0.0",
+  "assets": {
+    "Blenny-1.0.0.dmg": "https://github.com/f-is-h/Blenny/releases/download/v1.0.0/Blenny-1.0.0.dmg",
+    "Blenny-1.0.0.dmg.sha256": "https://github.com/f-is-h/Blenny/releases/download/v1.0.0/Blenny-1.0.0.dmg.sha256",
+    "Blenny-1.0.0.receipt.json": "https://github.com/f-is-h/Blenny/releases/download/v1.0.0/Blenny-1.0.0.receipt.json",
+    "release-notes.md": "https://github.com/f-is-h/Blenny/releases/download/v1.0.0/release-notes.md"
+  },
+  "anonymousAssetVerification": true,
+  "workflowRun": "36823493882",
+  "workflowCommit": "3496d804214c9649c34db3f1279de6460cd106f9"
+}
