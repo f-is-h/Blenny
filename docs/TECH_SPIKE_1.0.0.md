@@ -21,15 +21,17 @@ The first production attempt stopped on repository visibility; the second passed
 660 Debug and 608 Release tests and the source/history audit, then stopped at the
 valid-identity check after P12 import. That check did not distinguish a wrong
 certificate from a missing private-key identity or missing hosted trust. The
-existing self-signed signing route is retained. A diagnostic dispatch now records
-the public fingerprint and identity validity before/after temporary runner trust;
-run 36792759271 confirmed a matching pinned certificate and private-key identity,
-invalid before runner trust and valid immediately afterward. The original failure
-was missing hosted code-signing trust. The diagnostic finished in under a second,
-but its unbounded exit cleanup stalled and the run was cancelled. Cleanup is now
-instrumented and bounded per command; successful end-to-end runner cleanup remains
-a separate required result. The controller commit bb3f9ae also passed hosted
-Development checks (660 Debug and 608 Release tests, 45 Python tool tests).
+existing self-signed signing route is retained. Run 36792759271 confirmed that
+the matching certificate and private-key identity were excluded by the trusted
+valid-identity filter, then became valid after temporary runner trust. This proves
+the prefilter's trust rejection, not that actual explicit-identity signing needs
+that trust. Its exit cleanup stalled; run 36793628261 localized the hang to the
+admin trust removal and import commands. Keychain context restoration and deletion
+worked. The controller now removes those administrator mutations and probes actual
+signing plus fixed-root requirement verification on a disposable executable. That
+probe must be verified on the real runner before declaring this route resolved.
+The bb3f9ae and bfe8231 controllers both passed hosted Development checks (660 Debug
+and 608 Release tests, with their respective release-tool checks).
 
 The owner specified retaining 1.0.0 for CI-only repairs and requested a manual
 production entry for future use. The controller and selected annotated application
@@ -38,7 +40,7 @@ with its accepted digest and reviewed notes; the receipt also records the workfl
 controller commit. Verification and diagnosis never publish. Manual production
 requires an explicit existing tag and shares the automatic publication gates;
 public tags and published asset bytes remain immutable. This implementation is
-available on main. Confirmed certificate diagnosis does not imply successful
+available on main. Certificate diagnostics alone do not imply successful probe verification,
 cleanup, packaging or publication.
 
 The automation-stage follow-up passed 658 Debug and 606 ordinary Release tests,

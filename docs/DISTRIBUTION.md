@@ -69,19 +69,20 @@ archive. Neither implies Apple notarization or default Gatekeeper trust. Keep th
 selected self-signed identity and independent Blenny update key. Do not borrow
 Usage4Claude credentials or disable system protection.
 
-The hosted signing wrapper first compares the imported public certificate's SHA-1
-fingerprint with the pin, then snapshots the runner's admin trust settings and
-temporarily trusts that certificate for code signing only. P12 import does not
-transfer trust settings. It restores the snapshot (or removes only the temporary
-trust entry when no prior settings existed), restores the keychain search/default
-state and removes the temporary keychain on every exit path. Cleanup restores
-user keychain context before the admin trust domain. Each cleanup command has a
-20-second process timeout and a named progress marker; timeout or any failed
-restoration makes the job fail. The diagnostic receipt records cleanup completion.
-A failed trust snapshot or restoration fails signing. These operations are confined to the
-ephemeral GitHub runner; they do not change the owner's or users' Mac trust.
-Apple documents the trusted-chain and certificate-validity requirements in
-[TN3161: Inside Code Signing: Certificates](https://developer.apple.com/documentation/technotes/tn3161-inside-code-signing-certificates).
+The hosted signing wrapper compares the imported public certificate's SHA-1
+fingerprint with the pin and requires its matching private-key identity. It then
+signs an isolated disposable executable with that exact identity and verifies the
+signature against an explicit certificate-root requirement. A system-trust
+`find-identity -v` listing is diagnostic only: it must not reject an otherwise
+usable self-signed identity before actual signing. No administrator trust or
+authorization settings are modified. The wrapper restores the original user
+keychain search/default state and deletes its temporary keychain. Each cleanup
+command has a 20-second process timeout and a named progress marker; any failed
+cleanup fails the job and is recorded in the diagnostic receipt. These operations
+are confined to the ephemeral GitHub runner. Apple's
+[TN2206](https://developer.apple.com/library/archive/technotes/tn2206/) documents
+self-signed identities and explicit designated requirements; ordinary requirement
+verification does not consult system trust unless it requests a trusted anchor.
 
 An existing public source tag remains immutable after a failed workflow. Changes
 to release tooling can be reviewed as forward commits on main without changing
@@ -190,8 +191,8 @@ The manual Actions form has three operations:
 
 - `verification` (default): test, sign and verify; no public release or feed write.
 - `signing-diagnostics`: compare the imported certificate fingerprint and report
-  whether its private-key identity is available and valid before/after temporary
-  hosted code-signing trust. It does not build an application or publish.
+  whether its matching private-key identity can actually sign and verify a
+  disposable executable against the fixed certificate-root requirement. It does not build an application or publish.
 - `publish`: requires an existing annotated `release_tag`, such as `v1.0.0`.
   It tests and builds that exact tag source, then publishes automatically.
 

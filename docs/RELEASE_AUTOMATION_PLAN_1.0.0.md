@@ -199,8 +199,9 @@ main commit while preserving `1.0.0`, its source tag, accepted product digest an
 reviewed notes. Record both the application `sourceCommit` and the signing
 `workflowCommit` in the sealed receipt. Never retarget a public tag or replace
 published assets. A signing-diagnostic dispatch reports certificate fingerprint
-and private-key/validity checks before and after temporary hosted trust; it does
-not build, publish or update the feed.
+and private-key availability, diagnostic validity and an actual isolated signing
+and pinned-signature verification probe. It changes no administrator trust,
+builds no application, publishes nothing and does not update the feed.
 
 Execute the following without a human checkpoint between steps:
 

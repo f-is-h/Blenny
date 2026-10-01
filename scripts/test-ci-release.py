@@ -280,8 +280,8 @@ class ManualReleaseSourceTests(unittest.TestCase):
                 ci.preflight("production")
 
 
-class HostedSigningTrustTests(unittest.TestCase):
-    """Run the real signing wrapper with an isolated simulated Security CLI."""
+class HostedSigningIdentityTests(unittest.TestCase):
+    """Run the real wrapper with isolated Security CLI and signing probes."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -290,57 +290,46 @@ class HostedSigningTrustTests(unittest.TestCase):
         for name in ["scripts", "Config", "bin", "runner"]:
             (self.root / name).mkdir()
         shutil.copyfile(Path(__file__).with_name("ci-sign-package.sh"), self.root / "scripts/ci-sign-package.sh")
-        self.der = b"isolated-public-certificate-fixture"
-        self.fingerprint = hashlib.sha1(self.der).hexdigest().upper()
+        self.fingerprint = hashlib.sha1(b"isolated-public-certificate-fixture").hexdigest().upper()
         (self.root / "Config/SigningIdentity.sha1").write_text(self.fingerprint + "\n")
         (self.root / "Config/Info.plist").write_text('<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>1.0.0</string></dict></plist>')
-        self.trace = self.root / "security-trace.jsonl"
-        self.fake_command("security", '''import base64, json, os, pathlib, sys
+        self.trace = self.root / "trace.jsonl"
+        self.fake_command("security", r'''import base64, json, os, pathlib, sys, time
 args = sys.argv[1:]
 root = pathlib.Path(os.environ["SIGNING_FIXTURE_ROOT"])
-with (root / "security-trace.jsonl").open("a") as trace:
-    trace.write(json.dumps(args) + "\\n")
+with (root / "trace.jsonl").open("a") as trace:
+    trace.write(json.dumps(["security", *args]) + "\n")
 command = args[0]
+assert command not in {"add-trusted-cert", "remove-trusted-cert", "trust-settings-export", "trust-settings-import", "authorizationdb"}
 if command == "list-keychains" and "-s" not in args:
     print('    "fixture-original.keychain-db"')
+elif command == "list-keychains" and len(args) == 5 and "-s" in args and "fixture-original.keychain-db" == args[-1]:
+    mode = os.environ.get("SIGNING_FIXTURE_CLEANUP", "yes")
+    if mode == "hang": time.sleep(60)
+    if mode == "no": sys.exit(88)
 elif command == "default-keychain" and "-s" not in args:
     print('"fixture-default.keychain-db"')
 elif command == "find-certificate":
     encoded = base64.b64encode(b"isolated-public-certificate-fixture").decode()
-    print("-----BEGIN CERTIFICATE-----\\n" + encoded + "\\n-----END CERTIFICATE-----")
-elif command == "trust-settings-export":
-    mode = os.environ.get("SIGNING_FIXTURE_EXPORT", "existing")
-    if mode == "absent":
-        print("No Trust Settings were found.", file=sys.stderr)
-        sys.exit(1)
-    if mode == "failure":
-        print("Export denied", file=sys.stderr)
-        sys.exit(1)
-    pathlib.Path(args[-1]).write_text("fixture-original-trust-settings")
-elif command == "add-trusted-cert":
-    (root / "trusted").touch()
+    print("-----BEGIN CERTIFICATE-----\n" + encoded + "\n-----END CERTIFICATE-----")
 elif command == "find-identity":
-    has_key = os.environ.get("SIGNING_FIXTURE_KEY", "yes") == "yes"
-    valid = (root / "trusted").exists() and os.environ.get("SIGNING_FIXTURE_VALID", "yes") == "yes"
-    if has_key and ("-v" not in args or valid):
+    if os.environ.get("SIGNING_FIXTURE_KEY", "yes") == "yes" and "-v" not in args:
         print("1) " + os.environ["SIGNING_FIXTURE_FINGERPRINT"] + ' "Fixture Identity"')
-elif command == "trust-settings-import":
-    if os.environ.get("SIGNING_FIXTURE_RESTORE", "yes") == "no":
-        sys.exit(88)
-    assert pathlib.Path(args[-1]).read_text() == "fixture-original-trust-settings"
-    (root / "trusted").unlink(missing_ok=True)
-elif command == "remove-trusted-cert":
-    if os.environ.get("SIGNING_FIXTURE_REMOVE", "yes") == "hang":
-        import time
-        time.sleep(60)
-    (root / "trusted").unlink(missing_ok=True)
 ''')
-        self.fake_command("sudo", '''import os, sys
-assert sys.argv[1] == "-n"
-os.execvp(sys.argv[2], sys.argv[2:])
+        self.fake_command("codesign", r'''import json, os, pathlib, sys
+root = pathlib.Path(os.environ["SIGNING_FIXTURE_ROOT"])
+args = sys.argv[1:]
+with (root / "trace.jsonl").open("a") as trace:
+    trace.write(json.dumps(["codesign", *args]) + "\n")
+if "--sign" in args:
+    assert args[args.index("--sign") + 1] == os.environ["SIGNING_FIXTURE_FINGERPRINT"]
+    assert "--keychain" in args
+    sys.exit(int(os.environ.get("SIGNING_FIXTURE_SIGN_STATUS", "0")))
+assert "--verify" in args and "--strict" in args
+assert any(arg.startswith('-R=identifier "xyz.fi5h.blenny.ci-signing-probe" and certificate root = H"') for arg in args)
+sys.exit(int(os.environ.get("SIGNING_FIXTURE_VERIFY_STATUS", "0")))
 ''')
-        for name in ["build-app.sh", "prepare-release.sh"]:
-            (self.root / "scripts" / name).write_text("#!/bin/zsh\nexit ${SIGNING_FIXTURE_PACKAGE_STATUS:-0}\n")
+        (self.root / "scripts/build-app.sh").write_text("#!/bin/zsh\nexit ${SIGNING_FIXTURE_PACKAGE_STATUS:-0}\n")
         (self.root / "scripts/prepare-release.sh").write_text('''#!/bin/zsh
 mkdir -p "$2"
 print '{"version":"1.0.0"}' > "$2/Blenny-1.0.0.receipt.json"
@@ -363,81 +352,73 @@ print '{"version":"1.0.0"}' > "$2/Blenny-1.0.0.receipt.json"
 
     def execute(self, **environment):
         result = subprocess.run(["zsh", str(self.root / "scripts/ci-sign-package.sh"), str(self.root / "sealed"), "1103"],
-                                env={**self.env, **environment}, capture_output=True, text=True)
+                                env={**self.env, **environment}, capture_output=True, text=True, timeout=40)
         self.assertEqual(list((self.root / "runner").iterdir()), [])
         self.assertNotIn("fixture-password", result.stdout + result.stderr)
         self.assertNotIn("fixture-update-key", result.stdout + result.stderr)
         calls = [json.loads(line) for line in self.trace.read_text().splitlines()]
-        self.assertTrue(any(call[0] == "delete-keychain" for call in calls))
-        self.assertIn(["default-keychain", "-d", "user", "-s", "fixture-default.keychain-db"], calls)
-        self.assertIn(["list-keychains", "-d", "user", "-s", "fixture-original.keychain-db"], calls)
-        return result, calls
+        self.assertIn(["security", "default-keychain", "-d", "user", "-s", "fixture-default.keychain-db"], calls)
+        self.assertIn(["security", "list-keychains", "-d", "user", "-s", "fixture-original.keychain-db"], calls)
+        self.assertTrue(any(call[:2] == ["security", "delete-keychain"] for call in calls))
+        return result, calls, json.loads((self.root / "LocalData/ci/signing-diagnostic.json").read_text())
 
-    def test_correct_self_signed_certificate_is_trusted_for_code_signing_then_restored(self):
-        result, calls = self.execute()
+    def test_self_signed_identity_is_actually_verified_without_system_trust_mutation(self):
+        result, calls, report = self.execute()
         self.assertEqual(result.returncode, 0, result.stderr)
-        trust = next(call for call in calls if call[0] == "add-trusted-cert")
-        self.assertEqual(trust[1:7], ["-d", "-r", "trustRoot", "-p", "codeSign", "-k"])
-        self.assertEqual(sum(call[0] == "find-identity" for call in calls), 3)
-        self.assertTrue(any(call[:2] == ["trust-settings-import", "-d"] for call in calls))
-        self.assertLess([call[0] for call in calls].index("remove-trusted-cert"), [call[0] for call in calls].index("trust-settings-import"))
-        self.assertFalse((self.root / "trusted").exists())
-        diagnostic = json.loads((self.root / "LocalData/ci/signing-diagnostic.json").read_text())
-        self.assertEqual(diagnostic["cause"], "missing-hosted-code-signing-trust")
-        self.assertTrue(diagnostic["pinnedIdentityPresent"])
-        self.assertFalse(diagnostic["validIdentityBeforeTrust"])
-        self.assertTrue(diagnostic["validIdentityAfterTrust"])
-        self.assertTrue(diagnostic["cleanupCompleted"])
+        self.assertFalse(report["validIdentityBeforeTrust"])
+        self.assertTrue(report["codeSigningProbeVerified"])
+        self.assertFalse(report["systemTrustModified"])
+        self.assertTrue(report["cleanupCompleted"])
+        self.assertEqual(report["cause"], "self-signed-identity-excluded-by-validity-filter")
+        self.assertEqual(sum(call[0] == "codesign" for call in calls), 2)
 
-    def test_hung_trust_cleanup_is_bounded_and_cannot_report_success(self):
-        result, calls = self.execute(SIGNING_FIXTURE_REMOVE="hang", BLENNY_SIGNING_DIAGNOSTICS_ONLY="true")
-        self.assertEqual(result.returncode, 65)
-        self.assertIn("timed out: remove-certificate-trust", result.stderr)
-        self.assertTrue(any(call[0] == "trust-settings-import" for call in calls))
-        diagnostic = json.loads((self.root / "LocalData/ci/signing-diagnostic.json").read_text())
-        self.assertFalse(diagnostic["cleanupCompleted"])
-
-    def test_wrong_certificate_is_rejected_before_trust_mutation(self):
+    def test_wrong_certificate_is_rejected_before_signing(self):
         (self.root / "Config/SigningIdentity.sha1").write_text("B" * 40 + "\n")
-        result, calls = self.execute()
+        result, calls, report = self.execute()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("does not match the pinned", result.stderr)
-        self.assertFalse(any(call[0] in ["add-trusted-cert", "trust-settings-export"] for call in calls))
+        self.assertEqual(report["cause"], "certificate-fingerprint-mismatch")
+        self.assertFalse(any(call[0] == "codesign" for call in calls))
 
-    def test_absent_prior_trust_is_removed_even_when_packaging_fails(self):
-        result, calls = self.execute(SIGNING_FIXTURE_EXPORT="absent", SIGNING_FIXTURE_PACKAGE_STATUS="42")
-        self.assertEqual(result.returncode, 42)
-        self.assertTrue(any(call[:2] == ["remove-trusted-cert", "-d"] for call in calls))
-        self.assertFalse((self.root / "trusted").exists())
-
-    def test_unusable_identity_after_trust_restores_snapshot(self):
-        result, calls = self.execute(SIGNING_FIXTURE_VALID="no")
+    def test_missing_private_key_is_rejected_before_signing(self):
+        result, calls, report = self.execute(SIGNING_FIXTURE_KEY="no")
         self.assertEqual(result.returncode, 65)
-        self.assertIn("no valid usable", result.stderr)
-        self.assertTrue(any(call[0] == "trust-settings-import" for call in calls))
-
-    def test_snapshot_failure_prevents_trust_mutation(self):
-        result, calls = self.execute(SIGNING_FIXTURE_EXPORT="failure")
-        self.assertEqual(result.returncode, 65)
-        self.assertFalse(any(call[0] == "add-trusted-cert" for call in calls))
-
-    def test_failed_trust_restoration_cannot_report_success(self):
-        result, calls = self.execute(SIGNING_FIXTURE_RESTORE="no")
-        self.assertEqual(result.returncode, 65)
-        self.assertIn("trust restoration failed", result.stderr)
-
-    def test_certificate_without_private_key_is_diagnosed_before_trust(self):
-        result, calls = self.execute(SIGNING_FIXTURE_KEY="no")
-        self.assertEqual(result.returncode, 65)
-        self.assertFalse(any(call[0] == "add-trusted-cert" for call in calls))
-        report = json.loads((self.root / "LocalData/ci/signing-diagnostic.json").read_text())
         self.assertEqual(report["cause"], "matching-certificate-has-no-usable-private-key")
+        self.assertFalse(any(call[0] == "codesign" for call in calls))
 
-    def test_diagnostics_only_skips_build_and_preserves_private_key_secrecy(self):
-        result, calls = self.execute(BLENNY_SIGNING_DIAGNOSTICS_ONLY="true", SIGNING_FIXTURE_PACKAGE_STATUS="42")
+    def test_signing_failure_stops_before_signature_verification(self):
+        result, calls, report = self.execute(SIGNING_FIXTURE_SIGN_STATUS="65")
+        self.assertEqual(result.returncode, 65)
+        self.assertFalse(report["codeSigningProbeVerified"])
+        self.assertEqual(sum(call[0] == "codesign" for call in calls), 1)
+        self.assertFalse((self.root / "sealed").exists())
+
+    def test_pinned_signature_verification_failure_stops_before_packaging(self):
+        result, calls, report = self.execute(SIGNING_FIXTURE_VERIFY_STATUS="65")
+        self.assertEqual(result.returncode, 65)
+        self.assertEqual(report["cause"], "identity-cannot-sign-pinned-probe")
+        self.assertFalse((self.root / "sealed").exists())
+
+    def test_packaging_failure_still_restores_keychain_context(self):
+        result, calls, report = self.execute(SIGNING_FIXTURE_PACKAGE_STATUS="42")
+        self.assertEqual(result.returncode, 42)
+        self.assertTrue(report["cleanupCompleted"])
+
+    def test_cleanup_failure_cannot_report_success(self):
+        result, calls, report = self.execute(SIGNING_FIXTURE_CLEANUP="no")
+        self.assertEqual(result.returncode, 65)
+        self.assertFalse(report["cleanupCompleted"])
+
+    def test_hung_keychain_cleanup_is_bounded_and_cannot_report_success(self):
+        result, calls, report = self.execute(SIGNING_FIXTURE_CLEANUP="hang")
+        self.assertEqual(result.returncode, 65)
+        self.assertIn("timed out: keychain-search-list", result.stderr)
+        self.assertFalse(report["cleanupCompleted"])
+
+    def test_diagnostics_skip_application_build_and_publication(self):
+        result, calls, report = self.execute(BLENNY_SIGNING_DIAGNOSTICS_ONLY="true", SIGNING_FIXTURE_PACKAGE_STATUS="42")
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root / "sealed").exists())
         self.assertIn("no application build or publication", result.stdout)
-        self.assertFalse((self.root / "trusted").exists())
 
 
 if __name__ == "__main__":

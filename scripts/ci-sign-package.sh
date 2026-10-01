@@ -17,20 +17,15 @@ chmod 700 "$secret_directory"
 keychain="$secret_directory/signing.keychain-db"
 keychain_password=$(openssl rand -hex 32)
 certificate="$secret_directory/pinned-certificate.pem"
-trust_backup="$secret_directory/admin-trust-before.plist"
-trust_changed=NO
 # The hosted runner is ephemeral. Retain its search list and default keychain.
 search_list=(${(f)"$(security list-keychains -d user | sed 's/^[[:space:]]*"//;s/"[[:space:]]*$//')"})
 default_keychain=$(security default-keychain -d user | sed 's/^[[:space:]]*"//;s/"[[:space:]]*$//')
 cleanup_command() {
-  local privilege=$1 label=$2
-  shift 2
+  local label=$1
+  shift
   print -- "Hosted cleanup: $label"
   local python=$(command -v python3)
-  local -a runner
-  runner=("$python")
-  [[ "$privilege" == admin ]] && runner=(sudo -n "$python")
-  "${runner[@]}" - "$label" "$@" <<'BOUNDED_CLEANUP'
+  "$python" - "$label" "$@" <<'BOUNDED_CLEANUP'
 import os, signal, subprocess, sys
 label = sys.argv[1]
 process = subprocess.Popen(sys.argv[2:], start_new_session=True)
@@ -47,16 +42,10 @@ BOUNDED_CLEANUP
 cleanup() {
   trap - EXIT INT TERM HUP
   local cleanup_failed=NO
-  # Restore user keychain context before changing the admin trust domain.
-  cleanup_command user default-keychain security default-keychain -d user -s "$default_keychain" || cleanup_failed=YES
-  cleanup_command user keychain-search-list security list-keychains -d user -s "${search_list[@]}" || cleanup_failed=YES
-  if [[ "$trust_changed" == YES ]]; then
-    cleanup_command admin remove-certificate-trust security remove-trusted-cert -d "$certificate" || cleanup_failed=YES
-    if [[ -f "$trust_backup" ]]; then
-      cleanup_command admin restore-admin-trust security trust-settings-import -d "$trust_backup" || cleanup_failed=YES
-    fi
-  fi
-  cleanup_command user delete-temporary-keychain security delete-keychain "$keychain" || cleanup_failed=YES
+  # Every cleanup operation stays in the runner user's temporary keychain context.
+  cleanup_command default-keychain security default-keychain -d user -s "$default_keychain" || cleanup_failed=YES
+  cleanup_command keychain-search-list security list-keychains -d user -s "${search_list[@]}" || cleanup_failed=YES
+  cleanup_command delete-temporary-keychain security delete-keychain "$keychain" || cleanup_failed=YES
   rm -rf "$secret_directory"
   if [[ -f "$diagnostic_report" ]]; then
     python3 - "$diagnostic_report" "$cleanup_failed" <<'CLEANUP_REPORT'
@@ -68,7 +57,7 @@ path.write_text(json.dumps(result, indent=2) + '\n')
 CLEANUP_REPORT
   fi
   if [[ "$cleanup_failed" == YES ]]; then
-    print -u2 'Hosted trust restoration failed or keychain cleanup failed; refusing successful signing completion'
+    print -u2 'Hosted keychain cleanup failed; refusing successful signing completion'
     exit 65
   fi
   print 'Hosted cleanup complete'
@@ -133,32 +122,33 @@ path.write_text(json.dumps(result,indent=2)+'\n')
 print('Pinned certificate matches: true; identity present: '+sys.argv[2]+'; valid before trust: '+sys.argv[3])
 BEFORE_TRUST
 [[ "$identity_present" == true ]] || { print -u2 'Pinned certificate has no matching code-signing private-key identity'; exit 65; }
-if ! security trust-settings-export -d "$trust_backup" > "$secret_directory/trust-export.log" 2>&1; then
-  if ! grep -Fq 'No Trust Settings were found' "$secret_directory/trust-export.log"; then
-    print -u2 'Cannot snapshot hosted admin trust settings; refusing to change trust'
-    exit 65
-  fi
-  rm -f "$trust_backup"
+# A valid-identity listing evaluates system trust. Our approved self-signed
+# distribution uses an explicit certificate-root requirement instead. Verify
+# actual signing ability and pinned signature integrity without changing trust.
+probe="$secret_directory/signing-probe"
+cp /usr/bin/true "$probe"
+chmod u+w "$probe"
+probe_identifier=xyz.fi5h.blenny.ci-signing-probe
+probe_requirement="identifier \"$probe_identifier\" and certificate root = H\"${pinned_identity:l}\""
+probe_verified=false
+if codesign --force --sign "$pinned_identity" --keychain "$keychain" \
+    --identifier "$probe_identifier" "$probe" \
+    && codesign --verify --strict -R="$probe_requirement" "$probe"; then
+  probe_verified=true
 fi
-trust_changed=YES
-# This script is hosted-only. Trust is constrained to code signing, and the
-# runner's prior admin trust settings are restored on every exit path.
-sudo -n security add-trusted-cert -d -r trustRoot -p codeSign -k "$keychain" "$certificate"
-valid_identities_after=$(security find-identity -v -p codesigning "$keychain")
-valid_after=false
-[[ "$valid_identities_after" == *"$pinned_identity"* ]] && valid_after=true
-python3 - "$diagnostic_report" "$valid_after" <<'AFTER_TRUST'
-import json,sys
+python3 - "$diagnostic_report" "$probe_verified" <<'SIGNING_PROBE'
+import json, sys
 from pathlib import Path
-path=Path(sys.argv[1]); result=json.loads(path.read_text())
-result['validIdentityAfterTrust']=sys.argv[2]=='true'
-result['cause']=('unusable-identity-after-trust' if not result['validIdentityAfterTrust'] else
-                 'identity-already-valid' if result['validIdentityBeforeTrust'] else
-                 'missing-hosted-code-signing-trust')
-path.write_text(json.dumps(result,indent=2)+'\n')
-print('Valid identity after trust: '+sys.argv[2]+'; diagnosis: '+result['cause'])
-AFTER_TRUST
-[[ "$valid_after" == true ]] || { print -u2 'Pinned certificate has no valid usable code-signing identity after hosted trust setup'; exit 65; }
+path = Path(sys.argv[1]); result = json.loads(path.read_text())
+result['codeSigningProbeVerified'] = sys.argv[2] == 'true'
+result['systemTrustModified'] = False
+result['cause'] = ('identity-cannot-sign-pinned-probe' if not result['codeSigningProbeVerified'] else
+                  'identity-already-valid' if result['validIdentityBeforeTrust'] else
+                  'self-signed-identity-excluded-by-validity-filter')
+path.write_text(json.dumps(result, indent=2) + '\n')
+print('Pinned actual signing probe verified: ' + sys.argv[2] + '; diagnosis: ' + result['cause'])
+SIGNING_PROBE
+[[ "$probe_verified" == true ]] || { print -u2 'Pinned identity cannot sign and verify the isolated probe'; exit 65; }
 if [[ "$diagnostics_only" == true ]]; then
   print 'Signing diagnosis complete; no application build or publication was performed'
   exit 0
