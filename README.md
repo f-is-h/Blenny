@@ -1,132 +1,187 @@
-<img src="Assets/AppIcon/BlennyAppIcon.png" width="96" alt="Blenny icon">
+<p align="center">
+  <a href="https://blenny.fi5h.xyz">
+    <img src="docs/images/readme-website.webp" width="100%" alt="The Blenny website at blenny.fi5h.xyz: too much at the surface. A small orange fish peeks out of a rock on the sand, under a macOS-style menu bar.">
+  </a>
+</p>
 
-# Blenny
+<p align="center">
+  <b>A menu bar organizer for macOS 27 that never touches your pointer.</b><br>
+  A blenny is a small fish that lives in cracks in the reef and peeks out only when it has a reason to.<br>
+  Blenny does the same for your menu bar.
+</p>
 
-A native menu bar organizer built only for macOS 27. Keep everyday apps visible,
-reveal occasional ones when needed, and keep the rest hidden, without Blenny
-ever taking over your mouse.
+<p align="center">
+  <a href="https://blenny.fi5h.xyz"><b>Take the dive at blenny.fi5h.xyz →</b></a>
+</p>
 
-## Why Blenny
+<p align="center">
+  <a href="https://github.com/f-is-h/Blenny/releases/latest"><img alt="Download the latest release" src="https://img.shields.io/github/v/release/f-is-h/Blenny?label=download&amp;color=ff8b35&amp;style=for-the-badge"></a>
+  <a href="https://github.com/f-is-h/Blenny/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/f-is-h/Blenny/total?label=downloads&amp;color=e8601f&amp;style=for-the-badge"></a>
+  <a href="https://blenny.fi5h.xyz"><img alt="Website: blenny.fi5h.xyz" src="https://img.shields.io/badge/website-blenny.fi5h.xyz-1fa4cf?style=for-the-badge"></a>
+  <a href="https://github.com/sponsors/f-is-h?frequency=one-time&amp;metadata_project=blenny&amp;metadata_source=readme&amp;metadata_placement=badge&amp;metadata_lang=en"><img alt="Sponsor on GitHub" src="https://img.shields.io/badge/sponsor-%E2%9D%A4-ea4aaa?style=for-the-badge&amp;logo=githubsponsors&amp;logoColor=white"></a>
+  <br>
+  <img alt="macOS 27 only" src="https://img.shields.io/badge/macOS-27%20only-032a42?style=for-the-badge">
+  <img alt="Apple silicon" src="https://img.shields.io/badge/Apple-silicon-0b6f9f?style=for-the-badge">
+  <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-07426f?style=for-the-badge"></a>
+</p>
 
-- **Designed for macOS 27 only.** Blenny uses the menu bar ordering and
-  visibility mechanisms of macOS 27 directly. There is no compatibility layer
-  for older systems and no workaround carried over from them.
-- **Never moves your pointer or fakes a drag.** Blenny does not move the cursor,
-  synthesize clicks or simulate Command-drag. Your mouse stays yours while a
-  change is applied, and no icon is dragged across the screen on your behalf.
-- **Lightweight.** A native AppKit and SwiftUI app of about 6 MB, with Sparkle
-  as its only bundled dependency. It needs no Screen Recording permission and
-  runs no background polling loop; it acts only when you do or when the system
-  reports a relevant change.
-- **Fast.** Visibility and order are applied together as one reviewed change,
-  written through one serial writer instead of replaying moves icon by icon.
-- **Safe to try.** Edit a draft, review it, then Apply. Undo Changes reverses
-  the latest Apply, Stop releases restrictions immediately, and unexpected
-  system state fails closed instead of being retried in a loop.
+<p align="center">
+  <a href="https://blenny.fi5h.xyz"><b>Website</b></a> ·
+  <a href="#install">Install</a> ·
+  <a href="#organize">Organize</a> ·
+  <a href="#known-limitations">Known limitations</a> ·
+  <a href="#build-from-source">Build from source</a> ·
+  <a href="https://github.com/f-is-h/Blenny/releases">Release notes</a>
+</p>
 
-## Organize your menu bar
+<br>
 
-- **Visible** keeps an app available during management.
-- **Revealable** conceals it until you expand Blenny's bounded reveal session.
-- **Hidden** keeps it out of ordinary reveal sessions.
+## Every app gets a depth
 
-Drag icons in Organize to edit a draft, then choose **Apply**. You can also use
-an icon's context menu or accessibility actions. Icons belonging to one application
-move together. **Discard Changes** returns to your accepted configuration.
+Blenny gives every menu bar app one of three depths, and you decide which.
 
-**Undo Changes** reverses the latest successful Apply, including its visibility
-and ordering changes. Undo has one level. If another change invalidates the old
-Undo baseline, review **Replace Undo & Apply** before replacing that history.
+<img src="docs/images/readme-depths.webp" width="100%" alt="Three depths. Visible apps stay in the menu bar at the surface. Revealable apps are tucked into the reef until a reveal session brings them out. Hidden apps sink to the deep, out of the bar and out of every reveal.">
 
-**Stop** releases active visibility restrictions and retains accepted order.
-**Resume** revalidates and uses the saved configuration. **Quit** also releases
-restrictions; your saved Resume choice is retained for the next launch. macOS
-still controls its own overflow, so a Visible app may overflow when space is tight.
+Policy follows the owning application, so an app with several icons moves as
+one. Hidden apps keep running; they just stop asking for attention, and you can
+bring them back from Organize at any time. macOS still controls its own
+overflow, so a Visible app may overflow when space is tight.
 
-**Position Blenny Controls…** reviews placement of Blenny's arrow and fish at
-the Revealable/Visible boundary; **Undo Control Placement** restores their prior
-positions independently. Accepted placement persists through Stop and Quit.
+> **Field note · 3 – 20 m.** A blenny claims one hole and defends it. Most of
+> the time you only see its head, watching the water.
 
-## Install and grant access
+## Gentle with your Mac
 
-Requires **Apple silicon · macOS 27 only**. See the
-[acceptance matrix](docs/ACCEPTANCE_1.0.0.md) for tested environments.
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>⌖&nbsp; Hands off your pointer</h3>
+      Blenny never moves the cursor, clicks for you or fakes a Command‑drag.
+    </td>
+    <td width="33%" valign="top">
+      <h3>◐&nbsp; No Screen Recording</h3>
+      Blenny doesn't watch your screen, so it never asks for Screen Recording permission. No background polling either.
+    </td>
+    <td width="33%" valign="top">
+      <h3>⇣&nbsp; One careful writer</h3>
+      Every change runs through a single queue with a saved recovery record, one verification and at most one retry.
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>◼︎&nbsp; Fails closed</h3>
+      If the menu bar changed under it, Blenny stops and asks instead of writing again.
+    </td>
+    <td width="33%" valign="top">
+      <h3>↺&nbsp; Recoverable</h3>
+      Interrupted changes keep a recovery record, so Recover Changes can finish or restore them.
+    </td>
+    <td width="33%" valign="top">
+      <h3>✦&nbsp; Signed updates</h3>
+      Updates arrive through Sparkle, checked against Blenny's own key. Automatic checks stay off until you turn them on.
+    </td>
+  </tr>
+</table>
 
-**1.0.0 source finalized — local checks and owner acceptance completed;
-GitHub release pending.** Multi-display testing remains unverified. See the
-[release record](docs/RELEASE_1.0.0.md) for status.
+Blenny is a native AppKit and SwiftUI app of about 6 MB, built only for macOS 27, with Sparkle as its only bundled dependency.
 
-After publication, download the DMG from [GitHub Releases](https://github.com/f-is-h/Blenny/releases),
-open it, and drag Blenny into **Applications**. Quit an older copy before replacing
-it, eject the disk image, and launch the installed copy.
+## Organize
 
-Blenny uses a fixed self-signed certificate and is not notarized by Apple. If
-macOS blocks first launch, attempt to open it, then use **System Settings →
-Privacy & Security → Open Anyway** for Blenny. Follow
-[Apple's first-launch instructions](https://support.apple.com/102445).
-You do not need to disable Gatekeeper or SIP or install a trusted root certificate.
+<p align="center"><img src="docs/images/readme-organize.webp" width="80%" alt="The Organize window: Management on, with Visible, Revealable and Hidden rows of app icons, a Menu bar order section with Undo Changes, and Stop and Restore Visibility controls."></p>
+<p align="center"><sub>The Organize window as recreated on the website, populated with invented apps.</sub></p>
 
-Grant **Device Control** when Blenny requests it. If requested for ordering,
-choose the exact **Menu Bar Layout File** shown by Blenny's file picker.
-The selected file's security-scoped bookmark is saved privately. A stale bookmark
-is renewed once only if it still resolves to the correct file with a usable grant;
-invalid or revoked access requires choosing the file again. Screen Recording is
-not required.
+**Draft, then Apply.** Drag icons between Visible, Revealable and Hidden and
+into the order you want, or use an icon's context menu or accessibility
+actions. Nothing touches your menu bar until you choose **Apply**;
+**Discard Changes** returns to your accepted setup.
 
-Install managed applications in `/Applications` and relaunch them after moving
-them (see the application location limitation below).
+| Control | What it does |
+| --- | --- |
+| **Undo Changes** | Reverses the latest successful Apply, visibility and order together. Undo has one level; if another change invalidates its baseline, Blenny asks you to review **Replace Undo & Apply** first. |
+| **Stop** | Releases visibility restrictions immediately and keeps your order. |
+| **Resume** | Revalidates and reapplies your saved configuration. |
+| **Quit** | Releases restrictions and remembers your Resume choice for the next launch. |
+| **Position Blenny Controls…** | Places Blenny's arrow and fish at the boundary between Revealable and Visible. **Undo Control Placement** restores their previous positions on its own. |
+
+## Install
+
+1. Download `Blenny-<version>.dmg` from
+   [**GitHub Releases**](https://github.com/f-is-h/Blenny/releases/latest), open
+   it and drag Blenny into **Applications**. Quit any older copy first, then eject
+   the disk image and launch the installed copy.
+2. Grant **Device Control** when Blenny asks. If it asks for ordering access,
+   choose the exact **Menu Bar Layout File** shown in its file picker.
+   Screen Recording is not required.
+3. Keep the apps you want to manage in `/Applications`, and relaunch an app
+   after moving it there.
+
+<details>
+<summary><b>macOS says Blenny can't be opened?</b></summary>
+<br>
+
+Blenny uses a fixed self-signed certificate and is not notarized by Apple. Try
+to open it once, then choose **System Settings → Privacy & Security → Open
+Anyway** ([Apple's instructions](https://support.apple.com/102445)). You do not
+need to disable Gatekeeper or SIP, or install a trusted root certificate.
+
+</details>
+
+<details>
+<summary><b>Verifying the download</b></summary>
+<br>
+
+Each release ships `Blenny-<version>.dmg.sha256` next to the disk image, and a
+receipt recording the source commit, build and signature. Public binaries are
+built on GitHub from the reviewed, tagged source. Tested environments are
+listed in the [acceptance record](docs/ACCEPTANCE_1.0.0.md).
+
+</details>
 
 ## Known limitations
 
-Blenny 1.0.0 ships with the following known limitations. They come from how
-macOS 27 treats menu bar items while management is active, not from missing
-permissions. They are reviewed and accepted for this release rather than
-required fixes, and each has a workaround or a safe fallback. Please read them
-before you install.
+These come from how macOS 27 treats menu bar items while management is active,
+not from missing permissions. Each has a workaround or a safe fallback. Please
+read them before you install.
 
 | Area | What happens | Workaround |
 | --- | --- | --- |
-| Clock / Notification Center | Clicking the native Clock does not open Notification Center while management is active. | Swipe left from the right edge of the trackpad (owner-verified on an earlier tested build), or Stop management. |
-| Now Playing | Can disappear during active management, although Blenny writes no new settings for it. Blenny offers recovery only. | Stop management to release the restriction. |
-| Gaming, Wine and other unattributed extras | Menu extras whose host has no application Bundle ID may disappear during management. A Board entry does not prove the icon is physically visible. | Stop or Quit Blenny to release the restriction (the Gaming icon was observed returning after Quit). |
-| Application location | On the tested system, apps run from development folders, the Desktop or `~/Applications` can lose their menu bar identity and be hidden during management. Full Disk Access for Blenny does not fix this. | Install managed apps in `/Applications` and relaunch them after moving. |
+| Clock / Notification Center | Clicking the native Clock does not open Notification Center while management is active. | Swipe left from the right edge of the trackpad, or Stop management. |
+| Now Playing | Can disappear during management, although Blenny writes no new settings for it. Blenny offers recovery only. | Stop management to release the restriction. |
+| Gaming, Wine and other unattributed extras | Menu extras whose host has no application Bundle ID may disappear. An Organize entry does not prove the icon is physically visible. | Stop or Quit Blenny to release the restriction. |
+| Application location | Apps run from development folders, the Desktop or `~/Applications` can lose their menu bar identity and be hidden. Full Disk Access does not fix this. | Install managed apps in `/Applications` and relaunch them after moving. |
 | System item sorting | Siri, Time Machine and Control Center cannot be sorted yet. Clock and the native overflow arrow stay fixed. | Their visibility can still be managed where supported. |
 | Exact placement | Pixel positions and adjacency between Blenny's controls and the native overflow arrow are not guaranteed. | Preferred positions keep relative order. |
-| Platform and signing | Apple silicon and macOS 27 only. The app is self-signed and not notarized. | Use Open Anyway on first launch, as described above. |
+| Displays | Multiple displays have not been tested. | Report what you see in an issue. |
 
-### Help wanted
-
-These limitations are open problems, and we would love help solving them. If
-you know macOS 27's menu bar internals, or you find a route that works, please
-open an [issue](https://github.com/f-is-h/Blenny/issues) with your evidence or
-send a pull request. The
-[technical details](docs/KNOWN_LIMITATIONS.md) record what has already been
-tried and why it failed, so you can start from there instead of from zero.
-
-A fix must keep Blenny's core promises: no pointer movement, synthesized clicks
-or simulated drags, no private entitlements or SIP changes, no Screen Recording
-requirement, no polling loops, and complete restoration of any system state it
-changes. Automatically stopping and resuming management around a click is not
-an accepted fix, because it releases hiding restrictions.
+> [!TIP]
+> **Help wanted.** These are open problems. If you know macOS 27's menu bar
+> internals or find a route that works, open an
+> [issue](https://github.com/f-is-h/Blenny/issues) with your evidence or send a
+> pull request. [KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) records what
+> has already been tried and why it failed.
+>
+> A fix must keep Blenny's core promises: no pointer movement, synthesized clicks
+> or simulated drags, no private entitlements or SIP changes, no Screen Recording
+> requirement, no polling loops, and complete restoration of any system state it
+> changes. Automatically stopping and resuming management around a click is not
+> an accepted fix, because it releases hiding restrictions.
 
 ## Updates and recovery
 
-Use **Check for Updates** in Settings or Blenny's menu. Settings also lets you
-enable **Automatic checks**; it is off by default. Automatic checks do not enable
-unattended installation. Finish a running operation, resolve pending recovery,
-and apply or discard your draft before updating. Sparkle verifies each update
-against Blenny's independent EdDSA public key and persistent application identity.
+Use **Check for Updates** in Settings or Blenny's menu. **Automatic checks** can
+be enabled in Settings and are off by default; they never install unattended.
+Finish any running operation, resolve pending recovery, and apply or discard
+your draft before updating. Every update is verified against Blenny's own
+EdDSA key.
 
-When Blenny reports an unfinished change, use **Recover Changes** and retain
-its recovery data until completion. Unexpected target drift fails closed rather
-than repeatedly writing system settings. Do not delete recovery files to dismiss
-an error. [Recovery and uninstall guidance](docs/RECOVERY_AND_UNINSTALL.md) explains
-which changes Stop, Undo and recovery can restore.
+> [!IMPORTANT]
+> If Blenny reports an unfinished change, use **Recover Changes** and keep its
+> recovery data until it completes. Do not delete recovery files to dismiss an
+> error. [Recovery and uninstall](docs/RECOVERY_AND_UNINSTALL.md) explains what
+> Stop, Undo and recovery restore, how to handle lost access, and how to remove
+> Blenny cleanly.
 
-## Build and contribute
-
-Public binaries, starting with 1.0.0, are built on GitHub from reviewed source.
-See the [release procedure](docs/DISTRIBUTION.md) and [release notes](docs/RELEASE_NOTES.md).
+## Build from source
 
 Use Xcode 27 and the macOS 27 SDK explicitly:
 
@@ -135,26 +190,34 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/verify-local.
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/build-app.sh debug
 ```
 
-Debug and ordinary Release share the daily product capabilities. Debug adds
+Debug and ordinary Release share the daily product capabilities; Debug adds
 development menus and bounded probes. Distribution builds require the owner's
-existing pinned certificate; a contributor can explicitly request a development
-ad-hoc build using `BLENNY_CODE_SIGN_IDENTITY=- BLENNY_ALLOW_ADHOC=YES`.
-That build is not eligible for distribution or authenticated release updates.
+pinned certificate. Contributors can request a development ad-hoc build with
+`BLENNY_CODE_SIGN_IDENTITY=- BLENNY_ALLOW_ADHOC=YES`; it is not eligible for
+distribution or authenticated updates.
 
-See [contributing](CONTRIBUTING.md), [product contract](PROJECT_BRIEF.md),
-[release procedure](docs/DISTRIBUTION.md), [roadmap](docs/ROADMAP.md) and
-[archived research](Research/README.md). Report reproducible problems through
-[GitHub Issues](https://github.com/f-is-h/Blenny/issues); omit raw menu bar
-inventories, credentials and personal paths.
+More reading: [contributing](CONTRIBUTING.md), [product contract](PROJECT_BRIEF.md),
+[roadmap](docs/ROADMAP.md), [release procedure](docs/DISTRIBUTION.md),
+[changelog](CHANGELOG.md) and [archived research](Research/README.md). Report
+reproducible problems through [GitHub Issues](https://github.com/f-is-h/Blenny/issues),
+leaving out raw menu bar inventories, credentials and personal paths.
 
-## Support Blenny
+<br>
 
-If Blenny is useful to you, you can support its development through
-<a href="https://github.com/sponsors/f-is-h?frequency=one-time&amp;metadata_project=blenny&amp;metadata_source=readme&amp;metadata_placement=badge&amp;metadata_lang=en">GitHub Sponsors</a>
-or [Ko-fi](https://ko-fi.com/blenny).
+<p align="center">
+  <img src="Assets/AppIcon/BlennyAppIcon.png" width="88" alt="Blenny app icon">
+</p>
 
-## License
+<p align="center">
+  <a href="https://blenny.fi5h.xyz"><b>blenny.fi5h.xyz</b></a>
+</p>
 
-Blenny is licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE) and
-[third-party notices](THIRD_PARTY_NOTICES.txt). Sparkle is the bundled update
-dependency.
+<p align="center">
+  If Blenny keeps your menu bar a little quieter, you can support it through<br>
+  <a href="https://github.com/sponsors/f-is-h?frequency=one-time&amp;metadata_project=blenny&amp;metadata_source=readme&amp;metadata_placement=badge&amp;metadata_lang=en">GitHub Sponsors</a>
+  or <a href="https://ko-fi.com/blenny">Ko-fi</a>.
+</p>
+
+<p align="center">
+  <sub>Licensed under <a href="LICENSE">Apache-2.0</a> · <a href="NOTICE">NOTICE</a> · <a href="THIRD_PARTY_NOTICES.txt">Third-party notices</a> · Sparkle is the bundled update dependency.</sub>
+</p>
