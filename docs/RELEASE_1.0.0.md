@@ -3,19 +3,19 @@
 Status: **Published on 2026-10-01 from annotated tag `v1.0.0` (source
 `a7c004a`) by GitHub Actions run 36823493882, Build 1701.** Anonymous asset and
 feed verification passed; see `docs/public-release.json`. Multi-display coverage
-remains unverified. Updated 2026-10-02.
+remains unverified. Updated 2026-10-03.
 
-## Release page story, 2026-10-02
+## Release page story, 2026-10-02 to 2026-10-03
 
 After publication the owner approved a reviewed story in `docs/releases/1.0.0.md`,
 rendered by `release_tools.py` into the 1.0.0 section of `docs/RELEASE_NOTES.md`
-on main, to replace the GitHub Release body. Replacing the body is a separate,
-explicitly authorized step (`gh release edit v1.0.0 --notes-file` with the output
-of `release_tools.py notes --version 1.0.0`); until it runs, the body still shows
-the sealed generated notes. The tag, DMG, checksum, receipt, `release-notes.md`
-asset and appcast entry stay unchanged and carry the originally sealed notes
+on main. On 2026-10-03, with the owner's explicit authorization, the GitHub
+Release body was replaced with that section (`gh release edit v1.0.0
+--notes-file` using `release_tools.py notes --version 1.0.0`) and verified
+identical afterwards. The tag, DMG, checksum, receipt, `release-notes.md` asset
+and appcast entry are unchanged and carry the originally sealed notes
 (`releaseNotesSHA256` `9f8b2c01…`), which `docs/release-acceptance.json` also
-records. Once replaced, the Release body intentionally differs from the sealed
+records. The Release body therefore intentionally differs from the sealed
 `release-notes.md` asset. Do not rerun the 1.0.0 publish transaction: its body
 check compares against the tagged notes and would stop. 1.0.0 is the first
 release, so no updater shows its notes.
