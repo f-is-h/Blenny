@@ -143,11 +143,35 @@ def release_records(root=ROOT):
     return sorted(records, key=lambda r: version_tuple(r["version"]), reverse=True)
 
 
+STORY_LIMIT = 20000
+
+
+def release_story(version, root=ROOT):
+    """Optional reviewed narrative that replaces the generated user list for one version."""
+    path = root / f"docs/releases/{version}.md"
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8").strip()
+    if not text or len(text) > STORY_LIMIT or any(ord(c) < 32 and c != "\n" for c in text):
+        raise ValueError(f"Invalid release story length/control character: {path.name}")
+    if re.search(r"(?m)^#{1,2}(?:\s|$)", text):
+        raise ValueError("Release story headings must start at level three; the generator owns version sections")
+    if "<" in text or "![" in text or re.search(r"(?m)^\s*(?:```|~~~)", text):
+        raise ValueError("Release stories are Markdown text only: no HTML, autolinks, images or fenced code")
+    if any(not url.startswith("https://") for url in re.findall(r"\]\(([^)\s]*)", text)):
+        raise ValueError("Release story links must be absolute HTTPS URLs")
+    return text
+
+
 def render_documents(root=ROOT):
     changes = fragments(root)
     records = release_records(root)
     if not records:
         raise ValueError("No release records")
+    versions = {r["version"] for r in records}
+    for path in (root / "docs/releases").glob("*.md"):
+        if path.stem not in versions:
+            raise ValueError(f"Release story has no release record: {path.name}")
     outputs = {}
     for filename, user_facing in [("CHANGELOG.md", False), ("docs/RELEASE_NOTES.md", True)]:
         title = "Blenny release notes" if user_facing else "Blenny changelog"
@@ -157,6 +181,11 @@ def render_documents(root=ROOT):
             if not selected:
                 raise ValueError(f"No fragments for {record['version']}")
             lines += [f"## {record['version']} — {record['date']}", ""]
+            story = release_story(record["version"], root) if user_facing else None
+            if story is not None:
+                changelog = f"https://github.com/{REPOSITORY}/blob/v{record['version']}/CHANGELOG.md"
+                lines += [story, "", f"Technical changes are listed in the [changelog]({changelog}).", ""]
+                continue
             if record["firstPublicRelease"]:
                 lines += ["First public release. Earlier 0.x versions were private engineering milestones.", ""]
             for category, heading in CATEGORIES.items():

@@ -37,7 +37,9 @@ Also perform checks that require judgment:
 - Run Xcode 27 Debug and Release tests and app builds. Verify the deployment target, SDK, architecture, version, signatures, and the absence of diagnostic/test entry points from Release output; verify accepted backend capabilities remain present.
 - Run the fragment/generator, publication-transaction and workflow checks. Verify
   `docs/release-acceptance.json` covers the current product/configuration digest
-  and reviewed version notes. Record missing observations, never infer a pass.
+  and reviewed version notes. When `docs/releases/X.Y.Z.md` exists, review that
+  story against the fragments and verified behavior, including requirements and
+  known limits. Record missing observations, never infer a pass.
 - Check hosted runner feasibility, signing-secret setup, repository visibility,
   branch/tag protections and the automatic feed write before the first production
   trigger. A locally linted workflow is not hosted execution evidence.

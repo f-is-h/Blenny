@@ -20,6 +20,8 @@ Run `python3 scripts/release_tools.py prepare --version X.Y.Z --date YYYY-MM-DD
 canonical marketing version and regenerate CHANGELOG.md and docs/RELEASE_NOTES.md.
 Use `render` for corrections and `check`/`coverage` to validate. Generated output
 is deterministic; review fragments rather than editing the two outputs separately.
+A version may add a hand-written `docs/releases/X.Y.Z.md` story that replaces the
+generated user list in its release notes; see docs/DISTRIBUTION.md for its rules.
 The first public 1.0.0 notes cover the complete product, not the private 0.13 delta.
 
 Normal CI has no signing secrets or publication rights. The preparation workflow

@@ -66,6 +66,32 @@ class ReleaseToolsTests(unittest.TestCase):
         tools.write_json(self.root / "docs/changes/other-change.json", {**self.fragment, "id": "other-change", "user": None})
         self.assertNotIn("### Fixed", tools.render_documents(self.root)["docs/RELEASE_NOTES.md"])
 
+    def test_release_story_replaces_only_the_user_list(self):
+        story_path = self.root / "docs/releases/1.0.0.md"
+        story_path.write_text("### A short story\n\nRead [more](https://example.org).\n")
+        result = tools.render_documents(self.root)
+        notes = result["docs/RELEASE_NOTES.md"]
+        self.assertIn("### A short story", notes)
+        self.assertIn("blob/v1.0.0/CHANGELOG.md", notes)
+        self.assertNotIn("- Safe text", notes)
+        self.assertNotIn("First public release", notes)
+        self.assertIn(r"A \< B", result["CHANGELOG.md"])
+        self.render()
+        tools.validate_documents(self.root)
+        self.assertTrue(tools.version_notes("1.0.0", self.root).startswith("## 1.0.0 — 2026-09-30\n\n### A short story"))
+
+    def test_malformed_or_orphan_release_story_is_rejected(self):
+        story_path = self.root / "docs/releases/1.0.0.md"
+        for text in ["", "## Section\n", "# Title\n", "Text <b>bold</b>\n", "![image](https://example.org/a.png)\n",
+                     "[link](http://example.org)\n", "```\ncode\n```\n", "[link](relative.md)\n", "tab\there\n", "x" * (tools.STORY_LIMIT + 1)]:
+            story_path.write_text(text)
+            with self.assertRaises(ValueError, msg=repr(text[:20])):
+                tools.render_documents(self.root)
+        story_path.unlink()
+        (self.root / "docs/releases/9.9.9.md").write_text("### Orphan\n")
+        with self.assertRaisesRegex(ValueError, "no release record"):
+            tools.render_documents(self.root)
+
     def test_previous_releases_are_preserved(self):
         self.render()
         previous = tools.version_notes("1.0.0", self.root)

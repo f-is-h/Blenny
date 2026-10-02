@@ -1,0 +1,7 @@
+{
+  "id": "release-story",
+  "version": "unreleased",
+  "category": "internal",
+  "technical": "Render an optional reviewed docs/releases/X.Y.Z.md story in place of the generated user list, link the tagged changelog, and reject HTML, images, non-HTTPS links, version-level headings and orphan stories.",
+  "commits": []
+}

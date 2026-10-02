@@ -128,6 +128,16 @@ requires `Release-Note: none (reason)`. No model-service credential is required.
 GitHub and Sparkle extract the same reviewed version section. Initial 1.0.0 covers
 the entire first public product, including its requirements and accepted limits.
 
+An optional `docs/releases/X.Y.Z.md` release story replaces the generated user
+list in that version's release notes; CHANGELOG.md always keeps the complete
+technical list, and the generator appends a link to the tagged changelog. Write
+the story from the version's fragments and verified behavior, and cover its
+requirements and known limits. It is plain Markdown: headings start at level
+three, links are absolute HTTPS URLs, and HTML, images and fenced code are not
+accepted. The same text appears on the GitHub Release and in Sparkle's update
+dialog, so avoid wording that only fits one of them. Changing the story changes
+the reviewed notes digest required by development acceptance.
+
 ## Pre-trigger setup and acceptance
 
 Record actual owner observations in docs/release-acceptance.json. Only after
