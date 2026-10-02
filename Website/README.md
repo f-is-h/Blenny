@@ -22,6 +22,7 @@ Website/
 │       ├── css/site.css
 │       ├── img/           App icon derivatives; scene/ holds the layered hero and reef art
 │       └── js/            ES modules, one per concern (see below)
+├── art/                   Production sources for the illustrated art (not deployed)
 ├── tools/scene_assets.py  Clean generated PNGs and locate transparent holes
 ├── tools/social-card.mjs  Render the social preview card with headless Chrome
 └── prototypes/            Direction sketches kept for reference; not deployed
@@ -96,7 +97,8 @@ JavaScript modules in `site/assets/js/`:
 ## Scene art
 
 The hero rock, the cave interior, the three Blenny frames and the reef ledge are
-generated illustrations based on the app icon. Masters live in `Design/WebSite/`;
+generated illustrations based on the app icon. Masters live in `art/` (see
+`art/README.md`);
 the site ships WebP derivatives in `site/assets/img/scene/`, at two widths each.
 
 Each scene is layered back to front: cave interior, Blenny (or landed Reef
@@ -114,7 +116,7 @@ To replace a piece of art:
    heap only (no rock, moss, barnacles or thin lit rims), at 1200 px wide, so
    the caustics fall on the heap and nowhere else.
 4. App icons for the invented apps live in `site/assets/img/apps/` as 192 px
-   WebP, cropped to the rounded square (masters in `Design/WebSite/icons/`).
+   WebP, cropped to the rounded square (masters in `art/icons/`).
    Their file names match `icon` in `site/assets/js/glyphs.js`.
 5. Blenny frames must stay pixel-aligned and keep plain white eyes; if the eyes
    move, update `EYES` in `site/assets/js/sprite-blenny.js`.
@@ -123,11 +125,11 @@ To replace a piece of art:
 
 `site/assets/img/social-card.jpg` (1200 × 630) is the page's `og:image`; the
 GitHub repository uses a 1280 × 640 JPEG of the same card (under 1 MB). The
-card is the illustrated background from `Design/WebSite/social/` with the
+card is the illustrated background from `art/social/` with the
 site's own type and menu bar laid over it:
 
 ```sh
-node tools/social-card.mjs ../Design/WebSite/social/social-background-v1.png OUT_DIR
+node tools/social-card.mjs art/social/social-background-v1.png OUT_DIR
 ```
 
 It lays the card out natively at 1280 × 640 and 1200 × 630, so neither size is
