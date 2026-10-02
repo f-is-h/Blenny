@@ -1,0 +1,5 @@
+# Everyone is welcome, search engines and AI crawlers alike.
+User-agent: *
+Allow: /
+
+Sitemap: https://blenny.fi5h.xyz/sitemap.xml

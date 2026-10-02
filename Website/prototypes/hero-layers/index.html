@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hero layer test</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: linear-gradient(180deg, #8fe3ef, #2aa7cc 70%, #1b86b3); font: 12px ui-monospace, monospace; color: #04304a; }
+  .scene { position: relative; width: min(900px, 80vw); aspect-ratio: 2387 / 1373; }
+  .layer { position: absolute; will-change: transform; }
+  /* Hole in the cropped rock: x 33.2%-73.9%, y 38.6%-86.8%. */
+  .cave { left: 30%; top: 35%; width: 47%; height: 56%; object-fit: cover; object-position: 50% 70%; }
+  /* The pocket only clips the fish below the rock when it ducks; the rock itself hides everything outside the hole. */
+  .pocket { left: 31%; top: 10%; width: 45%; height: 80%; overflow: hidden; }
+  .sprite-blenny { position: absolute; left: 9%; width: 82%; bottom: 0%; aspect-ratio: 1677 / 1145; transition: transform 0.5s cubic-bezier(.34,1.56,.64,1); }
+  /* Darkness of the cave on the lower body; it lifts when the fish comes out. */
+  .sprite-blenny .shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(3, 14, 26, 0.72), rgba(3, 14, 26, 0.3) 24%, rgba(3, 14, 26, 0) 46%); -webkit-mask-size: 100% 100%; mask-size: 100% 100%; transition: opacity 0.5s; pointer-events: none; }
+  .pocket.is-out .sprite-blenny { transform: translateY(-22%); }
+  .pocket.is-out .shade { opacity: 0.35; }
+  .sprite-blenny .frame, .sprite-blenny .pupils { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .sprite-blenny .pupils { z-index: 1; }
+  .sprite-blenny .pupil { transition: transform 140ms ease-out; }
+  .sprite-blenny:not(.is-ready) .pupils, .sprite-blenny.is-blinking .pupils { visibility: hidden; }
+  .sprite-blenny.is-excited .pupil { transition-duration: 60ms; }
+  .pocket.is-shy .sprite-blenny { transform: translateY(80%); transition-duration: 0.22s; }
+  /* Shadow the overhang throws onto whatever sits in the hole; sized to the hole only. */
+  .hole-shade { left: 31%; top: 36%; width: 45%; height: 54%; pointer-events: none; background: linear-gradient(180deg, rgba(2, 14, 26, 0.5), rgba(2, 14, 26, 0) 38%), radial-gradient(120% 70% at 50% 100%, transparent 55%, rgba(2, 14, 26, 0.4)); }
+  .rock { inset: 0; width: 100%; height: 100%; }
+  .sand { position: absolute; left: -20%; right: -20%; bottom: -6%; height: 18%; border-radius: 50% 50% 0 0 / 100% 100% 0 0; background: linear-gradient(180deg, #f3e2b8, #e6cd97); }
+  p { position: fixed; bottom: 16px; left: 16px; margin: 0; }
+</style>
+</head>
+<body>
+<div class="scene" id="scene">
+  <img class="layer cave" id="cave" src="cave.webp" alt="">
+  <div class="layer pocket" id="pocket"></div>
+  <div class="layer hole-shade" id="holeShade"></div>
+  <img class="layer rock" id="rock" src="rock.webp" alt="">
+  <div class="sand"></div>
+</div>
+<p>Layers: cave interior → blenny (clipped to the pocket) → rock with a transparent hole. Move the pointer for parallax; get close to make it duck; click and it pops out.</p>
+<script type="module">
+  import { createSpriteBlenny } from './sprite-blenny.js';
+  const fish = createSpriteBlenny({ src: { base: 'blenny-base.webp', blink: 'blenny-blink.webp', excited: 'blenny-excited.webp' } });
+  const pocket = document.getElementById('pocket');
+  pocket.append(fish.el);
+  let outTimer = 0;
+  pocket.parentElement.addEventListener('click', () => {
+    fish.excite(1400);
+    pocket.classList.add('is-out');
+    clearTimeout(outTimer);
+    outTimer = setTimeout(() => pocket.classList.remove('is-out'), 1600);
+  });
+  const layers = [[document.getElementById('cave'), 14], [pocket, 6], [document.getElementById('holeShade'), 6], [document.getElementById('rock'), 2]];
+  addEventListener('pointermove', (e) => {
+    const nx = e.clientX / innerWidth - 0.5, ny = e.clientY / innerHeight - 0.5;
+    layers.forEach(([el, k]) => { el.style.transform = `translate(${-nx * k}px, ${-ny * k * 0.6}px)`; });
+    fish.lookAt(e.clientX, e.clientY);
+    const r = pocket.getBoundingClientRect();
+    pocket.classList.toggle('is-shy', Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)) < r.width * 0.3);
+  });
+  window.fish = fish;
+</script>
+</body>
+</html>

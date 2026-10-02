@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Blenny · Free, open-source menu bar organizer for macOS 27</title>
+<meta name="description" content="Free, open-source menu bar organizer for macOS 27. Keep everyday apps visible, reveal occasional ones with a click, and hide the rest. No Screen Recording.">
+<link rel="canonical" href="https://blenny.fi5h.xyz/">
+<meta name="theme-color" content="#7fdcef">
+<meta name="application-name" content="Blenny">
+<meta name="apple-mobile-web-app-title" content="Blenny">
+<meta name="author" content="Blenny contributors">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Blenny">
+<meta property="og:title" content="Blenny · Free menu bar organizer for macOS 27">
+<meta property="og:locale" content="en_US">
+<meta property="og:description" content="Surface, Reef and Deep: a small, native way to calm a crowded menu bar.">
+<meta property="og:url" content="https://blenny.fi5h.xyz/">
+<meta property="og:image" content="https://blenny.fi5h.xyz/assets/img/social-card.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Blenny, a menu bar organizer only for macOS 27: an orange blenny fish peeking out of a rock cave under sunlit water, beside the words Too much at the surface.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://blenny.fi5h.xyz/assets/img/social-card.jpg">
+<link rel="icon" type="image/png" sizes="64x64" href="assets/img/favicon-64.png">
+<link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="alternate" type="text/plain" title="Blenny for AI assistants and LLMs" href="/llms.txt">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&amp;family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..600,0..100,0..1;1,9..144,300..600,0..100,0..1&amp;family=Martian+Mono:wdth,wght@87.5..112.5,400..500&amp;display=swap">
+<link rel="stylesheet" href="assets/css/site.css">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "WebSite",
+   "@id": "https://blenny.fi5h.xyz/#website",
+   "url": "https://blenny.fi5h.xyz/",
+   "name": "Blenny",
+   "inLanguage": "en"
+  },
+  {
+   "@type": "SoftwareApplication",
+   "@id": "https://blenny.fi5h.xyz/#app",
+   "name": "Blenny",
+   "description": "A free, open-source menu bar organizer for macOS 27. Blenny manages menu bar items per app in three areas: Visible (always shown), Revealable (shown when you expand) and Hidden (stays hidden). It never moves the pointer, never synthesises clicks and never needs Screen Recording.",
+   "applicationCategory": "UtilitiesApplication",
+   "operatingSystem": "macOS 27 or later",
+   "processorRequirements": "Apple silicon",
+   "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+   },
+   "license": "https://www.apache.org/licenses/LICENSE-2.0",
+   "isAccessibleForFree": true,
+   "downloadUrl": "https://github.com/f-is-h/Blenny/releases/latest",
+   "installUrl": "https://github.com/f-is-h/Blenny/releases/latest",
+   "image": "https://blenny.fi5h.xyz/assets/img/blenny-icon-512.png",
+   "url": "https://blenny.fi5h.xyz/",
+   "sameAs": [
+    "https://github.com/f-is-h/Blenny"
+   ],
+   "author": {
+    "@type": "Person",
+    "name": "f-is-h",
+    "url": "https://github.com/f-is-h"
+   }
+  },
+  {
+   "@type": "FAQPage",
+   "@id": "https://blenny.fi5h.xyz/#faq",
+   "mainEntity": [
+    {
+     "@type": "Question",
+     "name": "Is Blenny free?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes. Blenny is free and open source under the Apache-2.0 license. If it earns a place in your menu bar, you can support it through GitHub Sponsors or Ko‑fi."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Why is it called Blenny?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Blennies are small reef fish that live in holes and crevices and poke their heads out to watch the world. That is exactly how a Reef app should behave."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Which Macs does it support?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "macOS 27 or later on Apple silicon. There is no macOS 26 or Intel version."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "What's the difference between Reef and Deep?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Reef apps come up whenever you click the fish for a reveal session. Deep apps never do; they stay out of the menu bar until you move them to another area."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How do updates work?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Use Check for Updates in Settings or in Blenny's menu. Automatic checks are off by default, and turning them on still doesn't install anything unattended."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How do I uninstall it?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Finish or recover any running change, choose Stop, turn off Open Blenny at Login and quit. Then move Blenny to the Trash. The recovery and uninstall guide covers the details."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Something went wrong. Now what?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Choose Stop to release Blenny's restrictions right away. If Blenny reports an unfinished change, use Recover Changes and keep its recovery data until it completes. Reproducible problems belong in GitHub Issues."
+     }
+    }
+   ]
+  }
+ ]
+}
+</script>
+<script type="module" src="assets/js/main.js"></script>
+</head>
+<body class="is-bright">
+<a class="skip" href="#main">Skip to content</a>
+<canvas id="sea" aria-hidden="true"></canvas>
+<canvas id="life" aria-hidden="true"></canvas>
+
+<header class="menubar" id="menubar">
+  <div class="appmenu">
+    <button class="app" id="appButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="appMenu">
+      <span class="mark" data-mark></span>Blenny
+    </button>
+    <div class="dropdown" id="appMenu" hidden>
+      <a href="#surface">Surface</a>
+      <a href="#reef">Reef</a>
+      <a href="#organize">Organize</a>
+      <a href="#deep">Deep</a>
+      <hr>
+      <a href="#safety">Safety</a>
+      <a href="#install">Install</a>
+      <a href="#faq">Questions</a>
+      <hr>
+      <a href="https://github.com/f-is-h/Blenny/releases/latest" data-download>Download…</a>
+      <a href="https://github.com/f-is-h/Blenny">Source on GitHub</a>
+      <a href="https://github.com/sponsors/f-is-h?metadata_project=blenny&amp;metadata_source=website">Sponsor Blenny</a>
+    </div>
+  </div>
+  <nav class="menus" aria-label="Sections">
+    <a href="#surface">Features</a>
+    <a href="#organize">How it works</a>
+    <a href="#safety">Safety</a>
+    <a href="#install">Install</a>
+    <a href="#faq">FAQ</a>
+  </nav>
+  <div class="tray concealed" id="concealed" aria-hidden="true"></div>
+  <button class="chev" id="revealArrow" type="button" aria-label="Expand Revealable items" title="Expand Revealable items"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3.5 3.5L8 8l-4.5 4.5M8.5 3.5L13 8l-4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  <button class="fish" id="fish" type="button" aria-label="Reveal the Reef" title="Reveal the Reef"><span data-mark></span></button>
+  <div class="tray" id="tray" aria-hidden="true"></div>
+  <div class="soundmenu">
+    <button class="sound" id="sound" type="button" aria-pressed="false" aria-label="Sound off. Turn sound on" title="Sound"><svg viewBox="0 0 20 16" width="19" height="15" aria-hidden="true"><path fill="currentColor" d="M2 5.6h2.6L8.4 2.3c.5-.4 1.2-.1 1.2.6v10.2c0 .7-.7 1-1.2.6L4.6 10.4H2c-.6 0-1-.4-1-1V6.6c0-.6.4-1 1-1z"/><g class="waves" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12.2 5.5a3.6 3.6 0 0 1 0 5"/><path d="M14.6 3.4a6.6 6.6 0 0 1 0 9.2"/></g><g class="mute" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12.4 5.8l4.4 4.4M16.8 5.8l-4.4 4.4"/></g></svg></button>
+    <div class="sound-hint" id="soundHint" role="status" hidden><b>The dive sounds better.</b><span>Turn on sound for the water, the deep and a few small surprises.</span></div>
+  </div>
+  <span class="clock" id="clock" aria-hidden="true"></span>
+</header>
+
+<div id="fallers" aria-hidden="true"></div>
+
+<aside class="gauge" aria-hidden="true">
+  <div class="readout">
+    <div><span class="num" id="depth">0.0</span><span class="unit"> m</span></div>
+    <div class="zone-name" id="zone">SURFACE</div>
+  </div>
+  <div class="rail" id="rail"><span class="range"><b>Blenny range</b></span><span class="bob" id="bob"></span></div>
+</aside>
+
+<main id="main">
+  <section id="top" class="zone hero bright" data-zone="SURFACE" data-from="0" data-to="0">
+    <div class="hero-copy">
+      <p class="eyebrow reveal">Menu bar organizer · <b>Only for macOS 27</b></p>
+      <h1 class="split">Too much at the <em>surface.</em></h1>
+      <p class="lede reveal">Every little app wants a spot in your menu bar. Blenny gives each one a depth instead: keep the essentials at the Surface, tuck the occasional ones into the Reef, and let the rest sink into the Deep.</p>
+      <div class="actions reveal">
+        <a class="btn primary magnetic" href="https://github.com/f-is-h/Blenny/releases/latest" data-download>
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+          Download for macOS
+        </a>
+        <a class="btn ghost magnetic" href="https://github.com/f-is-h/Blenny">View source</a>
+      </div>
+      <p class="meta reveal">Free &amp; open source · Apache-2.0 · Apple silicon · macOS 27</p>
+    </div>
+    <div class="perch" id="perch" aria-hidden="true">
+      <img class="perch-cave" src="assets/img/scene/cave.webp" alt="" width="1100" height="900">
+      <div class="perch-pocket" id="perchPocket"></div>
+      <div class="perch-shade"></div>
+      <img class="perch-rock" src="assets/img/scene/rock-hero-1200.webp" srcset="assets/img/scene/rock-hero-1200.webp 1200w, assets/img/scene/rock-hero-2400.webp 2400w" sizes="(max-width: 820px) 92vw, 40vw" alt="" width="2400" height="1502" fetchpriority="high">
+      <canvas class="perch-light" id="perchLight"></canvas>
+    </div>
+    <div class="hero-sand" id="heroSand" aria-hidden="true"><img class="sand-img" src="assets/img/scene/sand-2000.webp" srcset="assets/img/scene/sand-2000.webp 2000w, assets/img/scene/sand-4000.webp 4000w" sizes="160vw" alt="" width="4000" height="1100"><canvas class="sand-light" id="sandLight"></canvas></div>
+    <a class="scroll-cue" href="#surface"><span>Scroll to go under</span><i></i></a>
+  </section>
+
+  <section id="surface" class="zone bright" data-zone="SURFACE · ALWAYS VISIBLE" data-from="0" data-to="3">
+    <div class="depthmark" aria-hidden="true">0 m</div>
+    <p class="eyebrow reveal"><b>Surface</b> · 0 – 3 m · Always visible</p>
+    <h2 class="split">What you use stays in <em>the sun.</em></h2>
+    <p class="lede reveal">Surface apps keep their place in the menu bar while Blenny manages it. Wi‑Fi, battery, the one timer you actually check: they stay in the light, right where your eyes expect them.</p>
+    <ul class="points reveal">
+      <li><b>Whole apps, not stray icons.</b> Blenny works per application, so every icon an app owns moves together.</li>
+      <li><b>Order included.</b> Arrange the Surface the way you read it, and keep that order after Stop or Quit.</li>
+      <li><b>Native and small.</b> A Swift app for macOS 27 that sits quietly as one little fish in your menu bar.</li>
+    </ul>
+    <aside class="note reveal"><b>Field note · 0 – 3 m</b>Many blennies live right at the tide line. Some hop between tide pools and can breathe air for a while.</aside>
+  </section>
+
+  <section id="reef" class="zone" data-zone="REEF · SHOWN ON REVEAL" data-from="3" data-to="20">
+    <div class="depthmark" aria-hidden="true">12 m</div>
+    <p class="eyebrow reveal"><b>Reef</b> · 3 – 20 m · Shown on reveal</p>
+    <h2 class="split">The rest moves into <em>the reef.</em></h2>
+    <p class="lede reveal">Reef apps stay out of the way until you click the fish. Then they come up for a short reveal session and slip back when you are done. Like a blenny in its crevice: head out, watching, never in the way.</p>
+    <button class="btn glass magnetic reveal" id="tryReveal" type="button">
+      <span data-mark></span> Try a reveal
+    </button>
+    <div class="ledge" id="ledge" aria-hidden="true">
+      <div class="kelp" id="kelp"></div>
+      <div class="kelp kelp-small" id="kelpSmall"></div>
+      <img class="ledge-rock" src="assets/img/scene/reef-ledge-1600.webp" srcset="assets/img/scene/reef-ledge-1600.webp 1600w, assets/img/scene/reef-ledge-3200.webp 3200w" sizes="(max-width: 820px) 100vw, 1180px" alt="" width="3200" height="1450" loading="lazy">
+    </div>
+    <aside class="note reveal"><b>Field note · 3 – 20 m</b>A blenny claims one hole and defends it. Most of the time you only see its head, watching the water.</aside>
+  </section>
+
+  <section id="organize" class="zone" data-zone="SLOPE · ORGANIZE" data-from="20" data-to="35">
+    <div class="depthmark" aria-hidden="true">28 m</div>
+    <p class="eyebrow reveal">Slope · 20 – 35 m · Organize</p>
+    <h2 class="split">Drag. Apply. <em>Undo</em> if you change your mind.</h2>
+    <div class="organize-grid">
+      <ul class="points reveal">
+        <li><b>Draft first.</b> Drag icons between Surface, Reef and Deep. Nothing touches your menu bar until you choose Apply.</li>
+        <li><b>One-step Undo.</b> Undo Changes reverses the last Apply, visibility and order together.</li>
+        <li><b>Stop means stop.</b> Stop or Quit releases Blenny's restrictions at once. Resume picks your saved setup back up.</li>
+        <li><b>No mouse required.</b> Every icon has context-menu and accessibility actions for moving it.</li>
+      </ul>
+      <div class="window reveal" id="board" aria-label="Interactive Organize demo"></div>
+    </div>
+    <aside class="note reveal"><b>Field note · 20 – 35 m</b>Blenny diversity drops with depth. Past about 30 m you rarely meet one; the light turns blue and the reef thins out.</aside>
+  </section>
+
+  <section id="deep" class="zone" data-zone="DEEP · ALWAYS HIDDEN" data-from="35" data-to="45">
+    <div class="depthmark" aria-hidden="true">40 m</div>
+    <p class="eyebrow reveal"><b>Deep</b> · below 35 m · Always hidden</p>
+    <h2 class="split">Some things belong below <em>the reef.</em></h2>
+    <p class="lede reveal">Deep apps stay out of the menu bar and out of every reveal session. They keep running and stay yours; they just stop asking for attention. Move them back up whenever you like.</p>
+    <div class="bed" id="bed"></div>
+  </section>
+
+  <section id="safety" class="zone" data-zone="DEEP · SAFETY" data-from="45" data-to="50">
+    <p class="eyebrow reveal">48 m · Built to be careful</p>
+    <h2 class="split">Gentle with <em>your Mac.</em></h2>
+    <div class="cards">
+      <article class="card reveal"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5l12 7.2-5.3 1.3 3.1 5.6-2.3 1.3-3.1-5.6-4 3.6z"/><path d="M3 21L21 3" stroke-width="1.6" opacity=".55"/></svg></span><h3>Hands off your pointer</h3><p>Blenny never moves the cursor, clicks for you or fakes a Command‑drag.</p></article>
+      <article class="card reveal"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/><path d="M7.5 10.5s1.8-2.8 4.5-2.8 4.5 2.8 4.5 2.8-1.8 2.8-4.5 2.8-4.5-2.8-4.5-2.8z"/><path d="M6.5 14.5l11-8"/></svg></span><h3>No Screen Recording</h3><p>Blenny doesn't watch your screen, so it never asks for Screen Recording permission.</p></article>
+      <article class="card reveal"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><path d="M14.5 4.5l3 3L9 16H6v-3z"/><path d="M12.5 6.5l3 3"/></svg></span><h3>One careful writer</h3><p>Every change runs through a single queue with a saved recovery record, one verification and at most one retry.</p></article>
+      <article class="card reveal"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15.5" r="1.3" fill="currentColor" stroke="none"/></svg></span><h3>Fails closed</h3><p>If the menu bar changed under it, Blenny stops and asks instead of writing again.</p></article>
+      <article class="card reveal"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4v4.5h4.5"/><path d="M12 8.5V12l2.5 2"/></svg></span><h3>Recoverable</h3><p>Interrupted changes keep a recovery record, so Recover Changes can finish or restore them.</p></article>
+      <article class="card reveal"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.1 1.6 2.6-.2.9 2.5 2.2 1.4-.8 2.5.8 2.5-2.2 1.4-.9 2.5-2.6-.2L12 21l-2.1-1.6-2.6.2-.9-2.5L4.2 15.7l.8-2.5-.8-2.5 2.2-1.4.9-2.5 2.6.2z"/><path d="M8.8 12.2l2.2 2.2 4.2-4.4"/></svg></span><h3>Signed updates</h3><p>Updates arrive through Sparkle, checked against Blenny's own key. Automatic checks stay off until you turn them on.</p></article>
+    </div>
+  </section>
+
+  <section id="limits" class="zone" data-zone="DEEP · LIMITS" data-from="50" data-to="54">
+    <p class="eyebrow reveal">52 m · Honest charts</p>
+    <h2 class="split">What Blenny can't reach <em>yet.</em></h2>
+    <ul class="limits reveal">
+      <li><b>Clock and Notification Center.</b> While Blenny manages the menu bar, clicking the clock can't open Notification Center. Swipe left from the right edge of the trackpad instead.</li>
+      <li><b>Now Playing, Gaming and Wine.</b> These system extras may disappear during management. Stop brings them back.</li>
+      <li><b>Some system items stay put.</b> Siri, Time Machine and Control Center can't be sorted yet. Clock and the overflow arrow are fixed.</li>
+      <li><b>macOS has the last word.</b> On a narrow screen the system's own overflow can still tuck away a Surface app.</li>
+      <li><b>Tested ground.</b> Verified on macOS 27.0 (26A428) with Apple silicon. Other builds and display setups haven't been verified.</li>
+    </ul>
+  </section>
+
+  <section id="install" class="zone" data-zone="DEEP · INSTALL" data-from="54" data-to="57">
+    <p class="eyebrow reveal">56 m · Install</p>
+    <h2 class="split">Four steps <em>to the reef.</em></h2>
+    <div class="install-grid">
+      <ol class="steps reveal">
+        <li><b>Download</b> the disk image from <a href="https://github.com/f-is-h/Blenny/releases/latest">GitHub Releases</a>.</li>
+        <li><b>Drag Blenny into Applications</b>, eject the disk image and open the installed copy.</li>
+        <li><b>Allow the first launch.</b> Blenny is self-signed and not notarized by Apple. If macOS blocks it, choose Open Anyway in System Settings › Privacy &amp; Security (<a href="https://support.apple.com/102445">Apple's guide</a>).</li>
+        <li><b>Grant Device Control</b> when Blenny asks. That's it: no Screen Recording, no SIP changes.</li>
+      </ol>
+      <div class="dmg reveal" aria-hidden="true">
+        <div class="dmg-bar"><i></i><i></i><i></i><span>Blenny</span></div>
+        <div class="dmg-body">
+          <figure class="dmg-app"><img src="assets/img/blenny-icon-512.png" alt="" width="96" height="96"><figcaption>Blenny</figcaption></figure>
+          <svg class="dmg-arrow" viewBox="0 0 120 40"><path d="M4 20h100m-14-12l14 12-14 12"/></svg>
+          <figure class="dmg-folder"><svg viewBox="0 0 96 80"><path d="M6 14a6 6 0 0 1 6-6h22l8 8h42a6 6 0 0 1 6 6v46a6 6 0 0 1-6 6H12a6 6 0 0 1-6-6z"/><path class="tab" d="M6 26h84"/><path class="a" d="M36 58l12-24 12 24m-19-8h14"/></svg><figcaption>Applications</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" class="zone" data-zone="DEEP · QUESTIONS" data-from="57" data-to="59">
+    <p class="eyebrow reveal">58 m · Questions</p>
+    <h2 class="split">Before you <em>dive in.</em></h2>
+    <div class="faq reveal">
+      <details><summary>Is Blenny free?</summary><p>Yes. Blenny is free and open source under the Apache-2.0 license. If it earns a place in your menu bar, you can support it through GitHub Sponsors or Ko‑fi.</p></details>
+      <details><summary>Why is it called Blenny?</summary><p>Blennies are small reef fish that live in holes and crevices and poke their heads out to watch the world. That is exactly how a Reef app should behave.</p></details>
+      <details><summary>Which Macs does it support?</summary><p>macOS 27 or later on Apple silicon. There is no macOS 26 or Intel version.</p></details>
+      <details><summary>What's the difference between Reef and Deep?</summary><p>Reef apps come up whenever you click the fish for a reveal session. Deep apps never do; they stay out of the menu bar until you move them to another area.</p></details>
+      <details><summary>How do updates work?</summary><p>Use Check for Updates in Settings or in Blenny's menu. Automatic checks are off by default, and turning them on still doesn't install anything unattended.</p></details>
+      <details><summary>How do I uninstall it?</summary><p>Finish or recover any running change, choose Stop, turn off Open Blenny at Login and quit. Then move Blenny to the Trash. The <a href="https://github.com/f-is-h/Blenny/blob/main/docs/RECOVERY_AND_UNINSTALL.md">recovery and uninstall guide</a> covers the details.</p></details>
+      <details><summary>Something went wrong. Now what?</summary><p>Choose Stop to release Blenny's restrictions right away. If Blenny reports an unfinished change, use Recover Changes and keep its recovery data until it completes. Reproducible problems belong in <a href="https://github.com/f-is-h/Blenny/issues">GitHub Issues</a>.</p></details>
+    </div>
+  </section>
+
+  <section id="ascent" class="zone ascent" data-zone="DEEP" data-from="59" data-to="60">
+    <div class="breath">
+      <p class="eyebrow reveal">60 m · Time to go back up</p>
+      <a class="bubble-cta magnetic" href="https://github.com/f-is-h/Blenny/releases/latest" data-download>
+        <span>Download Blenny</span><small>macOS 27 · Apple silicon</small>
+      </a>
+      <div class="support reveal">
+        <a href="https://github.com/sponsors/f-is-h?metadata_project=blenny&amp;metadata_source=website">GitHub Sponsors</a>
+        <a href="https://ko-fi.com/blenny">Ko‑fi</a>
+        <a href="https://github.com/f-is-h/Blenny">Source</a>
+      </div>
+      <button class="up" id="up" type="button">↑ Back to the surface</button>
+    </div>
+    <footer class="footer">
+      <span>© Blenny contributors · Apache-2.0</span>
+      <span>macOS is a trademark of Apple Inc. Blenny is not affiliated with Apple.</span>
+    </footer>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<noscript><style>.split, .reveal { opacity: 1 !important; transform: none !important; filter: none !important; }</style></noscript>
+</body>
+</html>

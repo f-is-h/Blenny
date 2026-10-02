@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blenny Website Directions</title>
+<link rel="icon" href="shared/blenny-icon-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #04111d; --ink: #eaf6ff; --muted: rgba(234,246,255,0.6); --line: rgba(234,246,255,0.12); --accent: #ff8b35; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 400 14px/1.55 "Geist Mono", ui-monospace, monospace; }
+  header { padding: 56px clamp(16px, 5vw, 64px) 32px; display: flex; gap: 24px; align-items: end; flex-wrap: wrap; }
+  header img { width: 88px; height: 88px; border-radius: 22px; box-shadow: 0 20px 60px rgba(255,139,53,0.25); }
+  h1 { margin: 0; font: 400 clamp(44px, 7vw, 96px)/0.9 "Instrument Serif", serif; letter-spacing: -0.02em; }
+  h1 em { color: var(--accent); }
+  header p { margin: 0; max-width: 42em; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 560px), 1fr)); gap: 20px; padding: 0 clamp(16px, 5vw, 64px) 64px; }
+  a.card { display: block; color: inherit; text-decoration: none; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; background: rgba(255,255,255,0.02); transition: border-color 0.2s, transform 0.2s; }
+  a.card:hover { border-color: var(--accent); transform: translateY(-3px); }
+  .frame { position: relative; aspect-ratio: 16 / 10; overflow: hidden; background: #000; }
+  .frame iframe { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; border: 0; transform-origin: 0 0; pointer-events: none; }
+  .meta { padding: 18px 20px 20px; display: grid; gap: 6px; }
+  .meta .n { color: var(--accent); letter-spacing: 0.2em; font-size: 11px; }
+  .meta h2 { margin: 0; font: 400 34px/1 "Instrument Serif", serif; }
+  .meta p { margin: 0; color: var(--muted); }
+  .meta .try { color: var(--ink); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <img src="shared/blenny-icon-512.png" alt="">
+  <div>
+    <h1>Six ways <em>in.</em></h1>
+    <p>Rough website directions for Blenny. Each one is a mood sketch, not a finished page. Open one, play with it, and pick the direction worth building.</p>
+  </div>
+</header>
+<main class="grid">
+  <a class="card" href="descent/">
+    <div class="frame"><iframe src="descent/" loading="lazy" tabindex="-1" title="Descent preview"></iframe></div>
+    <div class="meta"><span class="n">01 · SCROLL STORY</span><h2>Descent</h2>
+      <p>The page is a dive. Icons fall out of a crowded menu bar and settle at their depth: sunlight, twilight, midnight. A live depth gauge and a WebGL sea.</p>
+      <span class="try">Try: scroll down, then click the fish in the menu bar.</span></div>
+  </a>
+  <a class="card" href="descent-b/">
+    <div class="frame"><iframe src="descent-b/" loading="lazy" tabindex="-1" title="Descent B preview"></iframe></div>
+    <div class="meta"><span class="n">01B · SCROLL STORY · REVISED</span><h2>Descent B</h2>
+      <p>Descent rescaled to where blennies really live: a 0–60 m gauge with the blenny's range marked. Surface, Reef and Deep map to Visible, Revealable and Hidden; revealable icons move into crevices like blennies do.</p>
+      <span class="try">Try: scroll down, then click the fish in the menu bar.</span></div>
+  </a>
+  <a class="card" href="night-dive/">
+    <div class="frame"><iframe src="night-dive/" loading="lazy" tabindex="-1" title="Night Dive preview"></iframe></div>
+    <div class="meta"><span class="n">02 · INTERACTIVE HERO</span><h2>Night Dive</h2>
+      <p>Pitch dark. Your cursor is a torch lighting a wet reef in real time. Hidden things only show their eyeshine, and they hide from your light.</p>
+      <span class="try">Try: move around, then press and hold.</span></div>
+  </a>
+  <a class="card" href="shallows/">
+    <div class="frame"><iframe src="shallows/" loading="lazy" tabindex="-1" title="Shallows preview"></iframe></div>
+    <div class="meta"><span class="n">02B · INTERACTIVE HERO · REVISED</span><h2>Shallows</h2>
+      <p>Night Dive moved up to 12 m, where blennies actually live. Sunlit water and sand, a reef wall in shade, and a shaft of sunlight you steer, with caustics and real self-shadowing. Shade-loving eyes duck when the sun finds them.</p>
+      <span class="try">Try: steer the sunlight, then press and hold.</span></div>
+  </a>
+  <a class="card" href="waterline/">
+    <div class="frame"><iframe src="waterline/" loading="lazy" tabindex="-1" title="Waterline preview"></iframe></div>
+    <div class="meta"><span class="n">03 · PHYSICS TOY</span><h2>Waterline</h2>
+      <p>The menu bar floats on the sea. Drag icons off it and drop them on the reef or into the deep. The product explains itself by being played with.</p>
+      <span class="try">Try: drag icons from the bar, then tap the fish.</span></div>
+  </a>
+  <a class="card" href="sonar/">
+    <div class="frame"><iframe src="sonar/" loading="lazy" tabindex="-1" title="Sonar preview"></iframe></div>
+    <div class="meta"><span class="n">04 · WILDCARD</span><h2>Sonar</h2>
+      <p>A phosphor-green submarine console. Your menu bar as sonar contacts on three depth rings, with a typed contact log and a real ping.</p>
+      <span class="try">Try: press P (sound on) and R.</span></div>
+  </a>
+</main>
+<script>
+  // Scale the 1440x900 previews to their card width.
+  const fit = () => document.querySelectorAll('.frame').forEach((f) => {
+    f.querySelector('iframe').style.transform = `scale(${f.clientWidth / 1440})`;
+  });
+  addEventListener('resize', fit); fit();
+</script>
+</body>
+</html>

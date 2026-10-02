@@ -1,0 +1,13 @@
+{
+  // Blenny website: a static site served by Cloudflare Workers static assets.
+  // Deploy from this directory with `npx wrangler deploy`.
+  "name": "blenny-website",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./site",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash"
+  },
+  // The app's Website menu item already opens this address.
+  "routes": [{ "pattern": "blenny.fi5h.xyz", "custom_domain": true }]
+}

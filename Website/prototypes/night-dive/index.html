@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blenny · Night Dive</title>
+<link rel="icon" href="../shared/blenny-icon-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --x: 50vw; --y: 50vh; --r: 300px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #010203; overflow: hidden; }
+  body { color: #fff; font-family: "Bricolage Grotesque", system-ui, sans-serif; cursor: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #rock { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+
+  .scene { position: fixed; inset: 0; }
+  .hole { position: absolute; border-radius: 50%; overflow: hidden; transform: translate(-50%, -50%); }
+  .critter {
+    position: absolute; left: 50%; top: 50%; width: 58%; aspect-ratio: 1; display: grid; place-items: center;
+    border-radius: 36%; color: #0d1a24;
+    background: radial-gradient(circle at 35% 30%, #fff, #d8ecf3 60%, #9fc3d3);
+    box-shadow: 0 -6px 18px rgba(0,0,0,0.5), inset 0 -6px 10px rgba(0,40,70,0.25);
+    transform: translate(-50%, 120%) rotate(-12deg);
+    transition: transform 0.55s cubic-bezier(.34,1.56,.64,1);
+  }
+  .critter svg { width: 56%; height: 56%; }
+  .is-revealing .critter { transform: translate(-50%, -40%) rotate(0deg); }
+  .is-revealing .critter:nth-child(odd) { transition-delay: 60ms; }
+  .hole.blenny-hole { overflow: hidden; }
+  .blenny-hole .blenny-character { position: absolute; left: 7%; width: 86%; bottom: -22%; transition: transform 0.6s cubic-bezier(.34,1.56,.64,1); }
+  .is-revealing .blenny-hole .blenny-character { transform: translateY(-10%); }
+
+  .headline {
+    position: absolute; left: 6vw; top: 36vh; max-width: 46vw; margin: 0;
+    font-weight: 800; font-size: clamp(48px, 7.4vw, 124px); line-height: 0.88; letter-spacing: -0.045em;
+    color: #f3efe6;
+  }
+  .headline span { display: block; font-weight: 300; letter-spacing: -0.03em; color: #ffb36b; }
+
+  /* Everything above is only readable inside the beam. */
+  #dark {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(circle at var(--x) var(--y), rgba(1,2,4,0) 0, rgba(1,2,4,0.05) calc(var(--r) * 0.45), rgba(1,2,4,0.94) var(--r));
+  }
+
+  /* Eyeshine of hidden things stays visible in the dark. */
+  .eyes { position: absolute; transform: translate(-50%, -50%); display: flex; gap: 10px; transition: opacity 0.25s; }
+  .eyes i { width: 7px; height: 5px; border-radius: 50%; background: #d8fff0; box-shadow: 0 0 8px 2px rgba(150,255,220,0.8), 0 0 24px 6px rgba(80,255,200,0.25); animation: eyeblink 5s infinite; }
+  .eyes.is-shy { opacity: 0; }
+  @keyframes eyeblink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+
+  .menubar {
+    position: fixed; top: 0; left: 0; right: 0; height: 28px; display: flex; align-items: center; gap: 16px; padding: 0 14px;
+    font: 500 13px -apple-system, BlinkMacSystemFont, sans-serif; color: rgba(255,255,255,0.86);
+    background: rgba(20, 26, 34, 0.55); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255,255,255,0.06); z-index: 5;
+  }
+  .menubar b { font-weight: 700; }
+  .menubar .tray { margin-left: auto; display: flex; align-items: center; height: 100%; }
+  .menubar .slot { width: 28px; height: 100%; display: grid; place-items: center; overflow: hidden; transition: width 0.45s cubic-bezier(.34,1.56,.64,1), opacity 0.3s; }
+  .menubar .slot.is-tucked { width: 0; opacity: 0; }
+  .menubar .fish { color: #ffb36b; }
+  .menubar .clock { white-space: nowrap; }
+
+  .hud {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 5;
+    font: 500 12px "JetBrains Mono", monospace; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.55);
+    display: flex; gap: 22px; align-items: center; white-space: nowrap;
+  }
+  .hud b { color: #ffb36b; font-weight: 500; }
+  .hud .count { color: #d8fff0; }
+  .cursor {
+    position: fixed; left: 0; top: 0; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+    border: 1.5px solid rgba(255,255,255,0.65); z-index: 6; pointer-events: none;
+  }
+  @media (max-width: 760px) {
+    .headline { top: 44vh; max-width: 88vw; }
+    .menubar .menus, .menubar .clock { display: none; }
+    .hud { font-size: 10px; gap: 12px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="rock"></canvas>
+<div class="scene" id="scene">
+  <h1 class="headline">Things hide<br>in the dark.<span>Let them.</span></h1>
+</div>
+<div id="dark"></div>
+<div class="scene" id="eyes"></div>
+
+<header class="menubar">
+  <b>Blenny</b><span class="menus">File&nbsp;&nbsp;&nbsp; Edit&nbsp;&nbsp;&nbsp; View</span>
+  <div class="tray" id="tray"></div>
+  <div class="slot fish" id="fish"></div>
+  <span class="clock" id="clock"></span>
+</header>
+<div class="hud"><span>Move your light</span><span>·</span><span><b>Hold</b> to call the reef</span><span>·</span><span class="count" id="count"></span></div>
+<div class="cursor" id="cursor"></div>
+
+<script src="../shared/icons.js"></script>
+<script src="../shared/blenny.js"></script>
+<script>
+(() => {
+  const { glyphs, svg, blennyGlyph, clock } = window.MenuGlyphs;
+  const $ = (s) => document.querySelector(s);
+  const scene = $('#scene'), eyesLayer = $('#eyes'), tray = $('#tray');
+  $('#fish').innerHTML = blennyGlyph;
+  const tick = () => { $('#clock').textContent = clock(); };
+  tick(); setInterval(tick, 20000);
+
+  // Hole layout in viewport fractions; radius as a fraction of the short side.
+  const BLENNY_HOLE = { x: 0.66, y: 0.6, r: 0.17 };
+  const REVEAL_HOLES = [
+    { x: 0.2, y: 0.19, r: 0.06 }, { x: 0.41, y: 0.15, r: 0.052 }, { x: 0.8, y: 0.2, r: 0.07 },
+    { x: 0.92, y: 0.6, r: 0.06 }, { x: 0.38, y: 0.84, r: 0.068 }, { x: 0.12, y: 0.82, r: 0.055 },
+    { x: 0.55, y: 0.33, r: 0.045 }, { x: 0.86, y: 0.88, r: 0.05 },
+  ];
+  const HIDDEN_HOLES = [
+    { x: 0.06, y: 0.1, r: 0.042 }, { x: 0.965, y: 0.36, r: 0.042 }, { x: 0.63, y: 0.94, r: 0.045 },
+    { x: 0.47, y: 0.7, r: 0.038 }, { x: 0.52, y: 0.07, r: 0.036 },
+  ];
+
+  const revealGlyphs = glyphs.filter((g) => g.intent === 'revealable');
+  const hiddenGlyphs = glyphs.filter((g) => g.intent === 'hidden');
+  const holes = [];
+
+  function makeHole(spec, kind, glyph) {
+    const el = document.createElement('div');
+    el.className = 'hole';
+    if (kind === 'reveal') el.innerHTML = `<div class="critter">${svg(glyph, 24, 2.2)}</div>`;
+    scene.append(el);
+    const h = { spec, kind, el, glyph };
+    if (kind === 'hidden') {
+      h.eyes = document.createElement('div');
+      h.eyes.className = 'eyes';
+      h.eyes.innerHTML = '<i></i><i></i>';
+      h.eyes.firstChild.style.animationDelay = h.eyes.lastChild.style.animationDelay = `${-Math.random() * 5}s`;
+      eyesLayer.append(h.eyes);
+    }
+    holes.push(h);
+    return h;
+  }
+  const bh = makeHole(BLENNY_HOLE, 'blenny');
+  bh.el.classList.add('blenny-hole');
+  const blenny = Blenny.create({ reach: 11 });
+  bh.el.append(blenny.el);
+  REVEAL_HOLES.forEach((s, i) => makeHole(s, 'reveal', revealGlyphs[i % revealGlyphs.length]));
+  HIDDEN_HOLES.forEach((s, i) => makeHole(s, 'hidden', hiddenGlyphs[i % hiddenGlyphs.length]));
+
+  // Menu bar: visible items plus tucked slots for the revealable ones.
+  glyphs.filter((g) => g.intent !== 'hidden').forEach((g) => {
+    const s = document.createElement('div');
+    s.className = 'slot' + (g.intent === 'revealable' ? ' is-tucked rev' : '');
+    s.innerHTML = svg(g);
+    tray.append(s);
+  });
+  $('#count').textContent = `${revealGlyphs.length} revealable · ${hiddenGlyphs.length} hidden`;
+
+  // --- WebGL rock wall with a real point light.
+  const canvas = $('#rock');
+  const gl = canvas.getContext('webgl', { antialias: false });
+  const MAX_HOLES = 16;
+  const frag = `
+    precision highp float;
+    uniform vec2 uRes; uniform vec3 uLight; uniform float uTime; uniform float uBeam; uniform float uDpr;
+    uniform vec4 uHoles[${MAX_HOLES}];
+    float hash(vec2 p) { p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+    float noise(vec2 p) {
+      vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + 1.0), u.x), u.y);
+    }
+    float fbm(vec2 p) {
+      float v = 0.0; float a = 0.5; mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+      for (int i = 0; i < 5; i++) { v += a * noise(p); p = m * p; a *= 0.5; }
+      return v;
+    }
+    float holeMask(vec2 p) {
+      float m = 1.0;
+      for (int i = 0; i < ${MAX_HOLES}; i++) {
+        vec4 H = uHoles[i];
+        if (H.z <= 0.0) continue;
+        m = min(m, length(p - H.xy) / H.z);
+      }
+      return m;
+    }
+    float height(vec2 p) {
+      float h = fbm(p * 0.0055) * 1.3 + fbm(p * 0.028 + 7.0) * 0.32 - abs(noise(p * 0.011) - 0.5) * 0.7;
+      float d = holeMask(p);
+      h -= smoothstep(1.12, 0.6, d) * 1.8;
+      h += exp(-pow((d - 1.18) * 3.2, 2.0)) * 0.32;
+      return h;
+    }
+    void main() {
+      vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uDpr;
+      float e = 1.5; float K = 70.0;
+      float hc = height(p);
+      float hx = height(p + vec2(e, 0.0)) - height(p - vec2(e, 0.0));
+      float hy = height(p + vec2(0.0, e)) - height(p - vec2(0.0, e));
+      vec3 n = normalize(vec3(-hx * K, -hy * K, 2.0 * e));
+      vec3 pos = vec3(p, hc * K);
+      vec3 toL = uLight - pos;
+      float dist = length(toL.xy);
+      vec3 L = normalize(toL);
+      float cone = smoothstep(uBeam, uBeam * 0.12, dist);
+      float diff = max(dot(n, L), 0.0);
+      vec3 R = reflect(-L, n);
+      float wet = smoothstep(0.45, 0.8, noise(p * 0.02));
+      float spec = pow(max(R.z, 0.0), 28.0) * (0.25 + 0.9 * wet);
+      float tone = fbm(p * 0.009 + 3.0);
+      vec3 albedo = mix(vec3(0.32, 0.35, 0.40), vec3(0.46, 0.39, 0.34), tone);
+      float algae = smoothstep(0.58, 0.72, fbm(p * 0.006 + 11.0));
+      albedo = mix(albedo, vec3(0.22, 0.40, 0.27), algae * 0.8);
+      float coral = smoothstep(0.66, 0.74, fbm(p * 0.016 + 29.0));
+      albedo = mix(albedo, vec3(0.86, 0.42, 0.52), coral * 0.75);
+      float d = holeMask(p);
+      float occl = smoothstep(0.55, 1.15, d);
+      vec3 torch = vec3(1.0, 0.93, 0.8);
+      vec3 col = albedo * torch * diff * cone * 1.35 * occl + torch * spec * cone * occl * 0.6;
+      col += albedo * vec3(0.012, 0.022, 0.04) * (0.6 + n.y * 0.4);
+      // Plankton drifting through the beam.
+      vec2 g = p / 34.0 + vec2(uTime * 0.07, -uTime * 0.11);
+      vec2 cell = floor(g); vec2 f = fract(g) - 0.5;
+      vec2 o = vec2(hash(cell + 1.3), hash(cell + 9.1)) - 0.5;
+      float speck = smoothstep(0.07, 0.0, length(f - o * 0.8)) * step(0.7, hash(cell));
+      col += vec3(0.9, 0.95, 1.0) * speck * cone * 0.7;
+      col += torch * cone * 0.035;
+      gl_FragColor = vec4(col, 1.0);
+    }`;
+  const vert = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+  function sh(type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, vert));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, frag));
+  gl.bindAttribLocation(prog, 0, 'p');
+  gl.linkProgram(prog); gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const U = (n) => gl.getUniformLocation(prog, n);
+  const uRes = U('uRes'), uLight = U('uLight'), uTime = U('uTime'), uBeam = U('uBeam'), uDpr = U('uDpr'), uHoles = U('uHoles');
+
+  let W = 0, H = 0, dpr = 1, beam = 300;
+  function layout() {
+    W = innerWidth; H = innerHeight;
+    dpr = Math.min(devicePixelRatio || 1, 1.25);
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    const portrait = H > W;
+    const unit = Math.min(W, H);
+    beam = Math.max(220, unit * 0.36);
+    document.documentElement.style.setProperty('--r', `${beam}px`);
+    const data = new Float32Array(MAX_HOLES * 4);
+    holes.forEach((h, i) => {
+      const sx = portrait ? h.spec.y : h.spec.x;
+      const sy = portrait ? h.spec.x : h.spec.y;
+      const r = h.spec.r * unit * (portrait ? 1.3 : 1);
+      h.cx = sx * W; h.cy = sy * H; h.r = r;
+      h.el.style.cssText = `left:${h.cx}px;top:${h.cy}px;width:${r * 2}px;height:${r * 2}px`;
+      if (h.eyes) h.eyes.style.cssText = `left:${h.cx}px;top:${h.cy + r * 0.1}px`;
+      data.set([h.cx, h.cy, r * (h.kind === 'blenny' ? 1.02 : 1), 0], i * 4);
+    });
+    gl.uniform4fv(uHoles, data);
+  }
+  addEventListener('resize', layout);
+  layout();
+
+  // --- Torch: follows the pointer, wanders when idle.
+  let tx = W * 0.5, ty = H * 0.45, lx = tx, ly = ty, lastMove = -1e9;
+  const cursor = $('#cursor');
+  addEventListener('pointermove', (e) => { tx = e.clientX; ty = e.clientY; lastMove = performance.now(); });
+
+  let revealing = false;
+  function setReveal(on) {
+    if (revealing === on) return;
+    revealing = on;
+    document.body.classList.toggle('is-revealing', on);
+    tray.querySelectorAll('.rev').forEach((s) => s.classList.toggle('is-tucked', !on));
+    if (on) blenny.excite(1400);
+  }
+  addEventListener('pointerdown', (e) => { tx = e.clientX; ty = e.clientY; lastMove = performance.now(); setReveal(true); });
+  addEventListener('pointerup', () => setReveal(false));
+  addEventListener('pointercancel', () => setReveal(false));
+  addEventListener('keydown', (e) => { if (e.code === 'Space') setReveal(true); });
+  addEventListener('keyup', (e) => { if (e.code === 'Space') setReveal(false); });
+
+  function frame(now) {
+    const t = now / 1000;
+    if (now - lastMove > 2600) {
+      tx = W * (0.5 + 0.34 * Math.sin(t * 0.37)) ;
+      ty = H * (0.5 + 0.3 * Math.sin(t * 0.53 + 1.2));
+    }
+    lx += (tx - lx) * 0.12; ly += (ty - ly) * 0.12;
+    const jitter = Math.sin(t * 13) * 0.6 + Math.sin(t * 7.3) * 0.8;
+    const bx = lx + jitter, by = ly - jitter * 0.5;
+    document.documentElement.style.setProperty('--x', `${bx}px`);
+    document.documentElement.style.setProperty('--y', `${by}px`);
+    cursor.style.transform = `translate(${tx}px, ${ty}px)`;
+    cursor.style.opacity = now - lastMove > 2600 ? 0 : 1;
+
+    gl.uniform2f(uRes, canvas.width, canvas.height);
+    gl.uniform3f(uLight, bx, by, 240);
+    gl.uniform1f(uTime, t);
+    gl.uniform1f(uBeam, beam * (revealing ? 1.25 : 1));
+    gl.uniform1f(uDpr, dpr);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Hidden eyes are shy of the light.
+    holes.forEach((h) => {
+      if (!h.eyes) return;
+      const near = Math.hypot(h.cx - bx, h.cy - by) < beam * 0.55;
+      if (near !== h.shy) { h.shy = near; h.eyes.classList.toggle('is-shy', near); }
+    });
+    blenny.lookAt(bx, by);
+    requestAnimationFrame(frame);
+  }
+  (document.fonts?.ready ?? Promise.resolve()).then(() => requestAnimationFrame(frame));
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blenny · Shallows</title>
+<link rel="icon" href="../shared/blenny-icon-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #1d7fa8; overflow: hidden; }
+  body { color: #06283d; font-family: "Bricolage Grotesque", system-ui, sans-serif; cursor: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #reef, #life { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  #life { pointer-events: none; }
+
+  .scene { position: fixed; inset: 0; pointer-events: none; }
+  .hole { position: absolute; border-radius: 50%; overflow: hidden; transform: translate(-50%, -50%); filter: brightness(var(--lit, 0.7)) saturate(var(--sat, 0.8)); }
+  .critter {
+    position: absolute; left: 50%; top: 50%; width: 58%; aspect-ratio: 1; display: grid; place-items: center;
+    border-radius: 36%; color: #0d2a3c;
+    background: radial-gradient(circle at 35% 30%, #fff, #e4f3f8 60%, #b4d6e3);
+    box-shadow: 0 -6px 18px rgba(0,20,40,0.45), inset 0 -6px 10px rgba(0,40,70,0.2);
+    transform: translate(-50%, 120%) rotate(-12deg);
+    transition: transform 0.55s cubic-bezier(.34,1.56,.64,1);
+  }
+  .critter svg { width: 56%; height: 56%; }
+  .is-calling .critter { transform: translate(-50%, -40%) rotate(0deg); }
+  .blenny-hole .blenny-character { position: absolute; left: 7%; width: 86%; bottom: -6%; transition: transform 0.6s cubic-bezier(.34,1.56,.64,1); }
+  .is-calling .blenny-hole .blenny-character { transform: translateY(-14%); }
+
+  /* Shade-loving eyes: they duck when sunlight lands on them. */
+  .peeper { position: absolute; left: 50%; top: 56%; display: flex; gap: 5px; transform: translate(-50%, -50%); transition: transform 0.28s cubic-bezier(.5,0,.3,1.4), opacity 0.2s; }
+  .peeper i { position: relative; width: 11px; height: 13px; border-radius: 50%; background: #fbf7ee; animation: peepblink 5.5s infinite; }
+  .peeper i::after { content: ""; position: absolute; left: 3px; top: 4px; width: 5px; height: 6px; border-radius: 50%; background: #1d0e08; transform: translate(var(--px, 0px), var(--py, 0px)); }
+  .peeper.is-shy { transform: translate(-50%, 60%) scaleY(0.3); opacity: 0; }
+  @keyframes peepblink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
+
+  .headline {
+    position: fixed; left: 5vw; top: 11vh; margin: 0; pointer-events: none;
+    font-weight: 800; font-size: clamp(44px, 6.4vw, 108px); line-height: 0.9; letter-spacing: -0.045em; color: #04263b;
+  }
+  .headline span { display: block; font-weight: 300; letter-spacing: -0.03em; color: #fff; text-shadow: 0 2px 30px rgba(0, 60, 100, 0.35); }
+  .sub { position: fixed; left: 5vw; top: calc(11vh + clamp(44px, 6.4vw, 108px) * 1.95); max-width: 25em; margin: 0; font: 400 14px/1.55 "JetBrains Mono", monospace; color: rgba(4, 38, 59, 0.78); pointer-events: none; }
+
+  .menubar {
+    position: fixed; top: 0; left: 0; right: 0; height: 28px; display: flex; align-items: center; gap: 16px; padding: 0 14px;
+    font: 500 13px -apple-system, BlinkMacSystemFont, sans-serif; color: #0b1d2a; z-index: 5;
+    background: rgba(248, 253, 255, 0.55); backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.4);
+  }
+  .menubar b { font-weight: 700; }
+  .menubar .tray { margin-left: auto; display: flex; align-items: center; height: 100%; }
+  .menubar .slot { width: 28px; height: 100%; display: grid; place-items: center; overflow: hidden; transition: width 0.45s cubic-bezier(.34,1.56,.64,1), opacity 0.3s; }
+  .menubar .slot.is-tucked { width: 0; opacity: 0; }
+  .menubar .fish { color: #e8601f; }
+  .menubar .clock { white-space: nowrap; }
+
+  .hud {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 5; pointer-events: none;
+    font: 500 12px "JetBrains Mono", monospace; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(40, 26, 8, 0.7);
+    display: flex; gap: 18px; align-items: center; white-space: nowrap;
+  }
+  .hud b { color: #c2410c; font-weight: 500; }
+  .hud .depth { color: #06283d; font-variant-numeric: tabular-nums; }
+  .cta {
+    position: fixed; right: 3vw; top: 52px; z-index: 5; cursor: pointer; text-decoration: none;
+    font: 600 15px "Bricolage Grotesque", sans-serif; color: #fff; background: #e8601f; padding: 11px 18px; border-radius: 999px;
+    box-shadow: 0 10px 30px rgba(232, 96, 31, 0.35);
+  }
+  .sun-cursor {
+    position: fixed; left: 0; top: 0; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; z-index: 6; pointer-events: none;
+    border: 1.5px solid rgba(255,255,255,0.9); box-shadow: 0 0 14px rgba(255, 230, 170, 0.9);
+  }
+  @media (max-width: 760px) {
+    .menubar .menus, .menubar .clock { display: none; }
+    .hud { font-size: 10px; gap: 10px; }
+    .sub { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="reef"></canvas>
+<canvas id="life"></canvas>
+<div class="scene" id="scene"></div>
+<h1 class="headline">Sun for the few.<span>Shade for the rest.</span></h1>
+<p class="sub">Blenny sorts your menu bar into Visible, Revealable and Hidden. A small native organizer for macOS 27.</p>
+<a class="cta" href="#" onclick="return false">Download</a>
+
+<header class="menubar">
+  <b>Blenny</b><span class="menus">File&nbsp;&nbsp;&nbsp; Edit&nbsp;&nbsp;&nbsp; View</span>
+  <div class="tray" id="tray"></div>
+  <div class="slot fish" id="fish"></div>
+  <span class="clock" id="clock"></span>
+</header>
+<div class="hud"><span>Steer the sunlight</span><span>·</span><span><b>Hold</b> to call the reef</span><span>·</span><span class="depth" id="depth">12 m</span></div>
+<div class="sun-cursor" id="cursor"></div>
+
+<script src="../shared/icons.js"></script>
+<script src="../shared/blenny.js"></script>
+<script>
+(() => {
+  const { glyphs, svg, blennyGlyph, clock } = window.MenuGlyphs;
+  const $ = (s) => document.querySelector(s);
+  const scene = $('#scene'), tray = $('#tray');
+  $('#fish').innerHTML = blennyGlyph;
+  const tick = () => { $('#clock').textContent = clock(); };
+  tick(); setInterval(tick, 20000);
+
+  // Composition follows the app icon: open sunlit water upper left,
+  // a shaded rock wall to the right, bright sand along the bottom.
+  const BLENNY_HOLE = { x: 0.64, y: 0.72, r: 0.135 };
+  const REVEAL_HOLES = [
+    { x: 0.12, y: 0.68, r: 0.05 }, { x: 0.3, y: 0.58, r: 0.055 }, { x: 0.47, y: 0.42, r: 0.05 },
+    { x: 0.63, y: 0.3, r: 0.055 }, { x: 0.83, y: 0.25, r: 0.06 }, { x: 0.93, y: 0.52, r: 0.055 },
+    { x: 0.4, y: 0.76, r: 0.058 }, { x: 0.85, y: 0.78, r: 0.045 },
+  ];
+  const HIDDEN_HOLES = [
+    { x: 0.05, y: 0.57, r: 0.038 }, { x: 0.74, y: 0.46, r: 0.036 }, { x: 0.5, y: 0.58, r: 0.034 },
+    { x: 0.97, y: 0.31, r: 0.034 }, { x: 0.23, y: 0.8, r: 0.035 },
+  ];
+
+  const revealGlyphs = glyphs.filter((g) => g.intent === 'revealable');
+  const holes = [];
+  function makeHole(spec, kind, glyph) {
+    const el = document.createElement('div');
+    el.className = 'hole';
+    if (kind === 'reveal') el.innerHTML = `<div class="critter">${svg(glyph, 24, 2.2)}</div>`;
+    if (kind === 'hidden') {
+      el.innerHTML = '<div class="peeper"><i></i><i></i></div>';
+      el.querySelectorAll('i').forEach((i) => { i.style.animationDelay = `${-Math.random() * 5}s`; });
+    }
+    scene.append(el);
+    const h = { spec, kind, el, peeper: el.querySelector('.peeper') };
+    holes.push(h);
+    return h;
+  }
+  const bh = makeHole(BLENNY_HOLE, 'blenny');
+  bh.el.classList.add('blenny-hole');
+  const blenny = Blenny.create({ reach: 11 });
+  bh.el.append(blenny.el);
+  REVEAL_HOLES.forEach((s, i) => makeHole(s, 'reveal', revealGlyphs[i % revealGlyphs.length]));
+  HIDDEN_HOLES.forEach((s) => makeHole(s, 'hidden'));
+
+  glyphs.filter((g) => g.intent !== 'hidden').forEach((g) => {
+    const s = document.createElement('div');
+    s.className = 'slot' + (g.intent === 'revealable' ? ' is-tucked rev' : '');
+    s.innerHTML = svg(g);
+    tray.append(s);
+  });
+
+  // ------------------------------------------------------------------
+  // WebGL: pass A bakes the rock height field once per resize;
+  // pass B lights it every frame (shade, caustics, steerable sun shaft).
+  const canvas = $('#reef');
+  const gl = canvas.getContext('webgl', { antialias: false });
+  const MAX_HOLES = 16;
+  const COMMON = `
+    precision highp float;
+    float hash(vec2 p) { p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+    float noise(vec2 p) {
+      vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + 1.0), u.x), u.y);
+    }
+    float fbm(vec2 p) {
+      float v = 0.0; float a = 0.5; mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+      for (int i = 0; i < 5; i++) { v += a * noise(p); p = m * p; a *= 0.5; }
+      return v;
+    }`;
+  const BAKE = COMMON + `
+    uniform vec2 uCss; uniform vec4 uHoles[${MAX_HOLES}];
+    float wallTop(float x) {
+      float t = smoothstep(0.08 * uCss.x, 0.72 * uCss.x, x);
+      return mix(0.46 * uCss.y, 0.13 * uCss.y, t) + (noise(vec2(x * 0.006, 3.0)) - 0.5) * uCss.y * 0.09 + (noise(vec2(x * 0.03, 7.0)) - 0.5) * 16.0;
+    }
+    void main() {
+      vec2 p = vec2(gl_FragCoord.x, uCss.y - gl_FragCoord.y);
+      float edge = p.y - wallTop(p.x);
+      float rock = smoothstep(-3.0, 3.0, edge);
+      float d = 9.0;
+      for (int i = 0; i < ${MAX_HOLES}; i++) {
+        vec4 H = uHoles[i];
+        if (H.z <= 0.0) continue;
+        d = min(d, length(p - H.xy) / H.z);
+      }
+      float h = fbm(p * 0.0055) * 1.3 + fbm(p * 0.028 + 7.0) * 0.32 - abs(noise(p * 0.011) - 0.5) * 0.7;
+      h -= (1.0 - smoothstep(0.0, 70.0, edge)) * 0.9;
+      h -= smoothstep(1.12, 0.6, d) * 1.8;
+      h += exp(-pow((d - 1.18) * 3.2, 2.0)) * 0.32;
+      h = mix(-2.4, h, rock);
+      float hn = clamp((h + 2.5) / 5.0, 0.0, 1.0) * 255.0;
+      gl_FragColor = vec4(floor(hn) / 255.0, fract(hn), clamp(d / 2.0, 0.0, 1.0), rock);
+    }`;
+  const LIGHT = COMMON + `
+    uniform sampler2D uTex; uniform vec2 uRes; uniform vec2 uCss;
+    uniform vec2 uSpot; uniform float uBeam; uniform float uTime;
+    const float K = 70.0;
+    vec3 LS = normalize(vec3(-0.45, -0.85, 0.55));
+    float dec(vec4 t) { return (t.r * 255.0 + t.g) / 255.0 * 5.0 - 2.5; }
+    float hAt(vec2 p) { return dec(texture2D(uTex, vec2(p.x, uCss.y - p.y) / uCss)); }
+    float caustic(vec2 p, float t) {
+      float c = 0.0;
+      for (int i = 0; i < 4; i++) {
+        float fi = float(i);
+        p += 0.42 * vec2(sin(p.y * 1.6 + t * 0.9 + fi * 1.7), cos(p.x * 1.4 - t * 0.7 + fi * 2.3));
+        float v = abs(sin(p.x * 2.2) + sin(p.y * 2.2 + fi));
+        c += pow(max(0.0, 1.0 - v * 2.2), 7.0);
+      }
+      return c;
+    }
+    float shadow(vec2 p, float h0) {
+      float s = 1.0;
+      for (int i = 1; i <= 14; i++) {
+        float t = float(i) * 7.0;
+        vec2 q = p + LS.xy * t;
+        float ray = h0 * K + LS.z * t;
+        float terrain = hAt(q) * K;
+        s = min(s, clamp(1.0 - (terrain - ray) * 0.12, 0.0, 1.0));
+      }
+      return s;
+    }
+    void main() {
+      vec2 uv = gl_FragCoord.xy / uRes;
+      vec2 p = vec2(uv.x, 1.0 - uv.y) * uCss;
+      vec4 T = texture2D(uTex, vec2(p.x, uCss.y - p.y) / uCss);
+      float h = dec(T);
+      float rock = T.a;
+      float holeD = T.b * 2.0;
+      float hr = hAt(p + vec2(1.5, 0.0)), hl = hAt(p - vec2(1.5, 0.0));
+      float hd = hAt(p + vec2(0.0, 1.5)), hu = hAt(p - vec2(0.0, 1.5));
+      vec3 n = normalize(vec3(-(hr - hl) * K / 3.0, -(hd - hu) * K / 3.0, 1.0));
+      float sy = p.y / uCss.y;
+      float t = uTime;
+      vec3 sunCol = vec3(1.0, 0.93, 0.76);
+
+      // Open water, bright near the surface, sun glow upper left, god rays.
+      vec3 water = mix(vec3(0.66, 0.95, 0.98), vec3(0.09, 0.56, 0.78), smoothstep(0.0, 0.75, sy));
+      vec2 sunP = vec2(0.06, -0.12) * uCss;
+      vec2 dv = p - sunP;
+      water += sunCol * 0.55 * exp(-length(dv) / uCss.y * 2.6);
+      float ang = atan(dv.x, dv.y);
+      float rays = pow(max(0.0, 0.5 + 0.5 * sin(ang * 34.0 + t * 0.35) * sin(ang * 21.0 - t * 0.27)), 3.0);
+      water += vec3(0.9, 1.0, 1.0) * rays * 0.32 * exp(-length(dv) / uCss.y * 0.9);
+      water += vec3(1.0) * caustic(p / 90.0 + vec2(0.0, t * 0.1), t * 0.8) * 0.18 * smoothstep(0.12, 0.0, sy);
+
+      // Rock in the shade of the overhang.
+      float c = caustic(p / 150.0, t * 0.7);
+      float tone = noise(p * 0.009) * 0.6 + noise(p * 0.03) * 0.4;
+      vec3 albedo = mix(vec3(0.30, 0.42, 0.55), vec3(0.47, 0.49, 0.52), tone);
+      float algae = smoothstep(0.62, 0.78, noise(p * 0.006 + 11.0) * 0.7 + noise(p * 0.02) * 0.3);
+      albedo = mix(albedo, vec3(0.34, 0.58, 0.40), algae * 0.65);
+      float coral = smoothstep(0.7, 0.78, noise(p * 0.014 + 29.0) * 0.75 + noise(p * 0.05) * 0.25);
+      albedo = mix(albedo, vec3(0.98, 0.54, 0.6), coral * 0.8);
+      float up = clamp(-n.y * 0.8 + n.z * 0.5, 0.0, 1.0);
+      float dSun = max(dot(n, LS), 0.0);
+      vec3 rockCol = albedo * vec3(0.42, 0.66, 0.86) * (0.27 + 0.36 * up);
+      rockCol += albedo * sunCol * dSun * (0.05 + 0.22 * c);
+
+      // The steerable shaft of sunlight.
+      float dist = length(p - uSpot);
+      float spot = smoothstep(uBeam, uBeam * 0.15, dist);
+      float sh = spot > 0.01 ? shadow(p, h) : 1.0;
+      float wet = smoothstep(0.4, 0.8, noise(p * 0.02));
+      vec3 R = reflect(-LS, n);
+      rockCol += (albedo * sunCol * dSun * (1.5 + 1.8 * c) + sunCol * pow(max(R.z, 0.0), 22.0) * (0.2 + 0.6 * wet)) * spot * sh;
+      float occl = smoothstep(0.55, 1.15, holeD);
+      rockCol = mix(vec3(0.02, 0.08, 0.13), rockCol, occl);
+
+      vec3 col = mix(water, rockCol, rock);
+
+      // Sunlit sand along the bottom, with ripples.
+      float sandEdge = uCss.y * 0.875 + (noise(vec2(p.x * 0.006, 1.0)) - 0.5) * 36.0;
+      float sand = smoothstep(-6.0, 6.0, p.y - sandEdge);
+      float ripple = sin(p.x * 0.045 + noise(p * 0.01) * 7.0 + p.y * 0.02) * 0.5 + 0.5;
+      float cs = caustic(p / 110.0 + 3.0, t * 0.9);
+      vec3 sandCol = vec3(0.92, 0.83, 0.64) * (0.78 + 0.14 * ripple) + sunCol * cs * 0.15;
+      sandCol += sunCol * spot * 0.25;
+      sandCol *= mix(0.72, 1.0, smoothstep(0.0, 40.0, p.y - sandEdge));
+      col = mix(col, sandCol, sand);
+
+      // Volumetric shaft from the surface down to the spot.
+      vec2 dir = normalize(LS.xy);
+      vec2 A = uSpot + dir * (uSpot.y / -dir.y);
+      vec2 ab = uSpot - A;
+      float k = clamp(dot(p - A, ab) / dot(ab, ab), 0.0, 1.0);
+      float dl = length(p - (A + ab * k));
+      float w = uBeam * (0.3 + 0.35 * k);
+      float shimmer = 0.75 + 0.25 * sin(dot(p, vec2(dir.y, -dir.x)) * 0.06 + t * 2.0);
+      col += sunCol * smoothstep(w, w * 0.1, dl) * (0.16 + 0.16 * k) * shimmer * (1.0 - 0.5 * rock);
+
+      // Sunlit motes.
+      vec2 g = p / 30.0 + vec2(t * 0.05, -t * 0.08);
+      vec2 cell = floor(g); vec2 f = fract(g) - 0.5;
+      vec2 o = vec2(hash(cell + 1.3), hash(cell + 9.1)) - 0.5;
+      float mote = smoothstep(0.06, 0.0, length(f - o * 0.8)) * step(0.78, hash(cell));
+      col += vec3(1.0) * mote * (0.12 + 0.6 * spot);
+
+      col *= 1.0 - 0.22 * pow(length(uv - vec2(0.45, 0.55)) * 1.25, 2.5);
+      gl_FragColor = vec4(col, 1.0);
+    }`;
+  const VERT = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+  function program(fragSrc) {
+    const mk = (type, src) => {
+      const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+      return s;
+    };
+    const pr = gl.createProgram();
+    gl.attachShader(pr, mk(gl.VERTEX_SHADER, VERT));
+    gl.attachShader(pr, mk(gl.FRAGMENT_SHADER, fragSrc));
+    gl.bindAttribLocation(pr, 0, 'p');
+    gl.linkProgram(pr);
+    if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(pr));
+    const u = {};
+    return { pr, u: (name) => (u[name] ??= gl.getUniformLocation(pr, name)) };
+  }
+  const bake = program(BAKE);
+  const light = program(LIGHT);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  const tex = gl.createTexture();
+  const fbo = gl.createFramebuffer();
+  let W = 0, H = 0, dpr = 1, beam = 240;
+
+  function layout() {
+    W = Math.floor(innerWidth); H = Math.floor(innerHeight);
+    dpr = Math.min(devicePixelRatio || 1, 1.25);
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    life.width = W * lifeDpr; life.height = H * lifeDpr;
+    lctx.setTransform(lifeDpr, 0, 0, lifeDpr, 0, 0);
+    const unit = Math.min(W, H);
+    beam = Math.max(180, unit * 0.3);
+
+    const data = new Float32Array(MAX_HOLES * 4);
+    holes.forEach((h, i) => {
+      const r = h.spec.r * unit;
+      h.cx = h.spec.x * W; h.cy = h.spec.y * H; h.r = r;
+      h.el.style.left = `${h.cx}px`; h.el.style.top = `${h.cy}px`;
+      h.el.style.width = h.el.style.height = `${r * 2}px`;
+      data.set([h.cx, h.cy, r * (h.kind === 'blenny' ? 1.02 : 1), 0], i * 4);
+    });
+
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.viewport(0, 0, W, H);
+    gl.useProgram(bake.pr);
+    gl.uniform2f(bake.u('uCss'), W, H);
+    gl.uniform4fv(bake.u('uHoles'), data);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    initSchools();
+  }
+
+  // ------------------------------------------------------------------
+  // Small schools of fish crossing the open water; they scatter from the sun.
+  const life = $('#life'), lctx = life.getContext('2d');
+  const lifeDpr = Math.min(devicePixelRatio || 1, 2);
+  let fish = [];
+  function initSchools() {
+    fish = [];
+    for (let s = 0; s < 3; s++) {
+      const cy = H * (0.18 + s * 0.13), dirX = s % 2 ? -1 : 1, speed = 38 + s * 14;
+      const cx0 = Math.random() * W;
+      for (let i = 0; i < 12 + s * 3; i++) {
+        fish.push({ s, x: cx0 + (Math.random() - 0.5) * 140, y: cy + (Math.random() - 0.5) * 60, vx: dirX * speed, vy: 0, dirX, speed, cy, ph: Math.random() * 6, size: 0.7 + Math.random() * 0.5 });
+      }
+    }
+  }
+  function drawLife(t, bx, by) {
+    lctx.clearRect(0, 0, W, H);
+    fish.forEach((f) => {
+      const dx = f.x - bx, dy = f.y - by, d = Math.hypot(dx, dy);
+      if (d < beam * 0.9) { f.vx += (dx / d) * 260 / 60; f.vy += (dy / d) * 260 / 60; }
+      f.vx += (f.dirX * f.speed - f.vx) * 0.02;
+      f.vy += ((f.cy + Math.sin(t * 0.5 + f.s) * 40 - f.y) * 0.4 - f.vy) * 0.03;
+      f.x += f.vx / 60; f.y += f.vy / 60 + Math.sin(t * 3 + f.ph) * 0.15;
+      if (f.x > W + 60) f.x = -60; if (f.x < -60) f.x = W + 60;
+      const a = Math.atan2(f.vy, f.vx);
+      lctx.save();
+      lctx.translate(f.x, f.y); lctx.rotate(a); lctx.scale(f.size, f.size);
+      lctx.fillStyle = 'rgba(6, 58, 88, 0.55)';
+      lctx.beginPath(); lctx.ellipse(0, 0, 9, 3.2, 0, 0, Math.PI * 2); lctx.fill();
+      const wag = Math.sin(t * 14 + f.ph) * 2;
+      lctx.beginPath(); lctx.moveTo(-7, 0); lctx.lineTo(-14, -4 + wag); lctx.lineTo(-14, 4 + wag); lctx.closePath(); lctx.fill();
+      lctx.restore();
+    });
+  }
+
+  addEventListener('resize', layout);
+  layout();
+
+  // ------------------------------------------------------------------
+  // Interaction.
+  let tx = W * 0.62, ty = H * 0.45, lx = tx, ly = ty, lastMove = -1e9;
+  const cursor = $('#cursor'), depthEl = $('#depth');
+  addEventListener('pointermove', (e) => { tx = e.clientX; ty = e.clientY; lastMove = performance.now(); });
+  let calling = false;
+  function setCall(on) {
+    if (calling === on) return;
+    calling = on;
+    document.body.classList.toggle('is-calling', on);
+    tray.querySelectorAll('.rev').forEach((s) => s.classList.toggle('is-tucked', !on));
+    if (on) blenny.excite(1400);
+  }
+  addEventListener('pointerdown', (e) => { tx = e.clientX; ty = e.clientY; lastMove = performance.now(); setCall(true); });
+  addEventListener('pointerup', () => setCall(false));
+  addEventListener('pointercancel', () => setCall(false));
+  addEventListener('keydown', (e) => { if (e.code === 'Space') setCall(true); });
+  addEventListener('keyup', (e) => { if (e.code === 'Space') setCall(false); });
+
+  function frame(now) {
+    const t = now / 1000;
+    const idle = now - lastMove > 2600;
+    if (idle) {
+      tx = W * (0.62 + 0.26 * Math.sin(t * 0.33));
+      ty = H * (0.52 + 0.24 * Math.sin(t * 0.47 + 1.2));
+    }
+    lx += (tx - lx) * 0.12; ly += (ty - ly) * 0.12;
+    const b = beam * (calling ? 1.3 : 1);
+    cursor.style.transform = `translate(${tx}px, ${ty}px)`;
+    cursor.style.opacity = idle ? 0 : 1;
+    depthEl.textContent = `${Math.round(2 + Math.max(0, Math.min(1, ly / H)) * 36)} m`;
+
+    gl.useProgram(light.pr);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(light.u('uTex'), 0);
+    gl.uniform2f(light.u('uRes'), canvas.width, canvas.height);
+    gl.uniform2f(light.u('uCss'), W, H);
+    gl.uniform2f(light.u('uSpot'), lx, ly);
+    gl.uniform1f(light.u('uBeam'), b);
+    gl.uniform1f(light.u('uTime'), t);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    drawLife(t, lx, ly);
+
+    // DOM critters share the lighting: shaded by default, warm in the sun.
+    holes.forEach((h) => {
+      const d = Math.hypot(h.cx - lx, h.cy - ly);
+      const s = Math.max(0, Math.min(1, (b - d) / (b * 0.85)));
+      const lit = (0.6 + 0.6 * s).toFixed(3);
+      if (lit !== h.lit) { h.lit = lit; h.el.style.setProperty('--lit', lit); h.el.style.setProperty('--sat', (0.8 + 0.35 * s).toFixed(3)); }
+      if (h.peeper) {
+        const shy = d < b * 0.6;
+        if (shy !== h.shy) { h.shy = shy; h.peeper.classList.toggle('is-shy', shy); }
+        const k = Math.min(1, d / 400) * 2.5;
+        h.peeper.style.setProperty('--px', `${((lx - h.cx) / (d || 1)) * k}px`);
+        h.peeper.style.setProperty('--py', `${((ly - h.cy) / (d || 1)) * k}px`);
+      }
+    });
+    blenny.lookAt(lx, ly);
+    requestAnimationFrame(frame);
+  }
+  (document.fonts?.ready ?? Promise.resolve()).then(() => requestAnimationFrame(frame));
+})();
+</script>
+</body>
+</html>

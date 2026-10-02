@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Material lab</title>
+<style>
+  body { margin: 0; padding: 40px; background: #1b8fbd; font: 12px ui-monospace, monospace; color: #fff; }
+  .host { position: relative; margin: 60px 60px 80px; }
+  #wall { width: 1000px; height: 460px; }
+  #boulder { width: 520px; height: 380px; }
+  #sand { width: 1000px; height: 220px; background: none; }
+  .crevice { position: absolute; width: 58px; height: 58px; transform: translate(-50%, -50%); border: 1px dashed rgba(255,255,255,0.3); border-radius: 50%; }
+  .home { width: 220px; height: 180px; }
+  label { display: block; margin-left: 60px; }
+</style>
+</head>
+<body>
+<label>reef wall</label>
+<div class="host" id="wall">
+  <div class="crevice home" style="left:30%;top:58%"></div>
+  <div class="crevice" style="left:8%;top:24%"></div><div class="crevice" style="left:47%;top:17%"></div>
+  <div class="crevice" style="left:62%;top:40%"></div><div class="crevice" style="left:79%;top:22%"></div>
+  <div class="crevice" style="left:75%;top:64%"></div>
+</div>
+<label>boulder</label>
+<div class="host" id="boulder"><div class="crevice" id="bh" style="left:50%;top:58%;width:240px;height:200px"></div></div>
+<label>sand</label>
+<div class="host" id="sand"></div>
+<script type="module">
+  import { createSurface, holesFrom } from './materials.js';
+  const q = (s) => document.querySelector(s);
+  const surfaces = [
+    createSurface(q('#wall'), { kind: 'wall', pad: 48, seed: 12.9, fog: [0.16, 0.5, 0.68, 0.2], caustic: 0.32, cell: 125, sharp: 4.5, holes: holesFrom(q('#wall'), '#wall .crevice') }),
+    createSurface(q('#boulder'), { kind: 'boulder', pad: 44, seed: 3.7, fog: [0.62, 0.9, 0.96, 0.08], caustic: 0.42, cell: 115, sharp: 4.5, holes: holesFrom(q('#boulder'), '#bh') }),
+    createSurface(q('#sand'), { kind: 'sand', pad: 0, seed: 8.2, fog: [0.7, 0.92, 0.96, 0.06], caustic: 0.75, cell: 80, sharp: 6 }),
+  ];
+  const t0 = performance.now();
+  surfaces.forEach((s) => s.build());
+  window.bakeMs = Math.round(performance.now() - t0);
+  // Synchronous GPU benchmark: ms per frame for all three surfaces.
+  window.bench = (frames = 30) => {
+    const px = new Uint8Array(4);
+    const sync = () => surfaces.forEach((s) => { const gl = s.canvas.getContext('webgl'); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); });
+    sync();
+    const t0 = performance.now();
+    for (let i = 0; i < frames; i++) { surfaces.forEach((s) => s.render(i * 0.03)); sync(); }
+    return ((performance.now() - t0) / frames).toFixed(2) + ' ms/frame';
+  };
+  window.benchBuild = () => { const t0 = performance.now(); surfaces.forEach((s) => s.build()); sync2(); return (performance.now() - t0).toFixed(0) + ' ms'; };
+  const sync2 = () => surfaces.forEach((s) => { const gl = s.canvas.getContext('webgl'); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4)); });
+  (function loop(now) { surfaces.forEach((s) => s.render(now / 1000)); requestAnimationFrame(loop); })(0);
+</script>
+</body>
+</html>

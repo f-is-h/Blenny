@@ -1,0 +1,49 @@
+# Blenny
+
+> Blenny is a free, open-source (Apache-2.0) menu bar organizer for macOS 27 on Apple silicon. It manages menu bar items per application in three areas, Visible, Revealable and Hidden, and is built to be careful with your Mac: it never moves the pointer, never synthesises clicks or Command-drag, and never needs Screen Recording.
+
+Website: https://blenny.fi5h.xyz/
+Source: https://github.com/f-is-h/Blenny
+Download: https://github.com/f-is-h/Blenny/releases/latest (a self-signed disk image, not notarized by Apple)
+
+## What it does
+
+- Visible (the website's "Surface"): apps that always stay in the menu bar.
+- Revealable (the "Reef"): apps that stay out of the way until you click Blenny's fish or its double arrow; they come back for a short reveal session.
+- Hidden (the "Deep"): apps that stay out of the menu bar and out of every reveal session. They keep running.
+- Policy is per application: every menu bar item an app owns moves together.
+- Organize window: drag apps between areas as a draft, choose Apply, and Undo Changes reverses the last Apply (visibility and order together). Every item also has context-menu and accessibility actions.
+- Stop or Quit releases Blenny's restrictions at once; Resume brings the saved setup back.
+
+## Safety
+
+- One serial writer for every change, with a saved recovery record, one verification and at most one retry.
+- Fails closed: if the menu bar changed underneath it, Blenny stops and asks instead of writing again.
+- Interrupted changes can be finished or restored with Recover Changes.
+- Updates come through Sparkle, checked against Blenny's own key; automatic checks are off by default.
+
+## Requirements and limits
+
+- macOS 27 or later on Apple silicon only. There is no macOS 26 or Intel version.
+- Verified on macOS 27.0 (26A428). Other builds and display setups have not been verified.
+- While Blenny manages the menu bar, clicking the clock cannot open Notification Center; swipe left from the right edge of the trackpad instead.
+- Now Playing, Gaming and Wine extras may disappear during management; Stop brings them back.
+- Siri, Time Machine and Control Center cannot be sorted yet; the clock and the overflow arrow are fixed.
+- On a narrow screen macOS can still tuck away a Visible app.
+
+## Install
+
+1. Download the disk image from GitHub Releases.
+2. Drag Blenny into Applications, eject the disk image and open the installed copy.
+3. If macOS blocks the first launch, choose Open Anyway in System Settings › Privacy & Security.
+4. Grant Device Control when Blenny asks. No Screen Recording and no SIP changes.
+
+## Docs
+
+- [README](https://github.com/f-is-h/Blenny#readme): overview and usage
+- [Recovery and uninstall](https://github.com/f-is-h/Blenny/blob/main/docs/RECOVERY_AND_UNINSTALL.md)
+- [Issues](https://github.com/f-is-h/Blenny/issues): reproducible problems
+
+## Support
+
+Free to use. Optional support through GitHub Sponsors (https://github.com/sponsors/f-is-h) or Ko-fi (https://ko-fi.com/blenny).

@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blenny · Descent</title>
+<link rel="icon" href="../shared/blenny-icon-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #eaf8ff;
+    --muted: rgba(234, 248, 255, 0.62);
+    --glow: #7df3ff;
+    --orange: #ff8b35;
+  }
+  * { box-sizing: border-box; }
+  html { background: #03101e; }
+  body {
+    margin: 0;
+    color: var(--ink);
+    font: 400 17px/1.55 Geist, system-ui, sans-serif;
+    background: transparent;
+    overflow-x: hidden;
+  }
+  #sea { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: -1; display: block; }
+
+  /* The menu bar is the water surface seen from below. */
+  .menubar {
+    position: fixed; top: 0; left: 0; right: 0; height: 30px; z-index: 50;
+    display: flex; align-items: center; gap: 18px; padding: 0 14px;
+    background: rgba(245, 252, 255, 0.46);
+    backdrop-filter: blur(22px) saturate(1.6); -webkit-backdrop-filter: blur(22px) saturate(1.6);
+    color: #0b1d2a; font: 500 13.5px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", Geist, sans-serif;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.35), 0 12px 40px rgba(0, 40, 70, 0.15);
+    transition: background 0.6s, color 0.6s;
+  }
+  body.is-deep .menubar { background: rgba(8, 24, 40, 0.55); color: #d9f4ff; }
+  .menubar .app { font-weight: 700; }
+  .menubar .menus { display: flex; gap: 18px; opacity: 0.86; }
+  .menubar .tray { margin-left: auto; display: flex; align-items: center; height: 100%; }
+  .menubar .slot {
+    width: 30px; height: 100%; display: grid; place-items: center; flex: none;
+    transition: width 0.7s cubic-bezier(.6,0,.2,1), opacity 0.4s;
+  }
+  .menubar .slot.is-gone { width: 0; opacity: 0; }
+  .menubar .fish { width: 34px; cursor: pointer; border-radius: 6px; }
+  .menubar .fish:hover { background: rgba(255,255,255,0.28); }
+  .menubar .fish.is-hinting { animation: hint 1.2s ease-in-out infinite; }
+  @keyframes hint { 50% { background: rgba(255, 139, 53, 0.45); } }
+  .menubar .clock { padding-left: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  @media (max-width: 720px) { .menubar .menus { display: none; } .menubar .clock { font-size: 12px; } }
+
+  /* Falling icons live in document coordinates. */
+  #fallers { position: absolute; top: 0; left: 0; width: 100%; height: 0; z-index: 52; pointer-events: none; }
+  .faller {
+    position: absolute; left: 0; top: 0; width: 16px; height: 16px; margin: -8px 0 0 -8px;
+    color: #0b1d2a; will-change: transform;
+  }
+  .faller svg { display: block; filter: drop-shadow(0 0 0 transparent); transition: filter 0.8s; }
+  .faller.is-landed.hidden-intent svg { filter: drop-shadow(0 0 3px var(--glow)) drop-shadow(0 0 8px rgba(125,243,255,0.6)); }
+  .faller .tag {
+    position: absolute; left: 50%; top: 22px; transform: translateX(-50%) scale(0.42); transform-origin: 50% 0;
+    font: 500 11px/1 "Geist Mono", monospace; letter-spacing: 0.04em; white-space: nowrap;
+    color: var(--muted); opacity: 0; transition: opacity 0.6s;
+  }
+  .faller.is-landed.hidden-intent .tag { opacity: 1; }
+
+  /* Depth gauge */
+  .gauge {
+    position: fixed; right: 22px; top: 50%; transform: translateY(-50%); z-index: 45;
+    display: flex; align-items: center; gap: 14px; font-family: "Geist Mono", monospace; pointer-events: none;
+  }
+  .gauge .readout { text-align: right; }
+  .gauge .num { font-size: 30px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .gauge .unit { font-size: 13px; color: var(--muted); }
+  .gauge .zone { font-size: 11px; letter-spacing: 0.22em; color: var(--glow); margin-top: 4px; }
+  body:not(.is-deep) .gauge { color: #04283f; }
+  body:not(.is-deep) .gauge .zone { color: #04385a; }
+  .gauge .rail { position: relative; width: 2px; height: 46vh; background: rgba(234,248,255,0.18); border-radius: 2px; }
+  .gauge .rail i { position: absolute; left: -5px; width: 12px; height: 1px; background: rgba(234,248,255,0.35); }
+  .gauge .bob { position: absolute; left: -6px; width: 14px; height: 14px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 18px var(--orange); transform: translateY(-50%); }
+  @media (max-width: 720px) { .gauge { right: 10px; } .gauge .rail { height: 30vh; } .gauge .num { font-size: 20px; } }
+
+  section { position: relative; min-height: 100vh; padding: 18vh 8vw 10vh; }
+  .eyebrow { font: 500 12px/1 "Geist Mono", monospace; letter-spacing: 0.28em; text-transform: uppercase; color: var(--glow); }
+  h1, h2 { font-family: "Instrument Serif", serif; font-weight: 400; letter-spacing: -0.02em; margin: 0; }
+  h1 { font-size: clamp(56px, 11vw, 176px); line-height: 0.86; }
+  h2 { font-size: clamp(44px, 7vw, 112px); line-height: 0.9; }
+  h1 em, h2 em { color: #fff; font-style: italic; }
+  .lede { max-width: 30em; color: var(--muted); font-size: clamp(16px, 1.5vw, 20px); margin-top: 28px; }
+
+  #surface { display: flex; flex-direction: column; justify-content: center; min-height: 100vh; padding-top: 12vh; }
+  #surface h1 { color: #03253b; }
+  #surface h1 em { color: #fff; text-shadow: 0 0 40px rgba(255,255,255,0.6); }
+  #surface .lede { color: rgba(4, 30, 48, 0.8); }
+  .dive-hint { margin-top: 7vh; display: inline-flex; gap: 12px; align-items: center; font: 500 13px "Geist Mono", monospace; color: #04283f; letter-spacing: 0.1em; }
+  .dive-hint b { display: inline-block; animation: sink 1.6s ease-in-out infinite; }
+  @keyframes sink { 50% { transform: translateY(8px); } }
+
+  #sunlight { min-height: 90vh; }
+  #twilight { min-height: 160vh; }
+  #midnight { min-height: 150vh; }
+
+  .reef {
+    position: relative; margin-top: 12vh; height: 420px; max-width: 1100px;
+  }
+  .rock {
+    position: absolute; background: radial-gradient(120% 90% at 30% 20%, #3c5872, #1b2d44 60%, #0d1829);
+    box-shadow: inset 0 18px 40px rgba(160, 220, 255, 0.12), inset 0 -30px 60px rgba(0,0,0,0.5), 0 40px 80px rgba(0,0,0,0.35);
+  }
+  .rock.burrow { left: 0; top: 40px; width: 420px; height: 360px; border-radius: 55% 45% 38% 62% / 52% 58% 42% 48%; }
+  .rock.ledge { left: 380px; top: 250px; width: 620px; height: 140px; border-radius: 40% 60% 30% 30% / 70% 60% 40% 30%; }
+  .hole {
+    position: absolute; left: 88px; top: 92px; width: 236px; height: 208px; overflow: hidden;
+    border-radius: 50% 50% 46% 46% / 58% 58% 42% 42%;
+    background: radial-gradient(60% 60% at 50% 60%, #020812, #07121f 70%, #13243a);
+    box-shadow: inset 0 22px 30px rgba(0,0,0,0.8);
+  }
+  .hole .blenny-character { position: absolute; left: 22px; bottom: -64px; width: 192px; transition: transform 0.5s cubic-bezier(.3,1.6,.5,1); }
+  .hole.is-peeking .blenny-character { transform: translateY(-26px); }
+  .reef .note {
+    position: absolute; left: 470px; top: 30px; max-width: 360px; color: var(--muted); font-size: 15px;
+  }
+  .reef .note kbd {
+    font: 500 12px "Geist Mono", monospace; color: #0b1d2a; background: var(--orange); padding: 3px 7px; border-radius: 5px;
+  }
+  @media (max-width: 900px) {
+    .reef { height: 560px; }
+    .rock.burrow { width: 320px; height: 290px; }
+    .hole { left: 50px; top: 70px; width: 210px; height: 180px; }
+    .hole .blenny-character { left: 14px; width: 180px; }
+    .rock.ledge { left: 8vw; top: 420px; width: 80vw; height: 110px; }
+    .reef .note { left: 0; top: 320px; }
+  }
+
+  .floor {
+    position: relative; margin-top: 30vh; height: 180px;
+    background: radial-gradient(60% 100% at 50% 100%, rgba(90, 200, 255, 0.08), transparent 70%);
+    border-top: 1px solid rgba(125, 243, 255, 0.08);
+  }
+
+  #trench { min-height: 120vh; display: grid; place-items: center; text-align: center; padding-top: 10vh; }
+  .lure { position: relative; display: grid; justify-items: center; }
+  .lure svg { width: 240px; height: 260px; overflow: visible; }
+  .lure .stalk { stroke: rgba(200, 160, 120, 0.35); stroke-width: 3; fill: none; }
+  .lure a {
+    position: relative; margin-top: -58px; width: 190px; height: 190px; border-radius: 50%;
+    display: grid; place-items: center; text-decoration: none; color: #062033;
+    font: 600 17px/1.15 Geist, sans-serif; letter-spacing: -0.01em;
+    background: radial-gradient(circle at 42% 38%, #ffffff, #c9fff6 30%, #5ff2e2 62%, #11a7b8);
+    box-shadow: 0 0 40px 10px rgba(95, 242, 226, 0.55), 0 0 160px 60px rgba(95, 242, 226, 0.18);
+    animation: lure 3.2s ease-in-out infinite;
+  }
+  .lure a small { display: block; font: 500 11px "Geist Mono", monospace; letter-spacing: 0.08em; opacity: 0.7; margin-top: 6px; }
+  @keyframes lure { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(6px, 10px); } }
+  .promises { display: flex; gap: 28px; flex-wrap: wrap; justify-content: center; margin-top: 70px; font: 500 12px "Geist Mono", monospace; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+  .promises span::before { content: "◦ "; color: var(--glow); }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 36px; transform: translate(-50%, 30px); opacity: 0; z-index: 60;
+    padding: 12px 18px; border-radius: 14px; font-size: 14px; color: #eaf8ff;
+    background: rgba(5, 20, 36, 0.72); backdrop-filter: blur(14px); border: 1px solid rgba(125,243,255,0.2);
+    transition: transform 0.4s, opacity 0.4s; pointer-events: none;
+  }
+  .toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+  .bubble { position: fixed; z-index: 55; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.7); pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="sea"></canvas>
+
+<header class="menubar">
+  <span class="app">Blenny</span>
+  <nav class="menus"><span>File</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span></nav>
+  <div class="tray" id="tray"></div>
+  <div class="slot fish" id="fish" title="Reveal"></div>
+  <span class="clock" id="clock"></span>
+</header>
+
+<div id="fallers"></div>
+
+<aside class="gauge" aria-hidden="true">
+  <div class="readout">
+    <div><span class="num" id="depth">0000</span> <span class="unit">m</span></div>
+    <div class="zone" id="zone">SURFACE</div>
+  </div>
+  <div class="rail" id="rail"><span class="bob" id="bob"></span></div>
+</aside>
+
+<main>
+  <section id="surface">
+    <div class="eyebrow" style="color:#04385a">Blenny for macOS 27</div>
+    <h1>Too much<br><span class="solid">at the <em>surface.</em></span></h1>
+    <p class="lede">Every little app wants a spot in your menu bar. Blenny gives each one a depth instead.</p>
+    <div class="dive-hint"><b>↓</b> Scroll to dive</div>
+  </section>
+
+  <section id="sunlight" data-zone="SUNLIGHT · VISIBLE" data-from="0" data-to="200">
+    <div class="eyebrow">0 – 200 m · Visible</div>
+    <h2>What you use<br>stays in <em>the light.</em></h2>
+    <p class="lede">Visible icons never leave the menu bar. Everything else is already sinking.</p>
+  </section>
+
+  <section id="twilight" data-zone="TWILIGHT · REVEALABLE" data-from="200" data-to="1000">
+    <div class="eyebrow">200 – 1000 m · Revealable</div>
+    <h2>The rest waits<br>in <em>the reef.</em></h2>
+    <p class="lede">Out of sight, one click away. Call them up for a moment; they swim back when you're done.</p>
+    <div class="reef" id="reef">
+      <div class="rock burrow"><div class="hole" id="hole"></div></div>
+      <div class="rock ledge" id="ledge"></div>
+      <p class="note">Try it. Click the fish <kbd>☺︎</kbd> in the menu bar and watch the reef come up.</p>
+    </div>
+  </section>
+
+  <section id="midnight" data-zone="MIDNIGHT · HIDDEN" data-from="1000" data-to="4000">
+    <div class="eyebrow">1000 – 4000 m · Hidden</div>
+    <h2>Some things<br>belong in <em>the dark.</em></h2>
+    <p class="lede">Hidden icons skip every reveal. They stay down here, quietly glowing, until you move them.</p>
+    <div class="floor" id="floor"></div>
+  </section>
+
+  <section id="trench" data-zone="TRENCH" data-from="4000" data-to="6000">
+    <div>
+      <div class="lure">
+        <svg viewBox="0 0 240 260"><path class="stalk" d="M-400 -300 C -120 -200 60 -40 120 170"/></svg>
+        <a href="#" onclick="return false">Download Blenny<small>MACOS 27+</small></a>
+      </div>
+      <div class="promises">
+        <span>Never moves your pointer</span><span>No Screen Recording</span><span>Undo anything</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script src="../shared/icons.js"></script>
+<script src="../shared/blenny.js"></script>
+<script>
+(() => {
+  const { glyphs, svg, blennyGlyph, clock } = window.MenuGlyphs;
+  const $ = (s) => document.querySelector(s);
+  const tray = $('#tray');
+  const fishSlot = $('#fish');
+  const layer = $('#fallers');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  fishSlot.innerHTML = blennyGlyph;
+  const tick = () => { $('#clock').textContent = clock(); };
+  tick(); setInterval(tick, 20000);
+
+  // --- Build the crowded menu bar and the icons that will sink out of it.
+  const order = [...glyphs].sort(() => Math.random() - 0.5);
+  const fallers = [];
+  order.forEach((g) => {
+    const slot = document.createElement('div');
+    slot.className = 'slot';
+    slot.innerHTML = svg(g);
+    tray.append(slot);
+    if (g.intent === 'visible') return;
+    const f = document.createElement('div');
+    f.className = `faller ${g.intent}-intent`;
+    f.innerHTML = svg(g, 16) + `<span class="tag">${g.name}</span>`;
+    layer.append(f);
+    fallers.push({ g, el: f, slot, phase: Math.random() * Math.PI * 2, reveal: 0, revealTarget: 0 });
+  });
+
+  // --- Character in the reef.
+  const blenny = Blenny.create();
+  const hole = $('#hole');
+  hole.append(blenny.el);
+
+  // --- Layout: where each faller starts and where it lands (document coords).
+  let vh = innerHeight, vw = innerWidth;
+  function layout() {
+    vh = innerHeight; vw = innerWidth;
+    const sy = scrollY;
+    const ledge = $('#ledge').getBoundingClientRect();
+    const floor = $('#floor').getBoundingClientRect();
+    const rev = fallers.filter((f) => f.g.intent === 'revealable');
+    const hid = fallers.filter((f) => f.g.intent === 'hidden');
+    rev.forEach((f, i) => {
+      const t = (i + 0.5) / rev.length;
+      f.tx = ledge.left + ledge.width * (0.1 + 0.8 * t);
+      f.ty = ledge.top + sy + 6 + Math.sin(t * Math.PI) * -10;
+    });
+    hid.forEach((f, i) => {
+      const t = (i + 0.5) / hid.length;
+      f.tx = floor.left + floor.width * (0.18 + 0.64 * t);
+      f.ty = floor.top + sy + 40 + (i % 2) * 36;
+    });
+    if (!layout.started) {
+      fallers.forEach((f) => {
+        const r = f.slot.getBoundingClientRect();
+        f.sx = r.left + r.width / 2;
+        f.sy = r.top + r.height / 2;
+      });
+      layout.started = true;
+    }
+    fallers.forEach((f) => { f.k = (f.ty - f.sy) / Math.max(1, f.ty - vh * 0.56); });
+  }
+
+  // --- Depth gauge mapping, section by section.
+  const zones = [...document.querySelectorAll('section[data-zone]')];
+  const rail = $('#rail');
+  [0, 200, 1000, 4000, 6000].forEach((m) => {
+    const i = document.createElement('i');
+    i.style.top = `${(Math.log1p(m) / Math.log1p(6000)) * 100}%`;
+    rail.append(i);
+  });
+  function depthAt(y) {
+    const probe = y + vh * 0.5;
+    let m = 0; let name = 'SURFACE';
+    for (const z of zones) {
+      const top = z.offsetTop; const h = z.offsetHeight;
+      if (probe >= top) {
+        const t = Math.min(1, (probe - top) / h);
+        m = +z.dataset.from + (z.dataset.to - z.dataset.from) * t;
+        name = z.dataset.zone;
+      }
+    }
+    return { m, name };
+  }
+
+  // --- Reveal session: revealable icons rise into the menu bar, then go home.
+  let revealTimer = 0;
+  const toast = $('#toast');
+  function say(text) {
+    toast.textContent = text; toast.classList.add('is-on');
+    clearTimeout(say.t); say.t = setTimeout(() => toast.classList.remove('is-on'), 3200);
+  }
+  function bubbles(x, y, n = 6) {
+    for (let i = 0; i < n; i++) {
+      const b = document.createElement('span');
+      b.className = 'bubble';
+      const s = 4 + Math.random() * 8;
+      b.style.cssText = `left:${x + (Math.random() - 0.5) * 30}px;top:${y}px;width:${s}px;height:${s}px`;
+      document.body.append(b);
+      b.animate([{ transform: 'translateY(0)', opacity: 0.9 }, { transform: `translate(${(Math.random() - 0.5) * 40}px, -${120 + Math.random() * 160}px)`, opacity: 0 }],
+        { duration: 1400 + Math.random() * 900, easing: 'cubic-bezier(.2,.6,.4,1)' }).onfinish = () => b.remove();
+    }
+  }
+  fishSlot.addEventListener('click', () => {
+    fishSlot.classList.remove('is-hinting');
+    const rev = fallers.filter((f) => f.g.intent === 'revealable');
+    const active = rev.some((f) => f.revealTarget === 1);
+    rev.forEach((f) => { f.revealTarget = active ? 0 : 1; });
+    blenny.excite(1200);
+    clearTimeout(revealTimer);
+    if (!active) {
+      say('Revealable icons are up. Hidden ones stay in the deep.');
+      revealTimer = setTimeout(() => rev.forEach((f) => { f.revealTarget = 0; }), 5200);
+      rev.forEach((f) => { const r = f.el.getBoundingClientRect(); bubbles(r.left, r.top, 3); });
+    }
+  });
+
+  // --- Pointer: Blenny watches you.
+  let px = vw / 2, py = vh / 2;
+  addEventListener('pointermove', (e) => { px = e.clientX; py = e.clientY; });
+
+  // --- WebGL sea.
+  const canvas = $('#sea');
+  const gl = canvas.getContext('webgl', { antialias: false, premultipliedAlpha: false });
+  const frag = `
+    precision highp float;
+    uniform vec2 uRes; uniform float uTime; uniform float uDepth; uniform float uScroll;
+    float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+    float caustic(vec2 p, float t) {
+      float c = 0.0;
+      for (int i = 0; i < 4; i++) {
+        float fi = float(i);
+        p += 0.42 * vec2(sin(p.y * 1.6 + t * 0.9 + fi * 1.7), cos(p.x * 1.4 - t * 0.7 + fi * 2.3));
+        float v = abs(sin(p.x * 2.2) + sin(p.y * 2.2 + fi));
+        c += pow(max(0.0, 1.0 - v * 2.2), 7.0);
+      }
+      return c;
+    }
+    vec3 water(float d) {
+      vec3 a = vec3(0.30, 0.86, 0.93);
+      vec3 b = vec3(0.04, 0.46, 0.70);
+      vec3 c = vec3(0.02, 0.16, 0.34);
+      vec3 e = vec3(0.006, 0.03, 0.08);
+      vec3 f = vec3(0.0, 0.004, 0.012);
+      vec3 col = mix(a, b, smoothstep(0.0, 0.18, d));
+      col = mix(col, c, smoothstep(0.14, 0.42, d));
+      col = mix(col, e, smoothstep(0.4, 0.66, d));
+      return mix(col, f, smoothstep(0.7, 0.95, d));
+    }
+    void main() {
+      vec2 uv = gl_FragCoord.xy / uRes;
+      float sy = 1.0 - uv.y;
+      float d = clamp(uDepth + sy * 0.07, 0.0, 1.0);
+      vec3 col = water(d);
+      float light = exp(-uDepth * 7.0);
+      vec2 cp = vec2(gl_FragCoord.x, gl_FragCoord.y - uScroll * 0.35) / uRes.y * 7.0;
+      float c = caustic(cp, uTime * 0.6);
+      col += vec3(0.8, 1.0, 1.0) * c * 0.3 * light * (0.35 + 0.65 * uv.y);
+      float r = sin(uv.x * 11.0 + uv.y * 3.5 + uTime * 0.25) * sin(uv.x * 17.0 - uv.y * 2.0 - uTime * 0.18);
+      col += vec3(0.8, 1.0, 1.0) * smoothstep(0.35, 1.0, r) * 0.16 * light * smoothstep(0.0, 1.0, uv.y);
+      float deep = smoothstep(0.35, 0.8, uDepth);
+      for (int L = 0; L < 3; L++) {
+        float fl = float(L);
+        float scale = 14.0 + fl * 11.0;
+        vec2 g = vec2(gl_FragCoord.x, gl_FragCoord.y - uScroll * (0.25 + 0.3 * fl)) / uRes.y * scale;
+        g.y += uTime * (0.08 + 0.05 * fl);
+        g.x += sin(g.y * 0.35 + fl) * 0.3;
+        vec2 cell = floor(g); vec2 f = fract(g) - 0.5;
+        float h = hash(cell + fl * 17.0);
+        vec2 o = vec2(hash(cell + 3.1), hash(cell + 7.7)) - 0.5;
+        float dist = length(f - o * 0.7);
+        float size = 0.03 + 0.05 * hash(cell + 11.0);
+        float snow = smoothstep(size, 0.0, dist) * step(0.55, h);
+        col += vec3(0.85, 0.95, 1.0) * snow * (0.35 - 0.2 * deep) * (0.5 + 0.2 * fl);
+        float pulse = 0.5 + 0.5 * sin(uTime * (1.2 + h * 2.0) + h * 40.0);
+        float bio = smoothstep(size * 5.0, 0.0, dist) * step(0.955, h) * pulse;
+        col += vec3(0.25, 0.95, 1.0) * bio * deep * 0.9;
+      }
+      col *= 1.0 - 0.35 * pow(length(uv - 0.5) * 1.2, 2.0);
+      gl_FragColor = vec4(col, 1.0);
+    }`;
+  const vert = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+  function shader(type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, shader(gl.VERTEX_SHADER, vert));
+  gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, frag));
+  gl.linkProgram(prog); gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'p');
+  gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const U = (n) => gl.getUniformLocation(prog, n);
+  const uRes = U('uRes'), uTime = U('uTime'), uDepth = U('uDepth'), uScroll = U('uScroll');
+  let dpr = 1;
+  function resize() {
+    dpr = Math.min(devicePixelRatio || 1, 1.5);
+    canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    layout();
+  }
+  addEventListener('resize', resize);
+
+  // --- Frame loop.
+  const easeInOut = (t) => t * t * (3 - 2 * t);
+  const depthEl = $('#depth'), zoneEl = $('#zone'), bob = $('#bob');
+  let hinted = false;
+  function frame(now) {
+    const t = now / 1000;
+    const sy = scrollY;
+    const maxScroll = document.documentElement.scrollHeight - vh;
+    const progress = Math.min(1, Math.max(0, sy / maxScroll));
+
+    gl.uniform2f(uRes, canvas.width, canvas.height);
+    gl.uniform1f(uTime, reduce ? 0 : t);
+    gl.uniform1f(uDepth, progress);
+    gl.uniform1f(uScroll, sy * dpr);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    document.body.classList.toggle('is-deep', progress > 0.22);
+
+    const { m, name } = depthAt(sy);
+    depthEl.textContent = String(Math.round(m)).padStart(4, '0');
+    zoneEl.textContent = name;
+    bob.style.top = `${(Math.log1p(m) / Math.log1p(6000)) * 100}%`;
+
+    const menuTop = 15;
+    const trayLeft = tray.getBoundingClientRect().left;
+    const revs = fallers.filter((f) => f.g.intent === 'revealable');
+    fallers.forEach((f) => {
+      // Slots collapse as soon as the dive starts.
+      f.slot.classList.toggle('is-gone', sy > 8);
+      let y = Math.min(f.ty, f.sy + sy * f.k);
+      const p = Math.min(1, Math.max(0, (y - f.sy) / (f.ty - f.sy)));
+      const e = easeInOut(p);
+      const damp = 1 - e;
+      let x = f.sx + (f.tx - f.sx) * e + Math.sin(sy * 0.005 + f.phase + t * 0.6) * 36 * damp;
+      let rot = Math.sin(sy * 0.004 + f.phase) * 40 * damp;
+      let scale = 1 + Math.min(1, p * 3) * 1.6;
+      const landed = p >= 0.999;
+      f.el.classList.toggle('is-landed', landed);
+      if (landed) y += Math.sin(t * 1.4 + f.phase) * 3;
+
+      // Reveal session blends toward a slot beside the tray.
+      f.reveal += (f.revealTarget - f.reveal) * 0.085;
+      if (f.reveal > 0.001) {
+        const i = revs.indexOf(f);
+        const bx = trayLeft - (revs.length - i) * 30 + 15;
+        const by = sy + menuTop;
+        const r = easeInOut(Math.min(1, f.reveal));
+        x = x + (bx - x) * r;
+        y = y + (by - y) * r;
+        scale = scale + (1 - scale) * r;
+        rot *= 1 - r;
+      }
+      const dark = f.reveal > 0.6 ? (document.body.classList.contains('is-deep') ? '#d9f4ff' : '#0b1d2a') : (p > 0.25 ? '#eaf8ff' : '#0b1d2a');
+      f.el.style.color = dark;
+      f.el.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg) scale(${scale})`;
+    });
+
+    // Blenny peeks out when the reef is on screen and watches the pointer.
+    const hr = hole.getBoundingClientRect();
+    const onScreen = hr.top < vh * 0.8 && hr.bottom > vh * 0.1;
+    hole.classList.toggle('is-peeking', onScreen);
+    const anyReveal = fallers.some((f) => f.revealTarget === 1);
+    if (anyReveal) blenny.lookAt(hr.left + hr.width / 2, -400);
+    else blenny.lookAt(px, py);
+    if (onScreen && !hinted) { hinted = true; fishSlot.classList.add('is-hinting'); }
+
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  // Wait for fonts so measured positions are final.
+  (document.fonts?.ready ?? Promise.resolve()).then(() => { layout(); requestAnimationFrame(frame); });
+})();
+</script>
+</body>
+</html>

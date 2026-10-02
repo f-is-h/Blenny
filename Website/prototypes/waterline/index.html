@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blenny · Waterline</title>
+<link rel="icon" href="../shared/blenny-icon-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a3d5c; }
+  body { font-family: "DM Mono", ui-monospace, monospace; color: #fff; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+
+  .raft {
+    position: fixed; left: 50%; top: 0; width: min(1120px, calc(100vw - 32px)); height: 32px; z-index: 5;
+    display: flex; align-items: center; gap: 16px; padding: 0 12px; border-radius: 10px;
+    background: rgba(250, 253, 255, 0.72); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    box-shadow: 0 10px 30px rgba(0, 50, 80, 0.25), inset 0 -1px 0 rgba(0,0,0,0.06);
+    color: #10202c; font: 500 13px -apple-system, BlinkMacSystemFont, sans-serif;
+    transform-origin: 50% 50%;
+  }
+  .raft b { font-weight: 700; }
+  .raft .menus { display: flex; gap: 16px; opacity: 0.8; }
+  .raft .tray { margin-left: auto; display: flex; align-items: center; height: 100%; }
+  .raft .slot {
+    width: 28px; height: 100%; display: grid; place-items: center; border-radius: 6px; cursor: grab; overflow: hidden;
+    transition: width 0.4s cubic-bezier(.34,1.4,.64,1), opacity 0.3s;
+  }
+  .raft .slot:hover { background: rgba(0, 40, 70, 0.08); }
+  .raft .slot.is-gone { width: 0; opacity: 0; pointer-events: none; }
+  .raft .slot.is-ghost { cursor: default; opacity: 0.001; }
+  .raft .slot.is-new { animation: pop 0.5s ease; }
+  @keyframes pop { 30% { transform: scale(1.6); } }
+  .raft .fish { width: 34px; cursor: pointer; color: #e8601f; }
+  .raft .clock { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  @media (max-width: 820px) { .raft .menus, .raft .clock { display: none; } }
+
+  .copy { position: fixed; left: 5vw; bottom: 6vh; z-index: 3; max-width: 520px; pointer-events: none; }
+  .copy p { margin: 0 0 8px; font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.78); }
+  .copy p b { color: #ffb36b; font-weight: 500; }
+  .stats { position: fixed; right: 5vw; bottom: 6vh; z-index: 3; text-align: right; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.7); pointer-events: none; }
+  .stats div { margin-top: 6px; }
+  .stats b { display: inline-block; min-width: 2ch; color: #fff; font-size: 22px; font-weight: 500; letter-spacing: 0; vertical-align: -3px; margin-left: 10px; }
+  .sky { position: fixed; top: 18px; left: 5vw; right: 5vw; z-index: 1; display: flex; align-items: center; justify-content: space-between; color: #0c3a52; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; }
+  .sky .mark { font: 800 22px Syne, sans-serif; letter-spacing: -0.02em; text-transform: none; }
+  .sky a { color: #fff; background: #e8601f; padding: 8px 14px; border-radius: 999px; text-decoration: none; letter-spacing: 0.06em; }
+  .burrow { position: fixed; width: 150px; z-index: 2; pointer-events: none; }
+  .burrow .clip { position: relative; width: 150px; height: 104px; overflow: hidden; border-radius: 50% 50% 0 0 / 70% 70% 0 0; }
+  .burrow .blenny-character { position: absolute; left: 6px; width: 138px; top: 26px; transition: top 0.5s cubic-bezier(.34,1.56,.64,1); }
+  .burrow.is-excited .blenny-character { top: 4px; }
+</style>
+</head>
+<body>
+<canvas id="sea"></canvas>
+<header class="raft" id="raft">
+  <b>Blenny</b><span class="menus"><span>File</span><span>Edit</span><span>View</span><span>Window</span></span>
+  <div class="tray" id="tray"></div>
+  <div class="slot fish" id="fish" title="Reveal"></div>
+  <span class="clock" id="clock"></span>
+</header>
+<nav class="sky"><span class="mark">Blenny</span><span>A menu bar organizer for macOS 27</span><a href="#" onclick="return false">Download</a></nav>
+<div class="burrow" id="burrow"><div class="clip" id="clip"></div></div>
+<div class="copy">
+  <p><b>Grab</b> any icon on the menu bar and pull it under.</p>
+  <p>Leave it on <b>the reef</b> and it's Revealable. Drop it into <b>the deep</b> and it's Hidden.</p>
+  <p>Then tap <b>the fish</b>.</p>
+</div>
+<div class="stats">
+  <div>Menu bar <b id="nBar">0</b></div>
+  <div>Reef <b id="nReef">0</b></div>
+  <div>Deep <b id="nDeep">0</b></div>
+</div>
+
+<script src="../shared/icons.js"></script>
+<script src="../shared/blenny.js"></script>
+<script>
+(() => {
+  const { glyphs, svg, image, blennyGlyph, clock } = window.MenuGlyphs;
+  const $ = (s) => document.querySelector(s);
+  const canvas = $('#sea'), ctx = canvas.getContext('2d');
+  const raft = $('#raft'), tray = $('#tray'), fish = $('#fish');
+  fish.innerHTML = blennyGlyph;
+  const tick = () => { $('#clock').textContent = clock(); };
+  tick(); setInterval(tick, 20000);
+
+  const blenny = Blenny.create({ reach: 9 });
+  $('#clip').append(blenny.el);
+
+  let W, H, dpr, surfaceY;
+  const glyphImg = new Map(glyphs.map((g) => [g.id, image(g, '#0f2230', 64, 2)]));
+
+  // --- Water surface: 1D spring columns.
+  const COLS = 140;
+  const wave = new Float32Array(COLS), waveV = new Float32Array(COLS);
+  const surfaceAt = (x) => {
+    const f = Math.max(0, Math.min(COLS - 1.001, (x / W) * (COLS - 1)));
+    const i = Math.floor(f), t = f - i;
+    return surfaceY + wave[i] * (1 - t) + wave[i + 1] * t;
+  };
+  function splash(x, v) {
+    const i = Math.round((x / W) * (COLS - 1));
+    for (let k = -2; k <= 2; k++) {
+      const j = i + k;
+      if (j >= 0 && j < COLS) waveV[j] += v * (1 - Math.abs(k) * 0.3);
+    }
+  }
+
+  // --- Seafloor: a reef shelf on the left, a trench on the right.
+  const FLOOR = [[0, 0.6], [0.1, 0.585], [0.22, 0.61], [0.33, 0.6], [0.41, 0.625], [0.45, 0.7], [0.48, 0.83], [0.53, 0.93], [0.62, 0.965], [0.76, 0.975], [0.9, 0.955], [1, 0.965]];
+  let floor = [];
+  const CLIFF_X = 0.465;
+
+  // --- Bodies.
+  const R = 21;
+  const bodies = [];
+  let grabbed = null;
+
+  // Menu bar slots.
+  const slots = new Map();
+  function addSlot(g, isNew) {
+    const s = document.createElement('div');
+    s.className = 'slot' + (isNew ? ' is-new' : '');
+    s.innerHTML = svg(g);
+    s.dataset.id = g.id;
+    s.addEventListener('pointerdown', (e) => grabFromBar(e, g, s));
+    tray.append(s);
+    slots.set(g.id, s);
+    return s;
+  }
+  [...glyphs].sort(() => Math.random() - 0.5).forEach((g) => addSlot(g));
+
+  function spawn(g, x, y) {
+    const b = { g, x, y, vx: 0, vy: 0, a: (Math.random() - 0.5) * 0.4, va: 0, state: 'free', wet: false, rest: 0, zone: null, ghost: null };
+    bodies.push(b);
+    return b;
+  }
+  function grabFromBar(e, g, slot) {
+    e.preventDefault();
+    const r = slot.getBoundingClientRect();
+    slot.classList.add('is-gone');
+    setTimeout(() => { slot.remove(); }, 450);
+    slots.delete(g.id);
+    const b = spawn(g, r.left + r.width / 2, r.top + r.height / 2);
+    startDrag(b, e);
+  }
+  function startDrag(b, e) {
+    grabbed = { b, px: e.clientX, py: e.clientY, lx: e.clientX, ly: e.clientY, t: performance.now() };
+    b.state = 'held';
+    blenny.excite(500);
+  }
+
+  addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.raft')) return;
+    let best = null, bd = R * 1.6;
+    bodies.forEach((b) => {
+      if (b.state !== 'free') return;
+      const d = Math.hypot(b.x - e.clientX, b.y - e.clientY);
+      if (d < bd) { bd = d; best = b; }
+    });
+    if (best) startDrag(best, e);
+  });
+  addEventListener('pointermove', (e) => {
+    blenny.lookAt(e.clientX, e.clientY);
+    if (!grabbed) return;
+    const now = performance.now();
+    const dt = Math.max(8, now - grabbed.t) / 1000;
+    grabbed.b.vx = (e.clientX - grabbed.lx) / dt * 0.6;
+    grabbed.b.vy = (e.clientY - grabbed.ly) / dt * 0.6;
+    grabbed.lx = e.clientX; grabbed.ly = e.clientY; grabbed.t = now;
+    grabbed.px = e.clientX; grabbed.py = e.clientY;
+  });
+  function release() {
+    if (!grabbed) return;
+    const b = grabbed.b;
+    grabbed = null;
+    // Dropped back on the raft: it becomes Visible again.
+    const rr = raft.getBoundingClientRect();
+    if (b.y < rr.bottom + 16 && b.x > rr.left && b.x < rr.right) {
+      bodies.splice(bodies.indexOf(b), 1);
+      const s = addSlot(b.g, true);
+      tray.insertBefore(s, tray.firstChild);
+      return;
+    }
+    b.state = 'free';
+  }
+  addEventListener('pointerup', release);
+  addEventListener('pointercancel', release);
+
+  // --- Reveal: reef icons float up into the bar, then swim home.
+  let revealUntil = 0;
+  fish.addEventListener('click', () => {
+    const reef = bodies.filter((b) => b.zone === 'reef' && b.state === 'free');
+    blenny.excite(1600);
+    $('#burrow').classList.add('is-excited');
+    setTimeout(() => $('#burrow').classList.remove('is-excited'), 1600);
+    if (!reef.length) return;
+    revealUntil = performance.now() + 4200;
+    reef.forEach((b, i) => {
+      b.home = { x: b.x, y: b.y, a: b.a };
+      b.state = 'docking';
+      b.ghost = document.createElement('div');
+      b.ghost.className = 'slot is-ghost';
+      tray.insertBefore(b.ghost, tray.firstChild);
+      b.t = 0; b.delay = i * 0.07;
+      for (let k = 0; k < 8; k++) bubbles.push(newBubble(b.x, b.y));
+    });
+    bodies.filter((b) => b.zone === 'deep').forEach((b) => { b.va += (Math.random() - 0.5) * 6; });
+  });
+
+  // --- Particles.
+  const bubbles = [];
+  const newBubble = (x, y) => ({ x: x + (Math.random() - 0.5) * 16, y, r: 1.5 + Math.random() * 3.5, vy: -40 - Math.random() * 60, ph: Math.random() * 6 });
+
+  function layout() {
+    dpr = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    surfaceY = Math.max(110, H * 0.15);
+    floor = FLOOR.map(([x, y]) => [x * W, y * H]);
+    // Blenny's burrow sits in the cliff face.
+    const bx = W * 0.435, by = H * 0.655;
+    const burrow = $('#burrow');
+    burrow.style.left = `${bx - 75}px`; burrow.style.top = `${by - 104}px`;
+    drawText();
+  }
+
+  // Headline rendered once, then sliced with a ripple each frame.
+  const textCanvas = document.createElement('canvas');
+  const tctx = textCanvas.getContext('2d');
+  function drawText() {
+    textCanvas.width = W * dpr; textCanvas.height = H * dpr;
+    tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    tctx.clearRect(0, 0, W, H);
+    const size = Math.min(W * 0.082, H * 0.15);
+    tctx.font = `800 ${size}px Syne, sans-serif`;
+    tctx.fillStyle = 'rgba(255,255,255,0.13)';
+    tctx.textBaseline = 'top';
+    tctx.fillText('Pull the', W * 0.05, surfaceY + H * 0.07);
+    tctx.fillText('clutter under.', W * 0.05, surfaceY + H * 0.07 + size * 0.95);
+  }
+
+  function segCollide(b, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const t = Math.max(0, Math.min(1, ((b.x - ax) * dx + (b.y - ay) * dy) / (dx * dx + dy * dy)));
+    const cx = ax + dx * t, cy = ay + dy * t;
+    let nx = b.x - cx, ny = b.y - cy;
+    const d = Math.hypot(nx, ny);
+    if (d >= R || d === 0) return false;
+    nx /= d; ny /= d;
+    b.x = cx + nx * R; b.y = cy + ny * R;
+    const vn = b.vx * nx + b.vy * ny;
+    if (vn < 0) {
+      b.vx -= 1.35 * vn * nx; b.vy -= 1.35 * vn * ny;
+      const tx = -ny, ty = nx;
+      const vt = b.vx * tx + b.vy * ty;
+      b.va = vt / R;
+      // Gentle slopes hold an icon in place; steep ones let it slide.
+      const grip = Math.abs(nx) < 0.45 * Math.abs(ny) ? 0.25 : 0.01;
+      b.vx -= vt * tx * grip; b.vy -= vt * ty * grip;
+    }
+    return true;
+  }
+
+  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  const raftBase = 8;
+
+  let last = performance.now();
+  function step(now) {
+    const dt = Math.min(1 / 30, (now - last) / 1000);
+    last = now;
+    const t = now / 1000;
+
+    // Waves.
+    for (let k = 0; k < 2; k++) {
+      for (let i = 0; i < COLS; i++) {
+        const l = wave[Math.max(0, i - 1)], r = wave[Math.min(COLS - 1, i + 1)];
+        waveV[i] += ((l + r) * 0.5 - wave[i]) * 40 * dt - wave[i] * 4 * dt;
+        waveV[i] *= 0.985;
+      }
+      for (let i = 0; i < COLS; i++) wave[i] += waveV[i] * dt * 6;
+    }
+    for (let i = 0; i < COLS; i++) wave[i] += Math.sin(t * 1.3 + i * 0.22) * 0.05 + Math.sin(t * 0.7 - i * 0.09) * 0.04;
+
+    // The menu bar floats on the surface.
+    const rr = raft.offsetWidth;
+    const cx = W / 2;
+    const yl = surfaceAt(cx - rr / 2), yr = surfaceAt(cx + rr / 2), ym = surfaceAt(cx);
+    const ang = Math.atan2(yr - yl, rr);
+    raft.style.transform = `translate(-50%, ${(yl + yr + ym * 2) / 4 - 32 + raftBase}px) rotate(${ang}rad)`;
+
+    // Bodies.
+    const sub = 3, h = dt / sub;
+    for (let s = 0; s < sub; s++) {
+      bodies.forEach((b) => {
+        if (b.state === 'held') {
+          b.x += (grabbed.px - b.x) * 0.5; b.y += (grabbed.py - b.y) * 0.5; b.a *= 0.9;
+          return;
+        }
+        if (b.state !== 'free') return;
+        const sy = surfaceAt(b.x);
+        const under = b.y > sy;
+        if (under !== b.wet) {
+          splash(b.x, b.vy * 0.05);
+          if (under) for (let k = 0; k < 10; k++) bubbles.push(newBubble(b.x, b.y));
+          b.wet = under;
+        }
+        if (under) {
+          b.vy += 260 * h;
+          const drag = Math.exp(-2.4 * h);
+          b.vx *= drag; b.vy *= drag;
+          if (!b.touching) b.vx += Math.sin(t * 0.8 + b.y * 0.01) * 6 * h;
+        } else {
+          b.vy += 1800 * h;
+        }
+        b.x += b.vx * h; b.y += b.vy * h;
+        b.a += b.va * h; b.va *= Math.exp(-1.6 * h);
+        b.touching = false;
+        for (let i = 0; i < floor.length - 1; i++) if (segCollide(b, floor[i][0], floor[i][1], floor[i + 1][0], floor[i + 1][1])) b.touching = true;
+        if (b.x < R) { b.x = R; b.vx = Math.abs(b.vx) * 0.5; }
+        if (b.x > W - R) { b.x = W - R; b.vx = -Math.abs(b.vx) * 0.5; }
+      });
+      // Body-body separation.
+      for (let i = 0; i < bodies.length; i++) {
+        for (let j = i + 1; j < bodies.length; j++) {
+          const a = bodies[i], c = bodies[j];
+          if (a.state !== 'free' || c.state !== 'free') continue;
+          const dx = c.x - a.x, dy = c.y - a.y, d = Math.hypot(dx, dy);
+          if (d > 0 && d < R * 2) {
+            const push = (R * 2 - d) / 2, nx = dx / d, ny = dy / d;
+            a.x -= nx * push; a.y -= ny * push; c.x += nx * push; c.y += ny * push;
+            const rv = (c.vx - a.vx) * nx + (c.vy - a.vy) * ny;
+            if (rv < 0) { a.vx += rv * nx * 0.5; a.vy += rv * ny * 0.5; c.vx -= rv * nx * 0.5; c.vy -= rv * ny * 0.5; }
+          }
+        }
+      }
+    }
+
+    // Classify resting bodies by where they settled.
+    let nReef = 0, nDeep = 0;
+    bodies.forEach((b) => {
+      if (b.state === 'free' && Math.hypot(b.vx, b.vy) < 30 && b.y > surfaceY + 40) {
+        b.zone = b.x < W * CLIFF_X && b.y < H * 0.75 ? 'reef' : b.y > H * 0.75 ? 'deep' : b.zone;
+      } else if (b.state === 'free' && b.y < surfaceY + 40) b.zone = null;
+      if (b.zone === 'reef') nReef++;
+      if (b.zone === 'deep') nDeep++;
+    });
+    $('#nBar').textContent = slots.size;
+    $('#nReef').textContent = nReef;
+    $('#nDeep').textContent = nDeep;
+
+    // Docking animation during a reveal session.
+    const revealing = now < revealUntil;
+    bodies.forEach((b) => {
+      if (b.state === 'docking' || b.state === 'homing') {
+        b.t = Math.min(1, b.t + dt * 1.1);
+        const k = ease(Math.max(0, Math.min(1, (b.t - b.delay) / (1 - b.delay))));
+        if (b.state === 'docking') {
+          const gr = b.ghost.getBoundingClientRect();
+          b.x = b.home.x + (gr.left + gr.width / 2 - b.home.x) * k;
+          b.y = b.home.y + (gr.top + gr.height / 2 - b.home.y) * k;
+          b.a = b.home.a * (1 - k);
+          if (Math.random() < 0.3) bubbles.push(newBubble(b.x, b.y + 10));
+          if (!revealing && b.t >= 1) { b.state = 'homing'; b.t = 0; b.from = { x: b.x, y: b.y }; }
+        } else {
+          b.x = b.from.x + (b.home.x - b.from.x) * k;
+          b.y = b.from.y + (b.home.y - b.from.y) * k;
+          b.a = b.home.a * k;
+          if (b.t >= 1) {
+            b.state = 'free'; b.vx = b.vy = 0;
+            b.ghost.remove(); b.ghost = null;
+          }
+        }
+      }
+    });
+
+    draw(t, revealing);
+    requestAnimationFrame(step);
+  }
+
+  function draw(t, revealing) {
+    // Sky above the waterline.
+    const sky = ctx.createLinearGradient(0, 0, 0, surfaceY);
+    sky.addColorStop(0, '#fdf1dc'); sky.addColorStop(1, '#bfe9f2');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, surfaceY + 30);
+
+    // Water body clipped to the surface line.
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let i = 0; i < COLS; i++) ctx.lineTo((i / (COLS - 1)) * W, surfaceY + wave[i]);
+    ctx.lineTo(W, H); ctx.closePath();
+    ctx.clip();
+    const water = ctx.createLinearGradient(0, surfaceY, 0, H);
+    water.addColorStop(0, '#1fb6c9'); water.addColorStop(0.35, '#0b6e98'); water.addColorStop(0.75, '#063a62'); water.addColorStop(1, '#021a33');
+    ctx.fillStyle = water; ctx.fillRect(0, 0, W, H);
+
+    // God rays.
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 7; i++) {
+      const x = W * (0.08 + i * 0.15) + Math.sin(t * 0.3 + i) * 40;
+      const g = ctx.createLinearGradient(0, surfaceY, 0, H * 0.8);
+      g.addColorStop(0, `rgba(190,250,255,${0.07 + 0.04 * Math.sin(t * 0.8 + i * 2)})`);
+      g.addColorStop(1, 'rgba(190,250,255,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(x - 30, surfaceY); ctx.lineTo(x + 30, surfaceY);
+      ctx.lineTo(x + 180, H * 0.8); ctx.lineTo(x + 40, H * 0.8); ctx.closePath(); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Rippled headline.
+    const tw = textCanvas.width, band = 3;
+    for (let y = 0; y < H; y += band) {
+      const off = Math.sin(y * 0.035 + t * 2.2) * 5 + Math.sin(y * 0.011 - t) * 3;
+      ctx.drawImage(textCanvas, 0, y * dpr, tw, band * dpr, off, y, W, band);
+    }
+
+    // Trench glow and floor.
+    const deepGlow = ctx.createRadialGradient(W * 0.74, H, 0, W * 0.74, H, W * 0.35);
+    deepGlow.addColorStop(0, revealing ? 'rgba(120,255,230,0.12)' : 'rgba(120,255,230,0.06)');
+    deepGlow.addColorStop(1, 'rgba(120,255,230,0)');
+    ctx.fillStyle = deepGlow; ctx.fillRect(0, 0, W, H);
+
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    floor.forEach(([x, y]) => ctx.lineTo(x, y));
+    ctx.lineTo(W, H); ctx.closePath();
+    const rock = ctx.createLinearGradient(0, H * 0.58, 0, H);
+    rock.addColorStop(0, '#2f5870'); rock.addColorStop(0.4, '#173247'); rock.addColorStop(1, '#07131f');
+    ctx.fillStyle = rock; ctx.fill();
+    ctx.strokeStyle = 'rgba(170, 235, 255, 0.35)'; ctx.lineWidth = 2;
+    ctx.beginPath(); floor.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke();
+
+    // Zone labels.
+    ctx.font = '500 11px "DM Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.textAlign = 'center';
+    ctx.fillText('THE REEF · REVEALABLE', W * 0.2, H * 0.585 - 70);
+    ctx.fillText('THE DEEP · HIDDEN', W * 0.74, H * 0.965 - 70);
+    ctx.textAlign = 'start';
+
+    // Bubbles.
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      b.y += b.vy / 60; b.x += Math.sin(t * 4 + b.ph) * 0.4;
+      if (b.y < surfaceAt(b.x)) { bubbles.splice(i, 1); continue; }
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.stroke();
+    }
+    if (Math.random() < 0.08) bubbles.push(newBubble(W * 0.435 + (Math.random() - 0.5) * 30, H * 0.64));
+    ctx.restore();
+
+    // Surface highlight.
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < COLS; i++) ctx.lineTo((i / (COLS - 1)) * W, surfaceY + wave[i]);
+    ctx.stroke();
+
+    // Icon tiles.
+    bodies.forEach((b) => {
+      ctx.save();
+      ctx.translate(b.x, b.y); ctx.rotate(b.a);
+      const docked = b.state === 'docking' && b.t > 0.9;
+      const s = docked ? 0.55 : 1;
+      ctx.scale(s, s);
+      if (b.zone === 'deep') { ctx.shadowColor = 'rgba(120,255,230,0.9)'; ctx.shadowBlur = 18 + Math.sin(t * 2 + b.x) * 6; }
+      else { ctx.shadowColor = 'rgba(0,20,40,0.35)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 4; }
+      ctx.fillStyle = b.zone === 'deep' ? '#d8fff4' : '#f4fbff';
+      ctx.beginPath(); ctx.roundRect(-R, -R, R * 2, R * 2, 11); ctx.fill();
+      ctx.shadowColor = 'transparent';
+      const img = glyphImg.get(b.g.id);
+      if (img.complete) ctx.drawImage(img, -R * 0.62, -R * 0.62, R * 1.24, R * 1.24);
+      ctx.restore();
+    });
+  }
+
+  addEventListener('resize', layout);
+  layout();
+
+  // Intro: a few icons tumble out of the bar on their own.
+  setTimeout(() => {
+    [...slots.values()].slice(0, 4).forEach((s, i) => {
+      setTimeout(() => {
+        const g = glyphs.find((x) => x.id === s.dataset.id);
+        const r = s.getBoundingClientRect();
+        s.classList.add('is-gone'); setTimeout(() => s.remove(), 450); slots.delete(g.id);
+        const b = spawn(g, r.left + r.width / 2, r.top + r.height / 2);
+        b.vx = [-1100, -800, -520, 380][i]; b.vy = -420;
+      }, i * 380);
+    });
+  }, 900);
+
+  (document.fonts?.ready ?? Promise.resolve()).then(() => { drawText(); requestAnimationFrame(step); });
+})();
+</script>
+</body>
+</html>

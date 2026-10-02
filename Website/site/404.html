@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lost at sea · Blenny</title>
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/img/favicon-64.png">
+<link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&amp;family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..600,0..100,0..1;1,9..144,300..600,0..100,0..1&amp;family=Martian+Mono:wdth,wght@87.5..112.5,400..500&amp;display=swap">
+<link rel="stylesheet" href="/assets/css/site.css">
+<style>
+  body { min-height: 100svh; display: grid; place-items: center; text-align: center; background: radial-gradient(120% 90% at 20% 0%, #1fa4cf, #0b5f8f 45%, #062d55); }
+  .lost { display: grid; justify-items: center; gap: 20px; padding: 24px; }
+  /* The hero's rock and cave, with the blenny peeking out now and then. */
+  .lost .perch { position: relative; right: auto; bottom: auto; width: min(380px, 78vw); cursor: default; }
+  .lost .perch-pocket .sprite-blenny { animation: peek 5s var(--spring) infinite; }
+  @keyframes peek { 0%, 12%, 88%, 100% { transform: translateY(70%); } 30%, 70% { transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .lost .perch-pocket .sprite-blenny { animation: none; } }
+  .lost h1 { max-width: none; font-size: clamp(56px, 10vw, 120px); }
+  .lost p { margin: 0; color: var(--muted); }
+</style>
+</head>
+<body>
+  <main class="lost">
+    <p class="eyebrow">404 · Depth unknown</p>
+    <div class="perch" aria-hidden="true">
+      <img class="perch-cave" src="/assets/img/scene/cave.webp" alt="" width="1100" height="900">
+      <div class="perch-pocket" id="hole"></div>
+      <div class="perch-shade"></div>
+      <img class="perch-rock" src="/assets/img/scene/rock-hero-1200.webp" alt="" width="2400" height="1502">
+    </div>
+    <h1>Lost <em>at sea.</em></h1>
+    <p>The blenny checked every crevice. The page you were looking for isn't here.</p>
+    <a class="btn primary" href="/">Back to the surface</a>
+  </main>
+  <script type="module" src="/assets/js/lost.js"></script>
+</body>
+</html>

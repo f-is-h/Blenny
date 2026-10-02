@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blenny · Sonar</title>
+<link rel="icon" href="../shared/blenny-icon-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=VT323&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --p: #7dffa8; --p-dim: rgba(125, 255, 168, 0.45); --p-faint: rgba(125, 255, 168, 0.14); --warn: #ffb347; --bg: #020a06; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); }
+  body {
+    color: var(--p); font: 400 14px/1.5 "IBM Plex Mono", monospace; overflow-x: hidden;
+    text-shadow: 0 0 6px rgba(125, 255, 168, 0.55), 1px 0 0 rgba(255, 60, 60, 0.12), -1px 0 0 rgba(60, 120, 255, 0.12);
+  }
+  .crt { position: relative; min-height: 100vh; padding: 28px clamp(16px, 3vw, 44px); display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: clamp(20px, 3vw, 48px); align-items: center; }
+  .crt::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 10;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,0.28) 3px);
+    mix-blend-mode: multiply;
+  }
+  .crt::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 11;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.75) 100%);
+    animation: flicker 0.12s steps(2) infinite;
+  }
+  @keyframes flicker { 50% { opacity: 0.93; } }
+
+  .scope-wrap { position: relative; aspect-ratio: 1; width: min(100%, 86vh); justify-self: center; }
+  #scope { width: 100%; height: 100%; display: block; cursor: crosshair; }
+  .readout { position: absolute; left: 0; bottom: -4px; font-size: 12px; color: var(--p-dim); letter-spacing: 0.08em; }
+
+  .panel { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+  .top { display: flex; justify-content: space-between; font-size: 12px; letter-spacing: 0.18em; color: var(--p-dim); }
+  h1 { margin: 0; font: 400 clamp(64px, 9vw, 150px)/0.8 VT323, monospace; letter-spacing: 0.01em; }
+  h1 small { display: block; font-size: 0.32em; line-height: 1.1; color: var(--p-dim); margin-top: 14px; letter-spacing: 0.06em; }
+  pre.ascii { margin: 0; font: 400 15px/1.05 "IBM Plex Mono", monospace; color: var(--warn); text-shadow: 0 0 8px rgba(255,179,71,0.6); }
+  .log {
+    height: 230px; overflow: hidden; border: 1px solid var(--p-faint); padding: 12px 14px; font-size: 12.5px;
+    background: linear-gradient(rgba(125,255,168,0.03), rgba(125,255,168,0.01)); display: flex; flex-direction: column; justify-content: flex-end;
+  }
+  .log div { white-space: pre; overflow: hidden; text-overflow: clip; }
+  .log .w { color: var(--warn); text-shadow: 0 0 6px rgba(255,179,71,0.6); }
+  .log .d { color: var(--p-dim); }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; }
+  button, .dl {
+    font: 400 26px/1 VT323, monospace; letter-spacing: 0.08em; color: var(--p); background: transparent; cursor: pointer;
+    border: 1px solid var(--p); padding: 10px 18px 8px; text-shadow: inherit; text-decoration: none;
+    box-shadow: 0 0 12px rgba(125,255,168,0.25), inset 0 0 12px rgba(125,255,168,0.1);
+  }
+  button:hover, .dl:hover { background: var(--p); color: var(--bg); text-shadow: none; }
+  button kbd { font: inherit; opacity: 0.55; margin-left: 8px; font-size: 18px; }
+  .dl { color: var(--warn); border-color: var(--warn); box-shadow: 0 0 12px rgba(255,179,71,0.3); margin-left: auto; }
+  .dl:hover { background: var(--warn); }
+  .legend { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12px; color: var(--p-dim); }
+  .legend b { color: var(--p); font-weight: 500; }
+  @media (max-width: 900px) {
+    .crt { grid-template-columns: 1fr; }
+    .scope-wrap { width: 100%; }
+    pre.ascii { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="crt">
+  <div class="scope-wrap">
+    <canvas id="scope"></canvas>
+    <div class="readout" id="readout">BRG ---° · RNG ---</div>
+  </div>
+  <div class="panel">
+    <div class="top"><span>BLENNY/SONAR v1.0</span><span id="clock">--:--:--</span></div>
+    <h1>MENU BAR<br>RECON<small>A tiny organizer for macOS 27.<br>Knows where every icon is hiding.</small></h1>
+<pre class="ascii" aria-hidden="true">   \|/          \|/
+    |   _.---._   |
+   .-'''       '''-.
+  /  .--.     .--.  \
+ |  ( ●  )   ( ●  )  |
+ |   '--'  .  '--'   |
+  \        o        /
+~~~'-.___________.-'~~~</pre>
+    <div class="log" id="log"></div>
+    <div class="controls">
+      <button id="ping">PING<kbd>P</kbd></button>
+      <button id="reveal">REVEAL<kbd>R</kbd></button>
+      <a class="dl" href="#" onclick="return false">&gt; DOWNLOAD_</a>
+    </div>
+    <div class="legend">
+      <b>RING 1</b><span>VISIBLE · always on the surface</span>
+      <b>RING 2</b><span>REVEALABLE · surfaces on command, dives back after</span>
+      <b>RING 3</b><span>HIDDEN · silent running, excluded from reveal</span>
+    </div>
+  </div>
+</div>
+
+<script src="../shared/icons.js"></script>
+<script>
+(() => {
+  const { glyphs } = window.MenuGlyphs;
+  const $ = (s) => document.querySelector(s);
+  const canvas = $('#scope'), ctx = canvas.getContext('2d');
+  const log = $('#log');
+
+  const RING = { visible: 0.3, revealable: 0.62, hidden: 0.9 };
+  const contacts = glyphs.map((g, i) => {
+    const jitter = (Math.random() - 0.5) * 0.14;
+    return {
+      g, id: (i + 1).toString(16).toUpperCase().padStart(2, '0'),
+      bearing: Math.random() * Math.PI * 2,
+      range: RING[g.intent] + jitter,
+      home: RING[g.intent] + jitter,
+      glow: 0, lit: 0,
+    };
+  });
+
+  let size = 600, dpr = 1;
+  function resize() {
+    const r = canvas.getBoundingClientRect();
+    dpr = Math.min(devicePixelRatio || 1, 2);
+    size = r.width;
+    canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  // --- Log with a typewriter feel.
+  const queue = [];
+  function print(text, cls = '') { queue.push({ text, cls }); }
+  let typing = null;
+  function pump() {
+    if (!typing && queue.length) {
+      const item = queue.shift();
+      const el = document.createElement('div');
+      if (item.cls) el.className = item.cls;
+      log.append(el);
+      while (log.children.length > 14) log.firstChild.remove();
+      typing = { el, text: item.text, i: 0 };
+    }
+    if (typing) {
+      typing.i = Math.min(typing.text.length, typing.i + 3);
+      typing.el.textContent = typing.text.slice(0, typing.i) + (typing.i < typing.text.length ? '█' : '');
+      if (typing.i >= typing.text.length) typing = null;
+    }
+  }
+  const pad = (s, n) => (s + ' '.repeat(n)).slice(0, n);
+  const deg = (a) => String(Math.round(((a * 180) / Math.PI + 360) % 360)).padStart(3, '0');
+
+  print('> BLENNY SONAR ONLINE. MACOS 27 MENU BAR IN RANGE.', 'd');
+  print(`> ${contacts.length} CONTACTS. ASSIGNING DEPTHS BY BUNDLE.`, 'd');
+
+  // --- Audio (only after a user gesture).
+  let audio = null;
+  function ping() {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const now = audio.currentTime;
+    const out = audio.createGain(); out.gain.value = 0.22; out.connect(audio.destination);
+    const delay = audio.createDelay(); delay.delayTime.value = 0.38;
+    const fb = audio.createGain(); fb.gain.value = 0.42;
+    delay.connect(fb); fb.connect(delay); delay.connect(out);
+    const o = audio.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(1480, now); o.frequency.exponentialRampToValueAtTime(1180, now + 1.2);
+    const g = audio.createGain();
+    g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(1, now + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, now + 1.3);
+    o.connect(g); g.connect(out); g.connect(delay);
+    o.start(now); o.stop(now + 1.4);
+  }
+
+  // --- Actions.
+  const rings = [];
+  function doPing() {
+    ping();
+    rings.push({ r: 0 });
+    print('> ACTIVE PING. ALL CONTACTS ILLUMINATED.', 'w');
+    contacts.filter((c) => c.g.intent === 'hidden').forEach((c) => {
+      print(`  0x${c.id} ${pad(c.g.name.toUpperCase(), 12)} HIDDEN · EXCLUDED FROM REVEAL`, 'd');
+    });
+  }
+  let revealUntil = 0;
+  function doReveal() {
+    revealUntil = performance.now() + 4500;
+    print('> REVEAL SESSION OPEN · 4.5 s', 'w');
+    contacts.filter((c) => c.g.intent === 'revealable').forEach((c) => { c.lit = 1; });
+    print('  REVEALABLE CONTACTS SURFACING. HIDDEN HOLDING DEPTH.', 'd');
+    setTimeout(() => print('> SESSION CLOSED. CONTACTS RETURNING TO RING 2.', 'd'), 4500);
+  }
+  $('#ping').addEventListener('click', doPing);
+  $('#reveal').addEventListener('click', doReveal);
+  addEventListener('keydown', (e) => {
+    if (e.key === 'p' || e.key === 'P') doPing();
+    if (e.key === 'r' || e.key === 'R') doReveal();
+  });
+
+  // --- Cursor readout.
+  canvas.addEventListener('pointermove', (e) => {
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left - r.width / 2, y = e.clientY - r.top - r.height / 2;
+    const rng = Math.hypot(x, y) / (r.width / 2);
+    $('#readout').textContent = `BRG ${deg(Math.atan2(x, -y))}° · RNG ${Math.round(rng * 4000).toString().padStart(4, '0')} m`;
+  });
+
+  // Glyph path images in phosphor green.
+  const imgs = new Map(glyphs.map((g) => [g.id, MenuGlyphs.image(g, '#7dffa8', 48, 2)]));
+  const blennyImg = new Image();
+  blennyImg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(MenuGlyphs.blennyGlyph.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" color="#ffb347" ').replace('width="16" height="16"', 'width="64" height="64"'));
+
+  let sweep = -Math.PI / 2, last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const R = size / 2, cx = R, cy = R;
+    const prev = sweep;
+    sweep += dt * 1.25;
+
+    // Phosphor persistence: fade rather than clear.
+    ctx.fillStyle = 'rgba(2, 10, 6, 0.16)';
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    // Grid.
+    ctx.strokeStyle = 'rgba(125,255,168,0.16)'; ctx.lineWidth = 1;
+    [RING.visible, RING.revealable, RING.hidden, 1].forEach((k, i) => {
+      ctx.setLineDash(i === 3 ? [] : [2, 6]);
+      ctx.beginPath(); ctx.arc(0, 0, R * k * 0.96, 0, Math.PI * 2); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+    for (let a = 0; a < 12; a++) {
+      const ang = (a / 12) * Math.PI * 2;
+      ctx.beginPath(); ctx.moveTo(Math.cos(ang) * R * 0.1, Math.sin(ang) * R * 0.1);
+      ctx.lineTo(Math.cos(ang) * R * 0.96, Math.sin(ang) * R * 0.96); ctx.stroke();
+    }
+    ctx.font = `${Math.max(10, R * 0.035)}px "IBM Plex Mono", monospace`;
+    ctx.fillStyle = 'rgba(125,255,168,0.5)';
+    ctx.fillText('VISIBLE', 6, -R * RING.visible * 0.96 + 14);
+    ctx.fillText('REVEALABLE', 6, -R * RING.revealable * 0.96 + 14);
+    ctx.fillText('HIDDEN', 6, -R * RING.hidden * 0.96 + 14);
+
+    // Sweep wedge.
+    const grad = ctx.createConicGradient ? ctx.createConicGradient(sweep - 0.9, 0, 0) : null;
+    if (grad) {
+      grad.addColorStop(0, 'rgba(125,255,168,0)');
+      grad.addColorStop(0.143, 'rgba(125,255,168,0.28)');
+      grad.addColorStop(0.144, 'rgba(125,255,168,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(0, 0, R * 0.96, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(180,255,205,0.9)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(sweep) * R * 0.96, Math.sin(sweep) * R * 0.96); ctx.stroke();
+
+    // Ping rings.
+    for (let i = rings.length - 1; i >= 0; i--) {
+      const p = rings[i]; p.r += dt * 0.9;
+      ctx.strokeStyle = `rgba(255,179,71,${Math.max(0, 1 - p.r)})`; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0, 0, R * 0.96 * p.r, 0, Math.PI * 2); ctx.stroke();
+      contacts.forEach((c) => { if (Math.abs(c.range - p.r) < 0.02) c.glow = 1.4; });
+      if (p.r > 1) rings.splice(i, 1);
+    }
+
+    // Contacts.
+    const revealing = now < revealUntil;
+    const norm = (a) => ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    contacts.forEach((c) => {
+      const target = c.g.intent === 'revealable' && revealing ? RING.visible * 0.9 : c.home;
+      c.range += (target - c.range) * dt * 2.2;
+      const a0 = norm(prev), a1 = norm(sweep), ca = norm(c.bearing);
+      const crossed = a0 < a1 ? ca >= a0 && ca < a1 : ca >= a0 || ca < a1;
+      if (crossed) {
+        if (c.g.intent !== 'hidden') {
+          c.glow = 1;
+          if (Math.random() < 0.35) print(`  0x${c.id} ${pad(c.g.name.toUpperCase(), 12)} ${pad(c.g.intent.toUpperCase(), 10)} BRG ${deg(c.bearing + Math.PI / 2)}°`);
+        } else c.glow = Math.max(c.glow, 0.12);
+      }
+      c.glow = Math.max(0, c.glow - dt * 0.45);
+      if (c.glow <= 0.01) return;
+      const x = Math.cos(c.bearing) * c.range * R * 0.96, y = Math.sin(c.bearing) * c.range * R * 0.96;
+      const hidden = c.g.intent === 'hidden';
+      ctx.globalAlpha = Math.min(1, c.glow);
+      ctx.fillStyle = hidden ? 'rgba(255,179,71,0.9)' : 'rgba(125,255,168,0.9)';
+      ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 16;
+      const s = R * 0.07;
+      const img = imgs.get(c.g.id);
+      if (img.complete) ctx.drawImage(img, x - s / 2, y - s / 2, s, s);
+      ctx.shadowBlur = 0;
+      ctx.font = `${Math.max(9, R * 0.028)}px "IBM Plex Mono", monospace`;
+      ctx.fillText(hidden ? `0x${c.id} ████` : `0x${c.id} ${c.g.name.toUpperCase()}`, x + s * 0.7, y + 4);
+      ctx.globalAlpha = 1;
+    });
+
+    // Blenny at the center, always friendly.
+    const b = R * 0.12;
+    if (blennyImg.complete) ctx.drawImage(blennyImg, -b / 2, -b / 2, b, b);
+    ctx.restore();
+
+    pump();
+    $('#clock').textContent = new Date().toLocaleTimeString('en-GB');
+    requestAnimationFrame(frame);
+  }
+  (document.fonts?.ready ?? Promise.resolve()).then(() => { resize(); requestAnimationFrame(frame); });
+})();
+</script>
+</body>
+</html>
