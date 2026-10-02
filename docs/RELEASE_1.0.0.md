@@ -1,9 +1,24 @@
 # Blenny 1.0.0 source release record
 
-Status: **Source finalized for authorized local commit/tag closure; local checks
-and owner development acceptance completed. Multi-display coverage is unverified.
-GitHub-built publication and public delivery remain pending.** Updated 2026-09-30.
-Local closure does not establish a completed public release.
+Status: **Published on 2026-10-01 from annotated tag `v1.0.0` (source
+`a7c004a`) by GitHub Actions run 36823493882, Build 1701.** Anonymous asset and
+feed verification passed; see `docs/public-release.json`. Multi-display coverage
+remains unverified. Updated 2026-10-02.
+
+## Release page story, 2026-10-02
+
+After publication the owner approved a reviewed story in `docs/releases/1.0.0.md`,
+rendered by `release_tools.py` into the 1.0.0 section of `docs/RELEASE_NOTES.md`
+on main, to replace the GitHub Release body. Replacing the body is a separate,
+explicitly authorized step (`gh release edit v1.0.0 --notes-file` with the output
+of `release_tools.py notes --version 1.0.0`); until it runs, the body still shows
+the sealed generated notes. The tag, DMG, checksum, receipt, `release-notes.md`
+asset and appcast entry stay unchanged and carry the originally sealed notes
+(`releaseNotesSHA256` `9f8b2c01…`), which `docs/release-acceptance.json` also
+records. Once replaced, the Release body intentionally differs from the sealed
+`release-notes.md` asset. Do not rerun the 1.0.0 publish transaction: its body
+check compares against the tagged notes and would stop. 1.0.0 is the first
+release, so no updater shows its notes.
 
 ## Final source closure decision, 2026-09-30
 
