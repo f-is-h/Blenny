@@ -53,6 +53,8 @@ document.addEventListener('keydown', (e) => {
 
 const sea = createSea($('#sea'));
 const life = createLife($('#life'));
+// Every jellyfish discharge, including the ones passed along a chain, crackles.
+life.onZap(({ manta }) => { sound.play('zap'); if (manta) sound.play('flee'); });
 const caustics = createSandCaustics($('#sandLight'), { reduceMotion });
 const rockCaustics = createSandCaustics($('#perchLight'), { reduceMotion });
 const dive = createDive({
@@ -85,8 +87,7 @@ addEventListener('pointerdown', (e) => {
   if (e.target.closest('a, button, .window, details, .ctx, .menubar, .egg-card')) return;
   life.burst(e.clientX, e.clientY, 9, 22);
   if (torch.k > 0.2) {
-    if (life.zap(e.clientX, e.clientY)) sound.play('zap');
-    else { life.spark(e.clientX, e.clientY, 26); sound.play('shimmer'); }
+    if (!life.zap(e.clientX, e.clientY)) { life.spark(e.clientX, e.clientY, 26); sound.play('shimmer'); }
   }
   else sound.play('bubble');
 });

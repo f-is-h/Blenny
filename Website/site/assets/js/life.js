@@ -105,7 +105,9 @@ export function createLife(canvas) {
   let W = 0, H = 0, dpr = 1;
   let fish = [];
   const bubbles = [];
-  const manta = { x: -400, y: 0, vy: 0, active: false, next: 0, flap: 0, seed: 0 };
+  const manta = { x: -400, y: 0, vy: 0, active: false, next: 0, flap: 0, seed: 0, shock: 0, flee: 0 };
+  const mantaScale = () => Math.min(1.1, Math.max(0.55, W / 1300));
+  const SHOCK = 0.9;
   const plankton = [];
   let jellies = [];
   // The school forms the Blenny mark around a resting pointer and scatters when it moves.
@@ -260,7 +262,28 @@ export function createLife(canvas) {
   }
 
   // Click a jelly in the dark and it discharges; it also flinches into a stroke.
+  // The charge jumps to any jelly close enough, one after another, so a cluster
+  // goes off as a chain. A manta passing close by takes the shock: arcs jump to
+  // it, it flashes and shudders, then beats hard and dives away. Every
+  // discharge is reported to onZap({ manta }) so the page can play its sound.
   const ZAP = 0.75;
+  let onZap = null;
+  const bell = (j) => [j.x, j.y - j.size * 0.4];
+  function startZap(j, from = null) {
+    j.zap = ZAP;
+    j.cyc = 0;
+    j.pending = 0;
+    j.linkFrom = from;
+    j.arcToManta = manta.active && Math.hypot(manta.x - j.x, manta.y - j.y) < 240 * mantaScale();
+    if (j.arcToManta) { manta.shock = SHOCK; manta.flee = 1; }
+    const reach = Math.max(180, W * 0.2);
+    for (const o of jellies) {
+      if (o === j || o.zap > 0 || o.pending > 0) continue;
+      const d = Math.hypot(o.x - j.x, o.y - j.y);
+      if (d < reach) { o.pending = 0.14 + d / 1600; o.pendingFrom = j; }
+    }
+    onZap?.({ manta: j.arcToManta });
+  }
   function zap(x, y) {
     let hit = null, best = Infinity;
     for (const j of jellies) {
@@ -268,14 +291,22 @@ export function createLife(canvas) {
       if (d < j.size * 2.2 && d < best) { best = d; hit = j; }
     }
     if (!hit) return false;
-    hit.zap = ZAP;
-    hit.cyc = 0;
+    startZap(hit);
     spark(x, y, 34, 50);
     return true;
   }
 
   function drawJelly(j, t, dt, alpha, torch) {
     const s = j.size;
+    // A charge passed on from a neighbour arrives after a short delay.
+    if (j.pending > 0 && dt > 0) {
+      j.pending -= dt;
+      if (j.pending <= 0) {
+        startZap(j, j.pendingFrom);
+        const [bx, by] = bell(j);
+        spark(bx, by, 18, 30);
+      }
+    }
     // Swim cycle: a quick contraction (first 28%), then a slow relaxation that
     // overshoots a little wider than rest before settling.
     if (dt > 0) j.cyc = (j.cyc + dt * j.rate) % 1;
@@ -318,6 +349,15 @@ export function createLife(canvas) {
         if (Math.random() < 0.3) continue;
         const a = Math.random() * Math.PI * 2, L = s * (1.6 + Math.random() * 2.8);
         bolt(p.x, p.y, p.x + Math.cos(a) * L, p.y + Math.sin(a) * L, zk);
+      }
+      // The arc that carried the charge here, from the neighbour that sent it.
+      if (j.linkFrom && zk > 0.45) {
+        const [fx, fy] = bell(j.linkFrom);
+        bolt(fx, fy, gx, gy, zk);
+      }
+      // Arcs that find the manta.
+      if (j.arcToManta && manta.active) {
+        for (let i = 0; i < 2; i++) bolt(gx, gy, manta.x + (Math.random() - 0.5) * 60, manta.y + (Math.random() - 0.5) * 40, zk);
       }
       ctx.globalAlpha = alpha * lit;
     }
@@ -430,20 +470,23 @@ export function createLife(canvas) {
   // The torch lights its back as it passes through the beam.
   function drawManta(t, dt, alpha, torch) {
     const m = manta;
-    m.flap += dt * 1.35;
+    // Shocked: a shudder and frantic beats; then flight, fading over a few seconds.
+    const shock = m.shock > 0 ? m.shock / SHOCK : 0;
+    if (dt > 0) { m.shock = Math.max(0, m.shock - dt); m.flee = Math.max(0, m.flee - dt / 4.5); }
+    m.flap += dt * 1.35 * (1 + 3.5 * shock + 1.2 * m.flee);
     const ph = m.flap;
     const span = 0.62 + 0.38 * Math.cos(ph);
     const lag = Math.sin(ph - 0.9) * 24;
     const S = 150;
-    const speed = 44 + 26 * Math.max(0, Math.sin(ph + 0.4));
+    const speed = (44 + 26 * Math.max(0, Math.sin(ph + 0.4))) * (1 + 2.4 * m.flee);
     m.x -= speed * dt;
-    m.vy = Math.cos(t * 0.23 + m.seed) * 14;
+    m.vy = Math.cos(t * 0.23 + m.seed) * 14 + 70 * m.flee;
     m.y += m.vy * dt;
     const bank = Math.atan2(m.vy, speed) * 0.8;
-    const scale = Math.min(1.1, Math.max(0.55, W / 1300));
+    const scale = mantaScale();
 
     ctx.save();
-    ctx.translate(m.x, m.y);
+    ctx.translate(m.x + (Math.random() - 0.5) * 7 * shock, m.y + (Math.random() - 0.5) * 7 * shock);
     ctx.rotate(-bank);
     // The shape is drawn head-right; mirror it so the manta faces the way it swims (left).
     ctx.scale(-scale, scale);
@@ -502,6 +545,17 @@ export function createLife(canvas) {
       ctx.fillStyle = `rgba(90, 170, 210, ${0.28 * beam * torch.k * alpha})`;
       ctx.fill(body);
     }
+    // Electrified: the body flashes and short arcs crawl over it.
+    if (shock > 0 && Math.random() < 0.75) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(190, 240, 255, ${(0.5 * shock).toFixed(3)})`;
+      ctx.fill(body);
+      for (let i = 0; i < 3; i++) {
+        const y0 = (Math.random() - 0.5) * tipY * 1.4, y1 = y0 + (Math.random() - 0.5) * 60;
+        bolt(-30 + Math.random() * 60, y0, -30 + Math.random() * 60, y1, shock);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
     ctx.restore();
   }
 
@@ -514,7 +568,7 @@ export function createLife(canvas) {
     const deep = Math.max(0, Math.min(1, (depthM - 34) / 6));
     if (deep > 0.01) {
       if (!manta.active && t > manta.next) {
-        Object.assign(manta, { active: true, x: W + 260, y: H * (0.3 + Math.random() * 0.35), flap: Math.random() * 6, seed: Math.random() * 6 });
+        Object.assign(manta, { active: true, x: W + 260, y: H * (0.3 + Math.random() * 0.35), flap: Math.random() * 6, seed: Math.random() * 6, shock: 0, flee: 0 });
       }
       if (manta.active) {
         drawManta(t, dt, deep, torch);
@@ -600,5 +654,5 @@ export function createLife(canvas) {
   }
 
   resize();
-  return { resize, render, burst, spark, zap };
+  return { resize, render, burst, spark, zap, onZap: (fn) => { onZap = fn; } };
 }

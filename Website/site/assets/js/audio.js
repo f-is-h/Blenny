@@ -193,11 +193,13 @@ function burst({ at = 0, from = 3000, to = 500, peak = 0.25, decay = 0.6, q = 0.
 const bubble = (pitch = 1, at = 0, peak = 0.16) => tone({ from: 260 * pitch, to: 900 * pitch, at, peak, decay: 0.09, glide: 0.07 });
 
 const EFFECTS = {
-  // A jellyfish discharging: a crackle of bright static over a short low buzz.
+  // A jellyfish discharging: a crackle of bright static over a thin sizzle.
   zap: () => {
     for (let i = 0; i < 11; i++) burst({ at: Math.random() * 0.6, from: 5000 + Math.random() * 2500, to: 1900, peak: 0.12 + Math.random() * 0.1, decay: 0.035 + Math.random() * 0.05, q: 2.2 });
-    tone({ type: 'sawtooth', from: 96, to: 68, peak: 0.09, attack: 0.01, decay: 0.5, glide: 0.45 });
+    burst({ at: 0.02, from: 7000, to: 3200, peak: 0.06, decay: 0.5, q: 0.7 });
   },
+  // The shocked manta bolting: a soft rush of water, falling in pitch.
+  flee: () => { burst({ at: 0.15, from: 1300, to: 180, peak: 0.16, decay: 0.7, q: 0.7 }); for (let i = 0; i < 4; i++) bubble(0.8 + Math.random() * 0.6, 0.25 + i * 0.06, 0.05); },
   // The download bubble bursting.
   pop: () => { tone({ from: 180, to: 520, peak: 0.16, decay: 0.14, glide: 0.09 }); for (let i = 0; i < 5; i++) bubble(1.1 + Math.random() * 0.9, 0.08 + i * 0.05, 0.06); },
   // A click in open water.
