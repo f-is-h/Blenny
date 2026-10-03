@@ -160,3 +160,24 @@ trailing-slash URLs. For Git-based deploys, set the project root directory to
 
 Deploying publishes the site. Do it only with the owner's explicit
 confirmation, like any other publication step.
+
+### Cloudflare settings the site relies on
+
+The Worker serves only the custom domain (`workers_dev` and `preview_urls` are
+off in `wrangler.jsonc`). These settings live in the Cloudflare dashboard, not
+in this repository. They apply to the whole `fi5h.xyz` zone, so other sites in
+the zone share them:
+
+- Bots: "Block AI bots" off, AI training, search and user policies not
+  restricted, Cloudflare-managed robots.txt and bot preference sync off, AI
+  Labyrinth (crawler protection) and Bot Fight Mode off. The site's own
+  `robots.txt` welcomes every crawler, and nothing in front of it may block
+  them.
+- SSL/TLS: Always Use HTTPS on, minimum TLS 1.2, TLS 1.3 on. `_headers` adds
+  HSTS for this host only.
+- Rocket Loader off: it rewrites script loading and would break the ES modules.
+- Web Analytics: a manual, cookieless Cloudflare Web Analytics site for
+  `blenny.fi5h.xyz`. The beacon in `index.html` and `404.html` carries its
+  public token, and `_headers` allows `static.cloudflareinsights.com` (script)
+  and `cloudflareinsights.com` (connect). The zone's automatic injection does
+  not reach Worker responses, so the beacon must stay in the HTML.
